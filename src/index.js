@@ -75,6 +75,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (k === "time")     return onTimeToggle(interaction);
       if (k === "timeok")   return onTimeConfirm(interaction);
       if (k === "role")     return onRolePick(interaction);
+      if (k === "callerpick") return onCallerPick(interaction);
+      if (k === "callerset")  return onCallerSet(interaction);
       if (k === "presence") return onPresence(interaction);
       if (k === "swapyes")  return onSwapYes(interaction);
       if (k === "swapno")   return onSwapNo(interaction);
@@ -134,10 +136,13 @@ async function onTimeConfirm(interaction) {
       content: `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`,
       components: buildRolePicker(ev.id),
     });
-    const rmsg = await thread.send({ content: rosterContent([]) });
-    await db.setRosterMsg(ev.id, rmsg.id);
+    const [c1, c2] = rosterChunks([]);
+    const r1 = await thread.send({ content: c1 });
+    const r2 = await thread.send({ content: c2 });
+    await db.setRosterMsg(ev.id, `${r1.id},${r2.id}`);
     created.push(`• **${time}** → ${thread}`);
     await logStaff(interaction.guild, `🆕 CTA **${time} UTC** criado por <@${callerId}>.`);
+    await new Promise((r) => setTimeout(r, 1200)); // respiro anti rate-limit
   }
   await interaction.editReply({ content: `✅ Planilha(s):\n${created.join("\n")}`, components: [] });
 }
@@ -148,9 +153,10 @@ function buildRolePicker(eventId) {
   const leave = new ButtonBuilder().setCustomId(`leave|${eventId}`).setLabel("Sair da função").setEmoji("🚪").setStyle(ButtonStyle.Danger);
   const montar = new ButtonBuilder().setCustomId(`montar|${eventId}`).setLabel("Montar PT (caller)").setStyle(ButtonStyle.Success);
   const cancel = new ButtonBuilder().setCustomId(`cancel|${eventId}`).setLabel("Cancelar (caller)").setStyle(ButtonStyle.Danger);
+  const caller = new ButtonBuilder().setCustomId(`callerpick|${eventId}`).setLabel("Sou o caller").setEmoji("👑").setStyle(ButtonStyle.Primary);
   const rows = [];
   for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
-  rows.push(new ActionRowBuilder().addComponents(leave, montar, cancel));
+  rows.push(new ActionRowBuilder().addComponents(caller, leave, montar, cancel));
   return rows;
 }
 
@@ -286,8 +292,49 @@ async function onMontar(interaction) {
   await logStaff(interaction.guild, `📋 PT montada · CTA **${ev.time_label} UTC** (${signups.length} inscritos).`);
 }
 
+
+// caller assume a vaga 1 da pt1 (escolhe entre Golem/Maça de Uma Mão/Bruxo)
+async function onCallerPick(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open")
+    return interaction.reply({ content: "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (interaction.user.id !== ev.caller_id)
+    return interaction.reply({ content: "Só quem chamou o CTA usa isso.", flags: MessageFlags.Ephemeral });
+  const opts = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO"];
+  const menu = new StringSelectMenuBuilder().setCustomId(`callerset|${eventId}`)
+    .setPlaceholder("Tua arma de caller")
+    .addOptions(opts.map((w) => ({ label: w, value: w })));
+  await interaction.reply({ content: "👑 Escolhe tua arma de caller (vaga 1 da PT1):", components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+}
+
+async function onCallerSet(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
+  if (interaction.user.id !== ev.caller_id)
+    return interaction.update({ content: "Só o caller usa isso.", components: [] });
+  const weapon = interaction.values[0];
+  const username = interaction.member?.displayName || interaction.user.username;
+  // força a vaga 0:0 (pt1 v1)
+  await db.upsertSignup({
+    eventId, userId: interaction.user.id, username, weapon, presence: "online",
+    partyIndex: 0, slotIndex: 0,
+  });
+  await refreshRoster(ev);
+  await interaction.update({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
+  await logStaff(interaction.guild, `👑 **${username}** assumiu caller (${weapon}) · CTA ${ev.time_label}`);
+}
+
 // ======================  HELPERS  ==========================================
-function rosterContent(signups) { return "**Planilha ao vivo**\n\n" + renderRoster(signups).join("\n\n"); }
+// divide os 4 blocos de PT em 2 mensagens (PT1+2 e PT3+4) pra nunca estourar 2000
+function rosterChunks(signups) {
+  const blocks = renderRoster(signups);
+  const half = Math.ceil(blocks.length / 2);
+  const a = ["**Planilha ao vivo (1/2)**", ...blocks.slice(0, half)].join("\n\n");
+  const b = ["**Planilha ao vivo (2/2)**", ...blocks.slice(half)].join("\n\n");
+  return [a.slice(0, 1990), b.slice(0, 1990)];
+}
 
 async function refreshRoster(ev) {
   if (!ev.thread_id || !ev.roster_msg) return;

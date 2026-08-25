@@ -97,6 +97,21 @@ function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = PARTIE
   return null;
 }
 
+
+// rótulo curto por vaga (pra planilha não estourar o limite do Discord)
+function shortLabel(slot) {
+  const ws = slot.accepts.map((a) => a.weapon);
+  if (slot.locked) return "👑 CALLER";
+  if (ws.length === 1) return ws[0];
+  if (ws.includes("SHADOW CALLER") || ws.includes("DANAÇÃO") || ws.includes("PÚTRIDO")) return "DEBUFF";
+  if (ws.includes("CAÇA ESPÍRITOS") || ws.includes("ENTALHADA")) return "DEBUFF MELEE";
+  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "BRACELETE";
+  if (slot.role === "Healer") return "HEALER";
+  if (slot.role === "Tank") return "TANK";
+  if (slot.role === "Support") return "SUPORTE";
+  return "DPS";
+}
+
 // -------------------  RENDER  ----------------------------------------------
 function renderRoster(signups, numParties = PARTIES.length) {
   const bySlot = new Map();
@@ -114,13 +129,12 @@ function renderRoster(signups, numParties = PARTIES.length) {
       const slot = party.slots[i];
       const su = bySlot.get(`${p}:${i}`);
       const n = String(i + 1).padStart(2, "0");
-      const label = slot.accepts.map((a) => a.weapon).join(" / ");
       if (su) {
         filled++;
         const flag = su.presence === "online" ? "🟢" : "🕐";
         lines.push(`\`${n}\` ${su.weapon} — **${su.username}** ${flag}`);
       } else {
-        lines.push(`\`${n}\` ${label} — *vazio*`);
+        lines.push(`\`${n}\` ${shortLabel(slot)} — *vazio*`);
       }
     }
     blocks.push(`__**${party.name}** (${filled}/${party.slots.length})__\n${lines.join("\n")}`);
