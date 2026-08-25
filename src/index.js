@@ -83,6 +83,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (k === "leave")    return onLeave(interaction);
       if (k === "cancel")   return onCancel(interaction);
       if (k === "montar")   return onMontar(interaction);
+      if (k === "fechar")   return onFechar(interaction);
     }
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("weapon|"))
       return onWeaponPick(interaction);
@@ -153,10 +154,12 @@ function buildRolePicker(eventId) {
   const leave = new ButtonBuilder().setCustomId(`leave|${eventId}`).setLabel("Sair da função").setEmoji("🚪").setStyle(ButtonStyle.Danger);
   const montar = new ButtonBuilder().setCustomId(`montar|${eventId}`).setLabel("Montar PT (caller)").setStyle(ButtonStyle.Success);
   const cancel = new ButtonBuilder().setCustomId(`cancel|${eventId}`).setLabel("Cancelar (caller)").setStyle(ButtonStyle.Danger);
+  const fechar = new ButtonBuilder().setCustomId(`fechar|${eventId}`).setLabel("Fechar CTA (caller)").setStyle(ButtonStyle.Secondary);
   const caller = new ButtonBuilder().setCustomId(`callerpick|${eventId}`).setLabel("Sou o caller").setEmoji("👑").setStyle(ButtonStyle.Primary);
   const rows = [];
   for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
-  rows.push(new ActionRowBuilder().addComponents(caller, leave, montar, cancel));
+  rows.push(new ActionRowBuilder().addComponents(caller, leave, montar));
+  rows.push(new ActionRowBuilder().addComponents(fechar, cancel));
   return rows;
 }
 
@@ -289,11 +292,28 @@ async function onMontar(interaction) {
   if (!ev) return interaction.reply({ content: "CTA não encontrado.", flags: MessageFlags.Ephemeral });
   if (interaction.user.id !== ev.caller_id)
     return interaction.reply({ content: "Só o caller monta.", flags: MessageFlags.Ephemeral });
-  await db.setStatus(eventId, "closed");
+  // NAO fecha o CTA — só publica a lista atual. Inscrições continuam abertas.
   const signups = await db.getSignups(eventId);
-  const content = `📋 **PT PRONTA — CTA ${ev.time_label} UTC**\n\n` + renderRoster(signups).join("\n\n");
-  await interaction.reply({ content: content.slice(0, 1900) });
-  await logStaff(interaction.guild, `📋 PT montada · CTA **${ev.time_label} UTC** (${signups.length} inscritos).`);
+  const blocks = renderRoster(signups);
+  const half = Math.ceil(blocks.length / 2);
+  const p1 = `📋 **PT — CTA ${ev.time_label} UTC (1/2)**\n\n` + blocks.slice(0, half).join("\n\n");
+  const p2 = `📋 **PT — CTA ${ev.time_label} UTC (2/2)**\n\n` + blocks.slice(half).join("\n\n");
+  await interaction.reply({ content: p1.slice(0, 1990) });
+  await interaction.followUp({ content: p2.slice(0, 1990) });
+  await logStaff(interaction.guild, `📋 PT publicada · CTA **${ev.time_label} UTC** (${signups.length} inscritos). (CTA segue aberto)`);
+}
+
+// fechar de vez (trava inscrições) — botão separado do Montar
+async function onFechar(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev) return interaction.reply({ content: "CTA não encontrado.", flags: MessageFlags.Ephemeral });
+  if (interaction.user.id !== ev.caller_id)
+    return interaction.reply({ content: "Só o caller fecha.", flags: MessageFlags.Ephemeral });
+  if (ev.status !== "open") return interaction.reply({ content: "CTA já encerrado.", flags: MessageFlags.Ephemeral });
+  await db.setStatus(eventId, "closed");
+  await interaction.reply({ content: `🔒 **CTA ${ev.time_label} FECHADO** — inscrições travadas.` });
+  await logStaff(interaction.guild, `🔒 CTA **${ev.time_label} UTC** fechado por <@${ev.caller_id}>.`);
 }
 
 
@@ -344,10 +364,13 @@ async function refreshRoster(ev) {
   if (!ev.thread_id || !ev.roster_msg) return;
   const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
   if (!thread) return;
-  const msg = await thread.messages.fetch(ev.roster_msg).catch(() => null);
-  if (!msg) return;
+  const ids = String(ev.roster_msg).split(",");
   const signups = await db.getSignups(ev.id);
-  await msg.edit({ content: rosterContent(signups).slice(0, 1900) }).catch(() => {});
+  const chunks = rosterChunks(signups);
+  await Promise.all(ids.map(async (id, i) => {
+    const m = await thread.messages.fetch(id).catch(() => null);
+    if (m && chunks[i]) await m.edit({ content: chunks[i] }).catch(() => {});
+  }));
 }
 
 async function logStaff(guild, text) {
