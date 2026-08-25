@@ -124,8 +124,55 @@ async function setStatus(eventId, status) {
   await pool.query(`UPDATE cta_events SET status=$1 WHERE id=$2`, [status, eventId]);
 }
 
+
+// CTAs abertos (pro autocomplete do slash command)
+async function getOpenEvents(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_events WHERE guild_id=$1 AND status='open' ORDER BY created_at DESC`,
+    [guildId]
+  );
+  return rows;
+}
+
+// acha evento aberto por rótulo de horário (ex "17:20")
+async function getOpenEventByTime(guildId, timeLabel) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_events WHERE guild_id=$1 AND status='open' AND time_label=$2
+     ORDER BY created_at DESC LIMIT 1`,
+    [guildId, timeLabel]
+  );
+  return rows[0];
+}
+
+// quem está numa vaga específica (ou null)
+async function getSignupAtSlot(eventId, partyIndex, slotIndex) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_signups WHERE event_id=$1 AND party_index=$2 AND slot_index=$3`,
+    [eventId, partyIndex, slotIndex]
+  );
+  return rows[0];
+}
+
+// remove todos os signups de uma PT (cta_clean) -> retorna quantos saíram
+async function clearParty(eventId, partyIndex) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM cta_signups WHERE event_id=$1 AND party_index=$2`,
+    [eventId, partyIndex]
+  );
+  return rowCount;
+}
+
+// move um signup pra uma vaga (usado por cta_move/add); mantém arma/presença
+async function moveSignupToSlot(eventId, userId, partyIndex, slotIndex) {
+  await pool.query(
+    `UPDATE cta_signups SET party_index=$3, slot_index=$4 WHERE event_id=$1 AND user_id=$2`,
+    [eventId, userId, partyIndex, slotIndex]
+  );
+}
+
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
+  getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
   getDueReminders, markReminderSent,
 };

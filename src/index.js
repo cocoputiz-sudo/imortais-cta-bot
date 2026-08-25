@@ -15,6 +15,7 @@ const {
 const db = require("./db");
 const { ROLES, WEAPON_CATALOG } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster } = require("./roster");
+const cmds = require("./commands");
 
 const CFG = {
   token: process.env.DISCORD_TOKEN,
@@ -70,6 +71,14 @@ function buildTimePicker(selected, callerId) {
 // ======================  ROTEADOR  =========================================
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (interaction.isAutocomplete()) return cmds.handleAutocomplete(interaction);
+    if (interaction.isChatInputCommand()) return onSlash(interaction);
+    if (interaction.isButton()) {
+      const [bk] = interaction.customId.split("|");
+      if (bk === "occ") return onOccupantChoice(interaction); // pergunta interativa
+      if (bk === "cleanyes") return onCleanConfirm(interaction);
+      if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
+    }
     if (interaction.isButton()) {
       const [k] = interaction.customId.split("|");
       if (k === "time")     return onTimeToggle(interaction);
@@ -137,10 +146,10 @@ async function onTimeConfirm(interaction) {
       content: `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`,
       components: buildRolePicker(ev.id),
     });
-    const [c1, c2] = rosterChunks([]);
-    const r1 = await thread.send({ content: c1 });
-    const r2 = await thread.send({ content: c2 });
-    await db.setRosterMsg(ev.id, `${r1.id},${r2.id}`);
+    const chunks = rosterChunks([]);
+    const ids = [];
+    for (const c of chunks) { const m = await thread.send({ content: c }); ids.push(m.id); }
+    await db.setRosterMsg(ev.id, ids.join(","));
     created.push(`• **${time}** → ${thread}`);
     await logStaff(interaction.guild, `🆕 CTA **${time} UTC** criado por <@${callerId}>.`);
     await new Promise((r) => setTimeout(r, 1200)); // respiro anti rate-limit
@@ -363,17 +372,179 @@ async function onCallerNo(interaction) {
   await interaction.update({ content: `👍 Beleza. Você está em ${dest}.`, components: [] });
 }
 
-// ======================  HELPERS  ==========================================
-// divide os 4 blocos de PT em 2 mensagens (PT1+2 e PT3+4) pra nunca estourar 2000
-function rosterChunks(signups) {
-  const blocks = renderRoster(signups);
-  const half = Math.ceil(blocks.length / 2);
-  const a = ["**Planilha ao vivo (1/2)**", ...blocks.slice(0, half)].join("\n\n");
-  const b = ["**Planilha ao vivo (2/2)**", ...blocks.slice(half)].join("\n\n");
-  return [a.slice(0, 1990), b.slice(0, 1990)];
+
+// ==================  SLASH COMMANDS  ======================================
+async function onSlash(interaction) {
+  if (!cmds.isStaff(interaction))
+    return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
+
+  const name = interaction.commandName;
+  const timeLabel = interaction.options.getString("cta");
+  const ev = await db.getOpenEventByTime(interaction.guildId, timeLabel);
+  if (!ev) return interaction.reply({ content: `Não achei um CTA aberto às ${timeLabel}.`, flags: MessageFlags.Ephemeral });
+
+  if (name === "cta_remove") return slashRemove(interaction, ev);
+  if (name === "cta_clean")  return slashClean(interaction, ev);
+  if (name === "cta_move")   return slashMoveOrAdd(interaction, ev, false);
+  if (name === "cta_add")    return slashMoveOrAdd(interaction, ev, true);
 }
 
-async function refreshRoster(ev) {
+async function slashRemove(interaction, ev) {
+  const user = interaction.options.getUser("usuario");
+  const removed = await db.deleteSignup(ev.id, user.id);
+  if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: `🗑️ ${user} removido do CTA ${ev.time_label}.` });
+  refreshRoster(ev);
+  await logStaff(interaction.guild, `🗑️ ${interaction.user} removeu ${user} · CTA ${ev.time_label}`);
+}
+
+async function slashClean(interaction, ev) {
+  const pt = interaction.options.getInteger("pt");
+  const signups = await db.getSignups(ev.id);
+  const naPt = signups.filter((s) => s.party_index === pt - 1).length;
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`cleanyes|${ev.id}|${pt}`).setLabel(`Sim, limpar PT${pt}`).setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`cleanno|${ev.id}`).setLabel("Não").setStyle(ButtonStyle.Secondary),
+  );
+  await interaction.reply({ content: `⚠️ Limpar a **PT${pt}** do CTA ${ev.time_label}? Vai tirar **${naPt}** pessoa(s).`, components: [row], flags: MessageFlags.Ephemeral });
+}
+
+async function onCleanConfirm(interaction) {
+  const [, eventId, pt] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev) return interaction.update({ content: "CTA não encontrado.", components: [] });
+  const n = await db.clearParty(eventId, parseInt(pt, 10) - 1);
+  await interaction.update({ content: `🧹 PT${pt} limpa — ${n} pessoa(s) removida(s).`, components: [] });
+  refreshRoster(ev);
+  await logStaff(interaction.guild, `🧹 ${interaction.user} limpou a PT${pt} (${n} pessoas) · CTA ${ev.time_label}`);
+}
+
+// move (add=false) ou adiciona (add=true) alguém numa vaga
+async function slashMoveOrAdd(interaction, ev, isAdd) {
+  const user = interaction.options.getUser("usuario");
+  const pt = interaction.options.getInteger("pt");
+  const vaga = interaction.options.getInteger("vaga");
+  const arma = interaction.options.getString("arma");
+
+  const signups = await db.getSignups(ev.id);
+  const existing = signups.find((s) => s.user_id === user.id);
+
+  if (!isAdd && !existing)
+    return interaction.reply({ content: `${user} não está inscrito. Use /cta_add pra adicionar.`, flags: MessageFlags.Ephemeral });
+  if (isAdd && existing)
+    return interaction.reply({ content: `${user} já está no CTA. Use /cta_move pra mover.`, flags: MessageFlags.Ephemeral });
+  if (isAdd && !arma)
+    return interaction.reply({ content: "Pra adicionar, informe a **arma**.", flags: MessageFlags.Ephemeral });
+
+  const others = signups.filter((s) => s.user_id !== user.id);
+  const target = cmds.resolveTargetSlot(pt - 1, vaga, arma, others);
+  if (!target) return interaction.reply({ content: `A PT${pt} está cheia.`, flags: MessageFlags.Ephemeral });
+
+  // vaga ocupada? pergunta interativa
+  const occupant = await db.getSignupAtSlot(ev.id, target.partyIndex, target.slotIndex);
+  const weaponToUse = arma || (existing ? existing.weapon : null);
+
+  if (occupant && occupant.user_id !== user.id) {
+    // guarda a operação no customId pra resolver após a escolha
+    const payload = `${ev.id}|${user.id}|${target.partyIndex}|${target.slotIndex}|${encodeURIComponent(weaponToUse || "")}|${isAdd ? 1 : 0}|${existing ? existing.party_index : ""}|${existing ? existing.slot_index : ""}`;
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`occ|reserva|${payload}`).setLabel(`${occupant.username} → reserva`).setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`occ|swap|${payload}`).setLabel(`Trocar de lugar`).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`occ|cancel|${payload}`).setLabel("Cancelar").setStyle(ButtonStyle.Danger),
+    );
+    return interaction.reply({
+      content: `⚠️ PT${target.partyIndex + 1} v${target.slotIndex + 1} está com **${occupant.username}**. O que fazer com ${occupant.username}?`,
+      components: [row], flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  // vaga livre: executa direto
+  await placeUser(ev.id, user.id, interaction, weaponToUse, target, isAdd);
+  await interaction.reply({ content: `✅ ${user} → PT${target.partyIndex + 1} v${target.slotIndex + 1}${weaponToUse ? ` (${weaponToUse})` : ""}.` });
+  refreshRoster(ev);
+  await logStaff(interaction.guild, `🔧 ${interaction.user} ${isAdd ? "adicionou" : "moveu"} ${user} → PT${target.partyIndex + 1} v${target.slotIndex + 1} · CTA ${ev.time_label}`);
+}
+
+// coloca o usuário na vaga (add cria signup; move atualiza)
+async function placeUser(eventId, userId, interaction, weapon, target, isAdd) {
+  const member = await interaction.guild.members.fetch(userId).catch(() => null);
+  const username = member?.displayName || "jogador";
+  await db.upsertSignup({
+    eventId, userId, username, weapon: weapon || "?", presence: "online",
+    partyIndex: target.partyIndex, slotIndex: target.slotIndex,
+  });
+}
+
+// resolve a pergunta interativa do ocupante
+async function onOccupantChoice(interaction) {
+  const parts = interaction.customId.split("|");
+  const choice = parts[1];
+  const [eventId, userId, tp, ts, wEnc, addFlag, oldP, oldS] = parts.slice(2);
+  const ev = await db.getEvent(eventId);
+  if (!ev) return interaction.update({ content: "CTA não encontrado.", components: [] });
+  if (choice === "cancel") return interaction.update({ content: "Operação cancelada.", components: [] });
+
+  const target = { partyIndex: parseInt(tp, 10), slotIndex: parseInt(ts, 10) };
+  const weapon = decodeURIComponent(wEnc) || "?";
+  const occupant = await db.getSignupAtSlot(eventId, target.partyIndex, target.slotIndex);
+
+  if (choice === "reserva" && occupant) {
+    // ocupante vai pra reserva (party/slot null)
+    await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: null, slotIndex: null });
+  }
+  if (choice === "swap" && occupant) {
+    // ocupante vai pra vaga de onde o movido veio (se veio de alguma)
+    const toP = oldP === "" ? null : parseInt(oldP, 10);
+    const toS = oldS === "" ? null : parseInt(oldS, 10);
+    await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: toP, slotIndex: toS });
+  }
+  // coloca o movido/adicionado na vaga alvo
+  await placeUser(eventId, userId, interaction, weapon, target, addFlag === "1");
+  await interaction.update({ content: `✅ Feito. Vaga PT${target.partyIndex + 1} v${target.slotIndex + 1} atualizada.`, components: [] });
+  refreshRoster(ev);
+  await logStaff(interaction.guild, `🔧 ${interaction.user} resolveu troca (${choice}) · CTA ${ev.time_label}`);
+}
+
+// ======================  HELPERS  ==========================================
+// 1 mensagem por PT (4 mensagens) pra nunca estourar 2000, mesmo com nomes longos.
+// A reserva (se houver) vai junto na ultima mensagem.
+function rosterChunks(signups) {
+  const blocks = renderRoster(signups); // [PT1, PT2, PT3, PT4, (Reserva?)]
+  const NUM_PT = 4;
+  const chunks = [];
+  for (let i = 0; i < NUM_PT; i++) {
+    let txt = blocks[i] || "";
+    // reserva (bloco extra) gruda na ultima PT
+    if (i === NUM_PT - 1 && blocks.length > NUM_PT) {
+      txt += "\n\n" + blocks.slice(NUM_PT).join("\n\n");
+    }
+    chunks.push(txt.slice(0, 1990));
+  }
+  return chunks; // 4 strings
+}
+
+// ---- DEBOUNCE da planilha ao vivo ----
+// Em vez de editar a cada inscrição, agrupa as mudanças e edita no maximo
+// 1x a cada 3s por evento. Protege contra rate limit no pico de inscricoes.
+const REFRESH_DELAY = 3000;
+const refreshTimers = new Map();   // eventId -> timeout
+const refreshPending = new Map();  // eventId -> ev (mais recente)
+
+function refreshRoster(ev) {
+  // guarda o ev mais recente e agenda (ou reusa o timer existente)
+  refreshPending.set(String(ev.id), ev);
+  if (refreshTimers.has(String(ev.id))) return; // ja tem edicao agendada
+  const t = setTimeout(async () => {
+    refreshTimers.delete(String(ev.id));
+    const target = refreshPending.get(String(ev.id));
+    refreshPending.delete(String(ev.id));
+    if (target) await doRefreshRoster(target).catch((e) => console.error("refresh:", e));
+  }, REFRESH_DELAY);
+  refreshTimers.set(String(ev.id), t);
+}
+
+// edição real das mensagens (chamada pelo debounce)
+async function doRefreshRoster(ev) {
   if (!ev.thread_id || !ev.roster_msg) return;
   const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
   if (!thread) return;
@@ -414,9 +585,14 @@ async function checkReminders() {
 }
 
 // ======================  BOOT  =============================================
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Online como ${c.user.tag}`);
   setInterval(checkReminders, 60 * 1000); // a cada minuto
+  // registra slash commands em cada servidor onde o bot está
+  for (const [gid] of c.guilds.cache) {
+    try { await cmds.registerCommands(c.user.id, gid); }
+    catch (e) { console.error("registerCommands:", e); }
+  }
 });
 
 (async () => { await db.init(); await client.login(CFG.token); })();

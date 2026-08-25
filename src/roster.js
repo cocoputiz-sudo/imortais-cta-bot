@@ -105,7 +105,7 @@ function shortLabel(slot) {
   if (ws.length === 1) return ws[0];
   if (ws.includes("SHADOW CALLER") || ws.includes("DANAÇÃO") || ws.includes("PÚTRIDO")) return "DEBUFF";
   if (ws.includes("CAÇA ESPÍRITOS") || ws.includes("ENTALHADA")) return "DEBUFF MELEE";
-  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "BRACELETE";
+  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "NATURE";
   if (slot.role === "Healer") return "HEALER";
   if (slot.role === "Tank") return "TANK";
   if (slot.role === "Support") return "SUPORTE";
