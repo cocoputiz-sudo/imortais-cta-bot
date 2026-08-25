@@ -163,8 +163,10 @@ function buildRolePicker(eventId) {
 async function onRolePick(interaction) {
   const [, eventId, role] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
-  if (!ev || ev.status !== "open")
-    return interaction.reply({ content: "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (!ev)
+    return interaction.reply({ content: "⚠️ Não achei esse CTA no sistema (evento perdido). Avisa o caller.", flags: MessageFlags.Ephemeral });
+  if (ev.status !== "open")
+    return interaction.reply({ content: `Esse CTA está **${ev.status === "cancelled" ? "cancelado" : "fechado"}**.`, flags: MessageFlags.Ephemeral });
   const weapons = catalog(role);
   if (!weapons.length) return interaction.reply({ content: "Sem armas nesse papel.", flags: MessageFlags.Ephemeral });
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${eventId}`)
@@ -187,6 +189,7 @@ async function onPresence(interaction) {
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
+  await interaction.deferUpdate(); // responde ao Discord em <3s; trabalho pesado a seguir
   const signups = await db.getSignups(eventId);
   const others = signups.filter((s) => s.user_id !== interaction.user.id);
   const spot = findBestSlot(weapon, others);
@@ -211,7 +214,7 @@ async function onPresence(interaction) {
       new ButtonBuilder().setCustomId(`swapno|${eventId}|${encodeURIComponent(weapon)}`)
         .setLabel(`Não, fico com ${weapon}`.slice(0, 80)).setStyle(ButtonStyle.Secondary),
     );
-    return interaction.update({
+    return interaction.editReply({
       content: `✅ Entrou como **${weapon}** (${dest}).\n\n💡 Tem vaga de **${up.weapon}** (Party ${up.partyIndex + 1}), melhor pra comp. Quer trocar?`,
       components: [row],
     });
@@ -219,7 +222,7 @@ async function onPresence(interaction) {
   const msg = spot
     ? `✅ Fechado! **Party ${spot.partyIndex + 1}**, vaga ${spot.slotIndex + 1} (${weapon}).`
     : `📝 Anotado como **reserva** (${weapon}).`;
-  await interaction.update({ content: msg, components: [] });
+  await interaction.editReply({ content: msg, components: [] });
 }
 
 async function onSwapYes(interaction) {
@@ -228,13 +231,14 @@ async function onSwapYes(interaction) {
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
+  await interaction.deferUpdate();
   // re-checa se a vaga sugerida ainda esta livre
   const signups = await db.getSignups(eventId);
   const others = signups.filter((s) => s.user_id !== interaction.user.id);
   const occupied = others.some((s) => String(s.party_index) === p && String(s.slot_index) === i);
   const username = interaction.member?.displayName || interaction.user.username;
   if (occupied) {
-    await interaction.update({ content: `⚠️ A vaga de ${weapon} já foi preenchida. Você continua na anterior.`, components: [] });
+    await interaction.editReply({ content: `⚠️ A vaga de ${weapon} já foi preenchida. Você continua na anterior.`, components: [] });
     return;
   }
   await db.upsertSignup({
@@ -242,8 +246,8 @@ async function onSwapYes(interaction) {
     presence: (signups.find(s => s.user_id === interaction.user.id)?.presence) || "online",
     partyIndex: parseInt(p, 10), slotIndex: parseInt(i, 10),
   });
+  await interaction.editReply({ content: `🔄 Trocado! Agora você é **${weapon}** na Party ${parseInt(p,10)+1}.`, components: [] });
   await refreshRoster(ev);
-  await interaction.update({ content: `🔄 Trocado! Agora você é **${weapon}** na Party ${parseInt(p,10)+1}.`, components: [] });
   await logStaff(interaction.guild, `🔄 **${username}** trocou para **${weapon}** → Party ${parseInt(p,10)+1} · CTA ${ev.time_label}`);
 }
 
@@ -316,13 +320,13 @@ async function onCallerSet(interaction) {
     return interaction.update({ content: "Só o caller usa isso.", components: [] });
   const weapon = interaction.values[0];
   const username = interaction.member?.displayName || interaction.user.username;
-  // força a vaga 0:0 (pt1 v1)
+  await interaction.deferUpdate();
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence: "online",
     partyIndex: 0, slotIndex: 0,
   });
+  await interaction.editReply({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
   await refreshRoster(ev);
-  await interaction.update({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
   await logStaff(interaction.guild, `👑 **${username}** assumiu caller (${weapon}) · CTA ${ev.time_label}`);
 }
 
