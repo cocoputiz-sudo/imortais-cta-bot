@@ -18,6 +18,10 @@ async function init() {
       time_label  TEXT NOT NULL DEFAULT '',        -- AGORA: 1 horario por evento
       status      TEXT NOT NULL DEFAULT 'open',      -- open | closed | cancelled
       roster_msg  TEXT,                              -- id da msg de planilha ao vivo
+      remind_30   TIMESTAMPTZ,                       -- quando mandar aviso 30min
+      remind_10   TIMESTAMPTZ,                       -- quando mandar aviso 10min
+      sent_30     BOOLEAN NOT NULL DEFAULT false,
+      sent_10     BOOLEAN NOT NULL DEFAULT false,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -38,13 +42,30 @@ async function init() {
   // colunas acima cobrem o novo modelo.
 }
 
-async function createEvent({ guildId, channelId, callerId, timeLabel }) {
+async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
   const { rows } = await pool.query(
-    `INSERT INTO cta_events (guild_id, channel_id, caller_id, time_label)
-     VALUES ($1,$2,$3,$4) RETURNING *`,
-    [guildId, channelId, callerId, timeLabel]
+    `INSERT INTO cta_events (guild_id, channel_id, caller_id, time_label, remind_30, remind_10)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [guildId, channelId, callerId, timeLabel, remind30 || null, remind10 || null]
   );
   return rows[0];
+}
+
+// lembretes vencidos ainda nao enviados (pro verificador periodico)
+async function getDueReminders(now) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_events
+     WHERE status='open' AND (
+       (sent_30=false AND remind_30 IS NOT NULL AND remind_30 <= $1) OR
+       (sent_10=false AND remind_10 IS NOT NULL AND remind_10 <= $1)
+     )`, [now]
+  );
+  return rows;
+}
+
+async function markReminderSent(eventId, which) {
+  const col = which === 30 ? "sent_30" : "sent_10";
+  await pool.query(`UPDATE cta_events SET ${col}=true WHERE id=$1`, [eventId]);
 }
 
 async function setThread(eventId, threadId) {
@@ -106,4 +127,5 @@ async function setStatus(eventId, status) {
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
+  getDueReminders, markReminderSent,
 };
