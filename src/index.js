@@ -75,8 +75,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (k === "time")     return onTimeToggle(interaction);
       if (k === "timeok")   return onTimeConfirm(interaction);
       if (k === "role")     return onRolePick(interaction);
-      if (k === "callerpick") return onCallerPick(interaction);
-      if (k === "callerset")  return onCallerSet(interaction);
+      if (k === "calleryes") return onCallerYes(interaction);
+      if (k === "callerno")  return onCallerNo(interaction);
       if (k === "presence") return onPresence(interaction);
       if (k === "swapyes")  return onSwapYes(interaction);
       if (k === "swapno")   return onSwapNo(interaction);
@@ -155,10 +155,9 @@ function buildRolePicker(eventId) {
   const montar = new ButtonBuilder().setCustomId(`montar|${eventId}`).setLabel("Montar PT (caller)").setStyle(ButtonStyle.Success);
   const cancel = new ButtonBuilder().setCustomId(`cancel|${eventId}`).setLabel("Cancelar (caller)").setStyle(ButtonStyle.Danger);
   const fechar = new ButtonBuilder().setCustomId(`fechar|${eventId}`).setLabel("Fechar CTA (caller)").setStyle(ButtonStyle.Secondary);
-  const caller = new ButtonBuilder().setCustomId(`callerpick|${eventId}`).setLabel("Sou o caller").setEmoji("👑").setStyle(ButtonStyle.Primary);
   const rows = [];
   for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
-  rows.push(new ActionRowBuilder().addComponents(caller, leave, montar));
+  rows.push(new ActionRowBuilder().addComponents(leave, montar));
   rows.push(new ActionRowBuilder().addComponents(fechar, cancel));
   return rows;
 }
@@ -203,6 +202,21 @@ async function onPresence(interaction) {
     partyIndex: spot ? spot.partyIndex : null, slotIndex: spot ? spot.slotIndex : null,
   });
   await refreshRoster(ev);
+
+  // se escolheu arma de caller E é quem criou o CTA -> pergunta se é o caller
+  const CALLER_WEAPONS = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO"];
+  if (CALLER_WEAPONS.includes(weapon.toUpperCase()) && interaction.user.id === ev.caller_id) {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`calleryes|${eventId}|${encodeURIComponent(weapon)}`)
+        .setLabel("👑 Sim, sou o caller").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`callerno|${eventId}`)
+        .setLabel("Não, sou jogador normal").setStyle(ButtonStyle.Secondary),
+    );
+    return interaction.editReply({
+      content: `Você escolheu **${weapon}**. Você é o **caller** deste CTA?`,
+      components: [row],
+    });
+  }
 
   const dest = spot ? `Party ${spot.partyIndex + 1} (vaga ${spot.slotIndex + 1})` : "RESERVA";
   const pres = presence === "online" ? "🟢 já ON" : "🕐 entra no horário";
@@ -317,30 +331,18 @@ async function onFechar(interaction) {
 }
 
 
-// caller assume a vaga 1 da pt1 (escolhe entre Golem/Maça de Uma Mão/Bruxo)
-async function onCallerPick(interaction) {
-  const [, eventId] = interaction.customId.split("|");
-  const ev = await db.getEvent(eventId);
-  if (!ev || ev.status !== "open")
-    return interaction.reply({ content: "CTA não está aberto.", flags: MessageFlags.Ephemeral });
-  if (interaction.user.id !== ev.caller_id)
-    return interaction.reply({ content: "Só quem chamou o CTA usa isso.", flags: MessageFlags.Ephemeral });
-  const opts = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO"];
-  const menu = new StringSelectMenuBuilder().setCustomId(`callerset|${eventId}`)
-    .setPlaceholder("Tua arma de caller")
-    .addOptions(opts.map((w) => ({ label: w, value: w })));
-  await interaction.reply({ content: "👑 Escolhe tua arma de caller (vaga 1 da PT1):", components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
-}
 
-async function onCallerSet(interaction) {
-  const [, eventId] = interaction.customId.split("|");
+
+// respondeu "sim, sou o caller" -> move pra v1 da pt1
+async function onCallerYes(interaction) {
+  const [, eventId, wEnc] = interaction.customId.split("|");
+  const weapon = decodeURIComponent(wEnc);
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
   if (interaction.user.id !== ev.caller_id)
-    return interaction.update({ content: "Só o caller usa isso.", components: [] });
-  const weapon = interaction.values[0];
-  const username = interaction.member?.displayName || interaction.user.username;
+    return interaction.update({ content: "Só quem criou o CTA é o caller.", components: [] });
   await interaction.deferUpdate();
+  const username = interaction.member?.displayName || interaction.user.username;
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence: "online",
     partyIndex: 0, slotIndex: 0,
@@ -348,6 +350,17 @@ async function onCallerSet(interaction) {
   await interaction.editReply({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
   await refreshRoster(ev);
   await logStaff(interaction.guild, `👑 **${username}** assumiu caller (${weapon}) · CTA ${ev.time_label}`);
+}
+
+// respondeu "não sou caller" -> mantém o encaixe normal que já foi feito
+async function onCallerNo(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  const su = ev ? await db.getSignup(eventId, interaction.user.id) : null;
+  const dest = su && su.party_index != null
+    ? `Party ${su.party_index + 1} (vaga ${su.slot_index + 1})`
+    : "RESERVA";
+  await interaction.update({ content: `👍 Beleza. Você está em ${dest}.`, components: [] });
 }
 
 // ======================  HELPERS  ==========================================
