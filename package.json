@@ -1,0 +1,16 @@
+{
+  "name": "imortais-cta-bot",
+  "version": "0.1.0",
+  "description": "Bot de montagem de CTA da guild IMORTAIS (Albion Online) — Fase 0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "pg": "^8.13.1"
+  }
+}
