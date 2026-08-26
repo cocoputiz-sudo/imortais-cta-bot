@@ -14,7 +14,7 @@ const {
 
 const db = require("./db");
 const { ROLES, WEAPON_CATALOG } = require("./comps");
-const { findBestSlot, suggestUpgrade, renderRoster } = require("./roster");
+const { findBestSlot, suggestUpgrade, renderRoster, reallocate } = require("./roster");
 const cmds = require("./commands");
 
 const CFG = {
@@ -207,16 +207,14 @@ async function onPresence(interaction) {
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
   await interaction.deferUpdate(); // responde ao Discord em <3s; trabalho pesado a seguir
-  const signups = await db.getSignups(eventId);
-  const others = signups.filter((s) => s.user_id !== interaction.user.id);
-  const spot = findBestSlot(weapon, others);
   const username = interaction.member?.displayName || interaction.user.username;
 
+  // grava a inscrição (sem vaga) e realoca TODO MUNDO de forma ótima
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
-    partyIndex: spot ? spot.partyIndex : null, slotIndex: spot ? spot.slotIndex : null,
+    partyIndex: null, slotIndex: null,
   });
-  await refreshRoster(ev);
+  const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
 
   // se escolheu arma de caller E é quem criou o CTA -> pergunta se é o caller
   const CALLER_WEAPONS = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO"];
@@ -233,28 +231,63 @@ async function onPresence(interaction) {
     });
   }
 
-  const dest = spot ? `Party ${spot.partyIndex + 1} (vaga ${spot.slotIndex + 1})` : "RESERVA";
+  const dest = myLoc ? `Party ${myLoc.partyIndex + 1} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
   const pres = presence === "online" ? "🟢 já ON" : "🕐 entra no horário";
   await logStaff(interaction.guild, `➕ **${username}** entrou de **${weapon}** → ${dest} · ${pres} · CTA ${ev.time_label}`);
 
-  // NUDGE: existe vaga melhor da mesma familia?
-  const up = suggestUpgrade(weapon, spot, others);
-  if (up) {
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`swapyes|${eventId}|${up.partyIndex}|${up.slotIndex}|${encodeURIComponent(up.weapon)}`)
-        .setLabel(`Sim, troco pra ${up.weapon}`.slice(0, 80)).setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`swapno|${eventId}|${encodeURIComponent(weapon)}`)
-        .setLabel(`Não, fico com ${weapon}`.slice(0, 80)).setStyle(ButtonStyle.Secondary),
-    );
-    return interaction.editReply({
-      content: `✅ Entrou como **${weapon}** (${dest}).\n\n💡 Tem vaga de **${up.weapon}** (Party ${up.partyIndex + 1}), melhor pra comp. Quer trocar?`,
-      components: [row],
-    });
-  }
-  const msg = spot
-    ? `✅ Fechado! **Party ${spot.partyIndex + 1}**, vaga ${spot.slotIndex + 1} (${weapon}).`
-    : `📝 Anotado como **reserva** (${weapon}).`;
+  const msg = myLoc
+    ? `✅ Fechado! **Party ${myLoc.partyIndex + 1}**, vaga ${myLoc.slotIndex + 1} (${weapon}).`
+    : `📝 Anotado como **reserva** (${weapon}) — sem vaga nem por afinidade.`;
   await interaction.editReply({ content: msg, components: [] });
+}
+
+// ==========================================================================
+// REALOCAÇÃO: roda o solver em todos, persiste mudanças, notifica quem moveu.
+// Retorna a posição do usuário `focusUserId` (pra mensagem de confirmação dele).
+// Notificação com DEBOUNCE POR PESSOA (não spamma no pico).
+// ==========================================================================
+const notifyTimers = new Map();   // eventId:userId -> timeout
+const notifyPending = new Map();  // eventId:userId -> {guild, threadId, text}
+
+async function applyReallocation(ev, guild, focusUserId) {
+  const signups = await db.getSignups(ev.id);
+  const result = reallocate(signups); // [{user_id, partyIndex, slotIndex, moved, ...}]
+
+  // persiste só quem mudou de vaga
+  let focusLoc = null;
+  for (const r of result) {
+    if (r.user_id === focusUserId)
+      focusLoc = r.partyIndex != null ? { partyIndex: r.partyIndex, slotIndex: r.slotIndex } : null;
+    if (r.moved) {
+      await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
+      // notifica quem foi movido (menos quem acabou de entrar — esse recebe a confirmação normal)
+      if (r.user_id !== focusUserId) {
+        const to = r.partyIndex != null
+          ? `**Party ${r.partyIndex + 1}**, vaga ${r.slotIndex + 1} (${r.weapon})`
+          : `**reserva**`;
+        scheduleNotify(ev, guild, r.user_id, `🔄 <@${r.user_id}> você foi remanejado para ${to}.`);
+      }
+    }
+  }
+  refreshRoster(ev); // atualiza a planilha (já tem debounce próprio)
+  return focusLoc;
+}
+
+// agenda uma notificação de remanejamento com debounce por pessoa (3s).
+// se a pessoa for movida de novo antes de 3s, a msg é substituída pela mais recente.
+function scheduleNotify(ev, guild, userId, text) {
+  const key = `${ev.id}:${userId}`;
+  notifyPending.set(key, { threadId: ev.thread_id, text });
+  if (notifyTimers.has(key)) return;
+  const t = setTimeout(async () => {
+    notifyTimers.delete(key);
+    const pend = notifyPending.get(key);
+    notifyPending.delete(key);
+    if (!pend || !pend.threadId) return;
+    const thread = await client.channels.fetch(pend.threadId).catch(() => null);
+    if (thread) await thread.send({ content: pend.text }).catch(() => {});
+  }, 3000);
+  notifyTimers.set(key, t);
 }
 
 async function onSwapYes(interaction) {
@@ -296,7 +329,7 @@ async function onLeave(interaction) {
   const removed = await db.deleteSignup(eventId, interaction.user.id);
   if (!removed) return interaction.reply({ content: "Você não estava inscrito.", flags: MessageFlags.Ephemeral });
   await interaction.reply({ content: "🚪 Saiu da função. Vaga liberada.", flags: MessageFlags.Ephemeral });
-  await refreshRoster(ev);
+  await applyReallocation(ev, interaction.guild, null); // realoca: reserva pode subir pra vaga livre
   const username = interaction.member?.displayName || interaction.user.username;
   await logStaff(interaction.guild, `➖ **${username}** saiu (era **${removed.weapon}**) · CTA ${ev.time_label}`);
 }
@@ -363,7 +396,7 @@ async function onCallerYes(interaction) {
     partyIndex: 0, slotIndex: 0,
   });
   await interaction.editReply({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
-  await refreshRoster(ev);
+  await applyReallocation(ev, interaction.guild, null); // realoca o resto após o caller assumir
   await logStaff(interaction.guild, `👑 **${username}** assumiu caller (${weapon}) · CTA ${ev.time_label}`);
 }
 

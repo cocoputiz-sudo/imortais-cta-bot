@@ -98,6 +98,96 @@ function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = PARTIE
 }
 
 
+// ==========================================================================
+// ENGINE DE REALOCAÇÃO POR AFINIDADE (Fase 2)
+// Recalcula a alocação INTEIRA a cada mudança (determinístico, sem cascata).
+// Prioridade de encaixe: (1) arma EXATA na vaga, (2) mesma FAMÍLIA (afinidade).
+// PT1 primeiro, peso menor primeiro. Respeita tetos. Caller (locked) fica fixo.
+// ==========================================================================
+
+// score de uma arma numa vaga: exato (custo = peso) ou afinidade (peso + 10).
+// null = a arma não serve nem por afinidade.
+function affinityScore(slot, weapon) {
+  const exact = slot.accepts.find((a) => U(a.weapon) === U(weapon));
+  if (exact) return { kind: "exact", cost: exact.weight };
+  const fam = WEAPON_FAMILY[U(weapon)];
+  if (!fam) return null;
+  const kin = slot.accepts.find((a) => WEAPON_FAMILY[U(a.weapon)] === fam);
+  if (kin) return { kind: "affinity", cost: kin.weight + 10 };
+  return null;
+}
+
+// resolve a alocação de todos os inscritos.
+// retorna { assignment: Map(user_id -> {partyIndex, slotIndex, kind}), reserves: [user_id] }
+function solve(signups, numParties = PARTIES.length) {
+  // vagas disponíveis (menos as locked), em ordem: pt asc, vaga asc
+  const cells = [];
+  for (let p = 0; p < numParties; p++)
+    for (let i = 0; i < PARTIES[p].slots.length; i++) {
+      if (PARTIES[p].slots[i].locked) continue;
+      cells.push({ p, i, slot: PARTIES[p].slots[i] });
+    }
+
+  const assignment = new Map();
+  const usedCells = new Set();
+  const usedUsers = new Set();
+  const weaponCount = {};
+
+  // caller / locked: quem já está numa vaga locked fica fixo
+  for (const su of signups) {
+    if (su.party_index != null && PARTIES[su.party_index]?.slots[su.slot_index]?.locked) {
+      assignment.set(su.user_id, { partyIndex: su.party_index, slotIndex: su.slot_index, kind: "caller" });
+      usedUsers.add(su.user_id);
+      usedCells.add(`${su.party_index}:${su.slot_index}`);
+      weaponCount[U(su.weapon)] = (weaponCount[U(su.weapon)] || 0) + 1;
+    }
+  }
+
+  // dois passes: primeiro coloca todos que dão match EXATO, depois AFINIDADE.
+  // dentro de cada passe, percorre as vagas na ordem de prioridade e pega o
+  // melhor candidato livre pra cada vaga.
+  for (const pass of ["exact", "affinity"]) {
+    for (const cell of cells) {
+      if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
+      let best = null;
+      for (const su of signups) {
+        if (usedUsers.has(su.user_id)) continue;
+        const sc = affinityScore(cell.slot, su.weapon);
+        if (!sc || sc.kind !== pass) continue;
+        const cap = capFor(su.weapon, numParties);
+        if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
+        // desempate: menor custo; PT1 já vem antes pela ordem das cells
+        if (!best || sc.cost < best.cost) best = { su, cost: sc.cost, kind: sc.kind };
+      }
+      if (best) {
+        assignment.set(best.su.user_id, { partyIndex: cell.p, slotIndex: cell.i, kind: best.kind });
+        usedUsers.add(best.su.user_id);
+        usedCells.add(`${cell.p}:${cell.i}`);
+        weaponCount[U(best.su.weapon)] = (weaponCount[U(best.su.weapon)] || 0) + 1;
+      }
+    }
+  }
+
+  const reserves = signups.filter((su) => !usedUsers.has(su.user_id)).map((su) => su.user_id);
+  return { assignment, reserves };
+}
+
+// roda o solver e devolve, pra cada inscrito, a posição nova + se MUDOU de vaga.
+// retorna [{user_id, username, weapon, presence, partyIndex, slotIndex, moved, kind}]
+function reallocate(signups, numParties = PARTIES.length) {
+  const { assignment } = solve(signups, numParties);
+  return signups.map((su) => {
+    const a = assignment.get(su.user_id);
+    const np = a ? a.partyIndex : null;
+    const ns = a ? a.slotIndex : null;
+    const moved = su.party_index !== np || su.slot_index !== ns;
+    return {
+      user_id: su.user_id, username: su.username, weapon: su.weapon,
+      presence: su.presence, partyIndex: np, slotIndex: ns, moved, kind: a?.kind,
+    };
+  });
+}
+
 // rótulo curto por vaga (pra planilha não estourar o limite do Discord)
 function shortLabel(slot) {
   const ws = slot.accepts.map((a) => a.weapon);
@@ -146,5 +236,6 @@ function renderRoster(signups, numParties = PARTIES.length) {
 
 module.exports = {
   findBestSlot, suggestUpgrade, renderRoster,
+  solve, reallocate, affinityScore,
   findOpenSlot: (w, s) => findBestSlot(w, s),
 };
