@@ -68,6 +68,9 @@ const WEAPONS = {
   "CRIA REIS":             { role: "Melee" },
   "LAMINA DA INFINIDADE":  { role: "Melee" },
   "FÚRIA CONTIDA":         { role: "Melee" },
+  "ARCO PLANGENTE":        { role: "Ranged" },
+  "EXECRADO":              { role: "Support" },
+  "OCULTO":                { role: "Support" },
   // Healers
   "QUEDA SANTA":           { role: "Healer" },
   "EXALTADO":              { role: "Healer" },
@@ -185,7 +188,7 @@ function buildWeaponCatalog() {
 // FAMÍLIAS FUNCIONAIS (pro nudge de troca: só sugere entre armas irmãs)
 // ---------------------------------------------------------------------------
 const FAMILIES = {
-  DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO"],
+  DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO", "EXECRADO"],
   DEBUFF_MELEE:  ["ENTALHADA", "CAÇA ESPÍRITOS"],
   TANKS_MACA:    ["MAÇA PESADA", "MAÇA PÉTREA", "MARTELO DE BATALHA", "MAÇA DE UMA MÃO", "GOLEM", "MONARCA", "MAÇA PESADA W RUNA GUARDA"],
   SUPORTE:       ["G.A", "ARVORE", "SILENCE", "JURADOR", "LOCUS"],

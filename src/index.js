@@ -22,6 +22,9 @@ const CFG = {
   ctaChannelId: process.env.CTA_CHANNEL_ID,
   imortalRoleId: process.env.IMORTAL_ROLE_ID,
   staffLogChannelId: process.env.STAFF_LOG_CHANNEL_ID || null,
+  bombPingChannelId: process.env.BOMB_PING_CHANNEL_ID || null,
+  bombRoleId: process.env.BOMB_ROLE_ID || null,
+  bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
   presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20").split(","),
 };
 
@@ -76,6 +79,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       const [bk] = interaction.customId.split("|");
       if (bk === "occ") return onOccupantChoice(interaction); // pergunta interativa
+      if (bk === "bombyes") return onBombConfirm(interaction, true);
+      if (bk === "bombno")  return onBombConfirm(interaction, false);
       if (bk === "cleanyes") return onCleanConfirm(interaction);
       if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
     }
@@ -152,6 +157,7 @@ async function onTimeConfirm(interaction) {
     await db.setRosterMsg(ev.id, ids.join(","));
     created.push(`• **${time}** → ${thread}`);
     await logStaff(interaction.guild, `🆕 CTA **${time} UTC** criado por <@${callerId}>.`);
+    await postBombPing(interaction.guild, ev, time); // aviso no bomb-ping
     await new Promise((r) => setTimeout(r, 1200)); // respiro anti rate-limit
   }
   await interaction.editReply({ content: `✅ Planilha(s):\n${created.join("\n")}`, components: [] });
@@ -503,6 +509,66 @@ async function onOccupantChoice(interaction) {
   await interaction.update({ content: `✅ Feito. Vaga PT${target.partyIndex + 1} v${target.slotIndex + 1} atualizada.`, components: [] });
   refreshRoster(ev);
   await logStaff(interaction.guild, `🔧 ${interaction.user} resolveu troca (${choice}) · CTA ${ev.time_label}`);
+}
+
+
+// ==================  BOMB — FASE A (contagem)  ============================
+async function postBombPing(guild, ev, time) {
+  if (!CFG.bombPingChannelId) return;
+  const ch = await client.channels.fetch(CFG.bombPingChannelId).catch(() => null);
+  if (!ch) return;
+  const roleMention = CFG.bombRoleId ? `<@&${CFG.bombRoleId}>` : "@Bomb";
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`bombyes|${ev.id}`).setLabel("Sim, vou").setEmoji("💣").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`bombno|${ev.id}`).setLabel("Não vou").setStyle(ButtonStyle.Secondary),
+  );
+  const msg = await ch.send({
+    content: `${roleMention} 💣 **BOMB** — Vai no CTA das **${time} UTC** hoje?`,
+    components: [row],
+  });
+  // thread de contagem pro líder do bomb
+  const thread = await msg.startThread({ name: `Bomb ${time} — contagem`, autoArchiveDuration: 1440 }).catch(() => null);
+  if (thread) {
+    await db.setBombThread(ev.id, thread.id);
+    const leader = CFG.bombLeaderRoleId ? `<@&${CFG.bombLeaderRoleId}>` : "Líder do Bomb";
+    await thread.send({ content: `${leader} contagem do bomb pro CTA ${time}:` });
+    const c = await thread.send({ content: bombCountText([]) });
+    await db.setBombRoster(ev.id, c.id); // guarda id da msg de contagem no banco
+  }
+}
+
+function bombCountText(confirms) {
+  const vem = confirms.filter((c) => c.coming);
+  const nao = confirms.filter((c) => !c.coming);
+  let t = `💣 **Confirmados: ${vem.length}**\n`;
+  if (vem.length) t += vem.map((c) => `• ${c.username}`).join("\n");
+  if (nao.length) t += `\n\n❌ Não vêm: ${nao.map((c) => c.username).join(", ")}`;
+  return t.slice(0, 1900);
+}
+
+async function onBombConfirm(interaction, coming) {
+  const [, eventId] = interaction.customId.split("|");
+  // só cargo Bomb responde
+  if (CFG.bombRoleId && !interaction.member?.roles?.cache?.has(CFG.bombRoleId))
+    return interaction.reply({ content: "Só quem tem o cargo Bomb responde aqui.", flags: MessageFlags.Ephemeral });
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open")
+    return interaction.reply({ content: "Esse CTA não está mais aberto.", flags: MessageFlags.Ephemeral });
+
+  const username = interaction.member?.displayName || interaction.user.username;
+  await db.upsertBombConfirm(eventId, interaction.user.id, username, coming);
+  await interaction.reply({ content: coming ? "💣 Confirmado! Você vai." : "Ok, anotado que não vai.", flags: MessageFlags.Ephemeral });
+
+  // atualiza a contagem na thread (id da msg vem do banco -> sobrevive a restart)
+  const confirms = await db.getBombConfirms(eventId);
+  const fresh = await db.getEvent(eventId);
+  if (fresh.bomb_thread && fresh.bomb_roster) {
+    const thread = await client.channels.fetch(fresh.bomb_thread).catch(() => null);
+    if (thread) {
+      const m = await thread.messages.fetch(fresh.bomb_roster).catch(() => null);
+      if (m) await m.edit({ content: bombCountText(confirms) }).catch(() => {});
+    }
+  }
 }
 
 // ======================  HELPERS  ==========================================

@@ -22,7 +22,20 @@ async function init() {
       remind_10   TIMESTAMPTZ,                       -- quando mandar aviso 10min
       sent_30     BOOLEAN NOT NULL DEFAULT false,
       sent_10     BOOLEAN NOT NULL DEFAULT false,
+      bomb_thread TEXT,                             -- thread de contagem do bomb
+      bomb_comp   TEXT,                             -- 'invi'|'melee'|'kite' (fase B)
+      bomb_roster TEXT,                             -- ids das msgs da planilha do bomb
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS bomb_confirms (
+      id          BIGSERIAL PRIMARY KEY,
+      event_id    BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      coming      BOOLEAN NOT NULL DEFAULT true,   -- true = vai, false = nao vai
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (event_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS cta_signups (
@@ -170,8 +183,35 @@ async function moveSignupToSlot(eventId, userId, partyIndex, slotIndex) {
   );
 }
 
+
+// ---- BOMB (fase A: contagem) ----
+async function setBombThread(eventId, threadId) {
+  await pool.query(`UPDATE cta_events SET bomb_thread=$1 WHERE id=$2`, [threadId, eventId]);
+}
+async function upsertBombConfirm(eventId, userId, username, coming) {
+  await pool.query(
+    `INSERT INTO bomb_confirms (event_id, user_id, username, coming)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (event_id, user_id) DO UPDATE SET coming=EXCLUDED.coming, created_at=now()`,
+    [eventId, userId, username, coming]
+  );
+}
+async function getBombConfirms(eventId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM bomb_confirms WHERE event_id=$1 ORDER BY created_at ASC`, [eventId]
+  );
+  return rows;
+}
+async function setBombComp(eventId, comp) {
+  await pool.query(`UPDATE cta_events SET bomb_comp=$1 WHERE id=$2`, [comp, eventId]);
+}
+async function setBombRoster(eventId, ids) {
+  await pool.query(`UPDATE cta_events SET bomb_roster=$1 WHERE id=$2`, [ids, eventId]);
+}
+
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
+  setBombThread, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
   getDueReminders, markReminderSent,
