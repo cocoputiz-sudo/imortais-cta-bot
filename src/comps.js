@@ -113,8 +113,8 @@ const PARTY1 = [
   slot("Support", [["G.A",1],["ARVORE",1]]),                                   // 05
   slot("Support", [["JURADOR",1]]),                                            // 06
   slot("Support", [["SHADOW CALLER",1]]),                                      // 07
-  slot("Support", [["SHADOW CALLER",1],["PÚTRIDO",2],["DANAÇÃO",3]]),          // 08 (nudge)
-  slot("Support", [["CAÇA ESPÍRITOS",1],["ENTALHADA",1]]),                     // 09
+  slot("Support", [["SHADOW CALLER",1],["PÚTRIDO",2],["DANAÇÃO",3],["EXECRADO",2]]),          // 08 (nudge)
+  slot("Support", [["CAÇA ESPÍRITOS",1],["ENTALHADA",1],["EXECRADO",2]]),                     // 09
   slot("Support", [["SILENCE",1]]),                                            // 10
   slot("Melee",   [["QUEBRA REINOS",1]]),                                      // 11
   slot("Melee",   [["PRISMA",1]]),                                             // 12
@@ -139,14 +139,14 @@ const PARTY2 = [
   slot("Tank",    [["ARVORE",1],["MAÇA PESADA",1],["MARTELO DE BATALHA",1],
                    ["MAÇA DE UMA MÃO",1],["MONARCA",1],["SILENCE",1],["G.A",1]]), // 04
   slot("Support", [["JURADOR",1],["MAÇA PESADA W RUNA GUARDA",2],
-                   ["MARTELO DE BATALHA",2],["MAÇA DE UMA MÃO",2]]),             // 05
+                   ["MARTELO DE BATALHA",2],["MAÇA DE UMA MÃO",2],["EXECRADO",1]]),             // 05
   slot("Support", [["JURADOR",1],["LOCUS",1],["MAÇA PESADA W RUNA GUARDA",2],
-                   ["MARTELO DE BATALHA",2],["MAÇA DE UMA MÃO",2]]),             // 06
+                   ["MARTELO DE BATALHA",2],["MAÇA DE UMA MÃO",2],["EXECRADO",1]]),             // 06
   slot("Support", [["G.A",1]]),                                                 // 07
   slot("Support", [["CAÇA ESPÍRITOS",1],["ENTALHADA",1],["SHADOW CALLER",1],
-                   ["DANAÇÃO",1],["PÚTRIDO",2]]),                               // 08
-  slot("Support", [["G.A",1],["SILENCE",1],["CARROÇA",1],["BEHEMOT",1]]),       // 09
-  slot("Support", [["G.A",1],["SILENCE",1],["CARROÇA",1],["BEHEMOT",1]]),       // 10
+                   ["DANAÇÃO",1],["PÚTRIDO",2],["EXECRADO",1]]),                               // 08
+  slot("Support", [["G.A",1],["SILENCE",1],["CARROÇA",1],["BEHEMOT",1],["EXECRADO",1]]),       // 09
+  slot("Support", [["G.A",1],["SILENCE",1],["CARROÇA",1],["BEHEMOT",1],["EXECRADO",1]]),       // 10
   slot("Melee",   [["BRAÇADEIRAS",1],["QUEBRA REINOS",1],["CANÇÃO",1],          // 11 (peso1 nos 3)
                    ["PRESA DEMONIACA",2],["GALATINAS",2],["ASTRAL",2],["PRISMA",2],
                    ["SINCELO",2],["CRIA REIS",2],["LAMINA DA INFINIDADE",2]]),
