@@ -13,7 +13,7 @@ const {
 } = require("discord.js");
 
 const db = require("./db");
-const { ROLES, WEAPON_CATALOG } = require("./comps");
+const { ROLES, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate } = require("./roster");
 const cmds = require("./commands");
 
@@ -81,6 +81,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (bk === "occ") return onOccupantChoice(interaction); // pergunta interativa
       if (bk === "bombyes") return onBombConfirm(interaction, true);
       if (bk === "bombno")  return onBombConfirm(interaction, false);
+      if (bk === "bombcomp") return onBombCompChoice(interaction);
+      if (bk === "bombrole") return onBombRolePick(interaction);
+      if (bk === "bombleave") return onBombLeave(interaction);
       if (bk === "cleanyes") return onCleanConfirm(interaction);
       if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
     }
@@ -101,6 +104,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("weapon|"))
       return onWeaponPick(interaction);
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("bombweapon|"))
+      return onBombWeaponPick(interaction);
   } catch (e) {
     console.error("interaction:", e);
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred)
@@ -567,6 +572,13 @@ async function postBombPing(guild, ev, time) {
     await thread.send({ content: `${leader} contagem do bomb pro CTA ${time}:` });
     const c = await thread.send({ content: bombCountText([]) });
     await db.setBombRoster(ev.id, c.id); // guarda id da msg de contagem no banco
+    // botões pro Líder do Bomb escolher a comp (Fase B)
+    const compRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`bombcomp|${ev.id}|invi`).setLabel("Montar Invi").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`bombcomp|${ev.id}|melee`).setLabel("Montar Melee").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`bombcomp|${ev.id}|kite`).setLabel("Kite (só lista)").setStyle(ButtonStyle.Secondary),
+    );
+    await thread.send({ content: "👑 **Líder do Bomb**, escolhe a composição:", components: [compRow] });
   }
 }
 
@@ -596,12 +608,143 @@ async function onBombConfirm(interaction, coming) {
   const confirms = await db.getBombConfirms(eventId);
   const fresh = await db.getEvent(eventId);
   if (fresh.bomb_thread && fresh.bomb_roster) {
+    const countMsgId = String(fresh.bomb_roster).split(",")[0]; // 1º id = contagem
     const thread = await client.channels.fetch(fresh.bomb_thread).catch(() => null);
     if (thread) {
-      const m = await thread.messages.fetch(fresh.bomb_roster).catch(() => null);
+      const m = await thread.messages.fetch(countMsgId).catch(() => null);
       if (m) await m.edit({ content: bombCountText(confirms) }).catch(() => {});
     }
   }
+}
+
+// ==================  BOMB — FASE B (montagem)  ============================
+// Líder do Bomb escolhe a comp. Kite só lista; Invi/Melee montam planilha.
+async function onBombCompChoice(interaction) {
+  const [, eventId, comp] = interaction.customId.split("|");
+  // só o Líder do Bomb
+  if (CFG.bombLeaderRoleId && !interaction.member?.roles?.cache?.has(CFG.bombLeaderRoleId))
+    return interaction.reply({ content: "Só o Líder do Bomb escolhe a composição.", flags: MessageFlags.Ephemeral });
+  const ev = await db.getEvent(eventId);
+  if (!ev) return interaction.reply({ content: "CTA não encontrado.", flags: MessageFlags.Ephemeral });
+
+  const confirms = (await db.getBombConfirms(eventId)).filter((c) => c.coming);
+
+  if (comp === "kite") {
+    if (confirms.length < KITE_MIN)
+      return interaction.reply({ content: `Kite precisa de pelo menos ${KITE_MIN} confirmados (tem ${confirms.length}).`, flags: MessageFlags.Ephemeral });
+    await db.setBombComp(eventId, "kite");
+    const nomes = confirms.map((c) => `• ${c.username}`).join("\n") || "(ninguém)";
+    return interaction.reply({ content: `🪁 **KITE COMP** — ${confirms.length} confirmados. O caller organiza na mão:\n${nomes}`.slice(0, 1900) });
+  }
+
+  // invi ou melee: monta a planilha do bomb
+  await db.setBombComp(eventId, comp);
+  await interaction.reply({ content: `💣 Montando **${BOMB_COMPS[comp].name}**...`, flags: MessageFlags.Ephemeral });
+  const thread = await client.channels.fetch(ev.bomb_thread).catch(() => null);
+  if (!thread) return;
+
+  const roleMention = CFG.bombRoleId ? `<@&${CFG.bombRoleId}>` : "@Bomb";
+  await thread.send({
+    content: `${roleMention} 💣 **${BOMB_COMPS[comp].name}** — escolhe tua arma pra entrar:`,
+    components: buildBombRolePicker(eventId),
+  });
+  const msg = await thread.send({ content: bombRosterText(eventId, comp, []) });
+  await db.setBombRoster(eventId, `${ev.bomb_roster},${msg.id}`); // guarda: contagem,planilha
+}
+
+// botões de papel pra inscrição no bomb (reusa os papéis)
+function buildBombRolePicker(eventId) {
+  const roleBtns = Object.entries(ROLES).map(([name, meta]) =>
+    new ButtonBuilder().setCustomId(`bombrole|${eventId}|${name}`).setLabel(name).setEmoji(meta.emoji).setStyle(ButtonStyle.Secondary));
+  const leave = new ButtonBuilder().setCustomId(`bombleave|${eventId}`).setLabel("Sair").setEmoji("🚪").setStyle(ButtonStyle.Danger);
+  const rows = [];
+  for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
+  rows.push(new ActionRowBuilder().addComponents(leave));
+  return rows;
+}
+
+// renderiza a planilha do bomb
+function bombRosterText(eventId, comp, signups) {
+  const slots = BOMB_COMPS[comp].slots;
+  const bySlot = new Map();
+  const reserves = [];
+  for (const su of signups) {
+    if (su.slot_index != null) bySlot.set(su.slot_index, su);
+    else reserves.push(su);
+  }
+  let filled = 0;
+  const lines = slots.map((slot, i) => {
+    const su = bySlot.get(i);
+    const n = String(i + 1).padStart(2, "0");
+    if (su) { filled++; return `\`${n}\` ${su.weapon} — **${su.username}**`; }
+    const label = slot.locked ? "👑 CALLER" : slot.accepts.map((a) => a.weapon).join(" / ");
+    return `\`${n}\` ${label} — *vazio*`;
+  });
+  let t = `💣 **${BOMB_COMPS[comp].name}** (${filled}/${slots.length})\n` + lines.join("\n");
+  if (reserves.length) t += `\n\n**Reserva:** ` + reserves.map((r) => `${r.username}(${r.weapon})`).join(", ");
+  return t.slice(0, 1990);
+}
+
+// arma do bomb: papel -> menu de armas (só as que existem na comp escolhida)
+async function onBombRolePick(interaction) {
+  const [, eventId, role] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev || !ev.bomb_comp) return interaction.reply({ content: "Bomb não está montado.", flags: MessageFlags.Ephemeral });
+  // armas daquele papel que aparecem na comp do bomb
+  const slots = BOMB_COMPS[ev.bomb_comp].slots;
+  const armas = [...new Set(slots.flatMap((s) => s.accepts).filter((a) => (WEAPON_CATALOG[role] || []).includes(a.weapon)).map((a) => a.weapon))];
+  if (!armas.length) return interaction.reply({ content: "Nenhuma arma desse papel nessa comp.", flags: MessageFlags.Ephemeral });
+  const menu = new StringSelectMenuBuilder().setCustomId(`bombweapon|${eventId}`)
+    .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
+  await interaction.reply({ content: `Escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+}
+
+async function onBombWeaponPick(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const weapon = interaction.values[0];
+  const ev = await db.getEvent(eventId);
+  if (!ev || !ev.bomb_comp) return interaction.update({ content: "Bomb não está montado.", components: [] });
+  await interaction.deferUpdate();
+  const username = interaction.member?.displayName || interaction.user.username;
+
+  // acha vaga livre pra essa arma na comp do bomb
+  const signups = await db.getBombSignups(eventId);
+  const others = signups.filter((s) => s.user_id !== interaction.user.id);
+  const taken = new Set(others.filter((s) => s.slot_index != null).map((s) => s.slot_index));
+  const slots = BOMB_COMPS[ev.bomb_comp].slots;
+  let slotIndex = null;
+  for (let i = 0; i < slots.length; i++) {
+    if (taken.has(i) || slots[i].locked) continue;
+    if (slots[i].accepts.some((a) => a.weapon.toUpperCase() === weapon.toUpperCase())) { slotIndex = i; break; }
+  }
+  await db.upsertBombSignup(eventId, interaction.user.id, username, weapon, slotIndex);
+  await refreshBombRoster(ev);
+  const msg = slotIndex != null ? `✅ Você entrou como **${weapon}** (vaga ${slotIndex + 1}).` : `📝 Reserva (${weapon}) — sem vaga.`;
+  await interaction.editReply({ content: msg, components: [] });
+}
+
+async function onBombLeave(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  const removed = await db.deleteBombSignup(eventId, interaction.user.id);
+  if (!removed) return interaction.reply({ content: "Você não estava na comp do bomb.", flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: "🚪 Saiu da comp do bomb.", flags: MessageFlags.Ephemeral });
+  await refreshBombRoster(ev);
+}
+
+// atualiza a planilha do bomb (a msg é a 2ª guardada em bomb_roster: "contagem,planilha")
+async function refreshBombRoster(ev) {
+  const fresh = await db.getEvent(ev.id);
+  if (!fresh.bomb_thread || !fresh.bomb_roster || !fresh.bomb_comp) return;
+  const ids = String(fresh.bomb_roster).split(",");
+  const planilhaId = ids[1]; // segundo id = planilha de montagem
+  if (!planilhaId) return;
+  const thread = await client.channels.fetch(fresh.bomb_thread).catch(() => null);
+  if (!thread) return;
+  const m = await thread.messages.fetch(planilhaId).catch(() => null);
+  if (!m) return;
+  const signups = await db.getBombSignups(ev.id);
+  await m.edit({ content: bombRosterText(ev.id, fresh.bomb_comp, signups) }).catch(() => {});
 }
 
 // ======================  HELPERS  ==========================================

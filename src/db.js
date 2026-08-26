@@ -38,6 +38,17 @@ async function init() {
       UNIQUE (event_id, user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS bomb_signups (
+      id          BIGSERIAL PRIMARY KEY,
+      event_id    BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      weapon      TEXT NOT NULL,
+      slot_index  INT,                               -- vaga na comp do bomb (null=reserva)
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (event_id, user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS cta_signups (
       id          BIGSERIAL PRIMARY KEY,
       event_id    BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
@@ -208,10 +219,31 @@ async function setBombComp(eventId, comp) {
 async function setBombRoster(eventId, ids) {
   await pool.query(`UPDATE cta_events SET bomb_roster=$1 WHERE id=$2`, [ids, eventId]);
 }
+async function upsertBombSignup(eventId, userId, username, weapon, slotIndex) {
+  await pool.query(
+    `INSERT INTO bomb_signups (event_id, user_id, username, weapon, slot_index)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (event_id, user_id) DO UPDATE SET weapon=EXCLUDED.weapon, slot_index=EXCLUDED.slot_index, created_at=now()`,
+    [eventId, userId, username, weapon, slotIndex]
+  );
+}
+async function getBombSignups(eventId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM bomb_signups WHERE event_id=$1 ORDER BY created_at ASC`, [eventId]
+  );
+  return rows;
+}
+async function deleteBombSignup(eventId, userId) {
+  const { rows } = await pool.query(
+    `DELETE FROM bomb_signups WHERE event_id=$1 AND user_id=$2 RETURNING *`, [eventId, userId]
+  );
+  return rows[0];
+}
 
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
   setBombThread, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
+  upsertBombSignup, getBombSignups, deleteBombSignup,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
   getDueReminders, markReminderSent,

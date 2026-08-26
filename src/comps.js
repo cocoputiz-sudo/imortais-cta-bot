@@ -202,4 +202,52 @@ const WEAPON_FAMILY = {};
 for (const [fam, list] of Object.entries(FAMILIES))
   for (const w of list) WEAPON_FAMILY[w] = fam;
 
-module.exports = { ROLES, WEAPONS, PARTIES, FAMILIES, WEAPON_FAMILY, WEAPON_CATALOG: buildWeaponCatalog() };
+// ---------------------------------------------------------------------------
+// COMPS DO BOMB (Fase B) — montadas quando o Líder do Bomb escolhe.
+// slot com locked:true = caller do bomb (ele se põe). Healer = QS/Exaltado/Corrompido.
+// ---------------------------------------------------------------------------
+const HEALER_BOMB = [["QUEDA SANTA",1],["EXALTADO",1],["CORROMPIDO",2]];
+
+const BOMB_INVI = [
+  { ...slot("Tank", [["BRUXO DE UMA MÃO",1]]), locked: true }, // caller
+  slot("Ranged", [["ARCO PLANGENTE",1]]),
+  slot("Ranged", [["ARCO PLANGENTE",1]]),
+  slot("Ranged", [["ARCO PLANGENTE",1]]),
+  slot("Ranged", [["ARCO PLANGENTE",1]]),
+  slot("Ranged", [["ARCO PLANGENTE",1]]),
+  slot("Ranged", [["ARCO PLANGENTE",1]]),
+  slot("Support", [["EXECRADO",1]]),
+  slot("Ranged", [["PRISMA",1]]),
+  slot("Ranged", [["CANÇÃO",1]]),
+  slot("Melee", [["CRAVADAS",1]]),
+  slot("Support", [["CAÇA ESPÍRITOS",1]]),
+  slot("Support", [["PÚTRIDO",1]]),
+  slot("Healer", HEALER_BOMB),
+  slot("Support", [["OCULTO",1]]),
+  slot("Tank", [["MAÇA PESADA",1]]),
+];
+
+const BOMB_MELEE = [
+  { ...slot("Tank", [["GOLEM",1]]), locked: true }, // caller
+  slot("Melee", [["BRAÇADEIRAS",1],["FÚRIA CONTIDA",1]]),
+  slot("Melee", [["BRAÇADEIRAS",1],["FÚRIA CONTIDA",1]]),
+  slot("Melee", [["BRAÇADEIRAS",1],["FÚRIA CONTIDA",1]]),
+  slot("Melee", [["BRAÇADEIRAS",1],["FÚRIA CONTIDA",1]]),
+  slot("Melee", [["BRAÇADEIRAS",1],["FÚRIA CONTIDA",1]]),
+  slot("Melee", [["BRAÇADEIRAS",1],["FÚRIA CONTIDA",1]]),
+  slot("Melee", [["QUEBRA REINOS",1]]),
+  slot("Ranged", [["CANÇÃO",1]]),
+  slot("Support", [["SHADOW CALLER",1]]), // Chama Sombra
+  slot("Healer", HEALER_BOMB),
+  slot("Support", [["OCULTO",1]]),
+  slot("Support", [["CAÇA ESPÍRITOS",1]]),
+  slot("Tank", [["MAÇA PESADA",1],["JURADOR",1],["MAÇA PÉTREA",1]]),
+];
+
+const BOMB_COMPS = {
+  invi:  { name: "Bomb Invi",  slots: BOMB_INVI },
+  melee: { name: "Bomb Melee", slots: BOMB_MELEE },
+};
+const KITE_MIN = 13; // Kite só libera com >= 13 confirmados
+
+module.exports = { ROLES, WEAPONS, PARTIES, FAMILIES, WEAPON_FAMILY, WEAPON_CATALOG: buildWeaponCatalog(), BOMB_COMPS, KITE_MIN };
