@@ -39,7 +39,6 @@ const WEAPONS = {
   "MAÇA PESADA W RUNA GUARDA": { role: "Tank" }, // maça pesada com W de runa guarda
   "BRUXO DE UMA MÃO":      { role: "Tank" },
   "MONARCA":               { role: "Tank" },
-  "PERMA":                 { role: "Tank" },
   "ARVORE":                { role: "Support" },
   // Supports
   "JURADOR":               { role: "Support" },
@@ -190,7 +189,7 @@ function buildWeaponCatalog() {
 const FAMILIES = {
   DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO", "EXECRADO"],
   DEBUFF_MELEE:  ["ENTALHADA", "CAÇA ESPÍRITOS"],
-  TANKS_MACA:    ["MAÇA PESADA", "MAÇA PÉTREA", "MARTELO DE BATALHA", "MAÇA DE UMA MÃO", "GOLEM", "MONARCA", "MAÇA PESADA W RUNA GUARDA"],
+  TANKS_MACA:    ["MAÇA PESADA", "MAÇA PÉTREA", "MARTELO DE BATALHA", "MARTELO DE UMA MÃO", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "GOLEM", "MONARCA", "MAÇA PESADA W RUNA GUARDA"],
   SUPORTE:       ["G.A", "ARVORE", "SILENCE", "JURADOR", "LOCUS"],
   HEALERS:       ["RAMPANTE", "POSTULENTO", "QUEDA SANTA", "CORROMPIDO", "EXALTADO"],
   MELEE:         ["BRAÇADEIRAS", "QUEBRA REINOS", "PRESA DEMONIACA", "GALATINAS", "CRIA REIS", "LAMINA DA INFINIDADE", "FÚRIA CONTIDA", "CRAVADAS", "URSINAS"],
