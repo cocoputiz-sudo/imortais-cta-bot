@@ -163,6 +163,13 @@ async function onTimeConfirm(interaction) {
   const times = csv.split(",").filter(Boolean);
   if (!times.length) return interaction.reply({ content: "Marca um horário.", flags: MessageFlags.Ephemeral });
 
+  // ordena cronologicamente (mais cedo primeiro), independente da ordem de clique
+  times.sort((a, b) => {
+    const [ha, ma] = a.split(":").map(Number);
+    const [hb, mb] = b.split(":").map(Number);
+    return (ha * 60 + ma) - (hb * 60 + mb);
+  });
+
   await interaction.update({ content: `⏳ Criando ${times.length} planilha(s)...`, components: [] });
 
   const created = [];
