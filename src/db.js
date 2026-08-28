@@ -28,6 +28,20 @@ async function init() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS voice_presence (
+      id          BIGSERIAL PRIMARY KEY,
+      guild_id    TEXT NOT NULL,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      channel_id  TEXT NOT NULL,
+      channel_kind TEXT NOT NULL,                    -- 'prep' | 'bomb'
+      joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      left_at     TIMESTAMPTZ,                        -- null = ainda na call
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_voice_open ON voice_presence(user_id, channel_id) WHERE left_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_voice_time ON voice_presence(joined_at);
+
     CREATE TABLE IF NOT EXISTS bomb_confirms (
       id          BIGSERIAL PRIMARY KEY,
       event_id    BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
@@ -240,10 +254,50 @@ async function deleteBombSignup(eventId, userId) {
   return rows[0];
 }
 
+// ---- PRESENÇA EM CALL (attendance camada 1) ----
+// abre um registro de presença (entrou na call)
+async function voiceJoin(guildId, userId, username, channelId, channelKind) {
+  // fecha qualquer registro aberto dessa pessoa nesse canal (segurança contra duplicata)
+  await pool.query(
+    `UPDATE voice_presence SET left_at=now() WHERE user_id=$1 AND channel_id=$2 AND left_at IS NULL`,
+    [userId, channelId]
+  );
+  await pool.query(
+    `INSERT INTO voice_presence (guild_id, user_id, username, channel_id, channel_kind)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [guildId, userId, username, channelId, channelKind]
+  );
+}
+// fecha o registro aberto (saiu da call)
+async function voiceLeave(userId, channelId) {
+  await pool.query(
+    `UPDATE voice_presence SET left_at=now() WHERE user_id=$1 AND channel_id=$2 AND left_at IS NULL`,
+    [userId, channelId]
+  );
+}
+// fecha TODOS os registros abertos (usado no boot, pra não deixar sessão órfã de antes do restart)
+async function voiceCloseAllOpen(channelId) {
+  await pool.query(
+    `UPDATE voice_presence SET left_at=now() WHERE channel_id=$1 AND left_at IS NULL`, [channelId]
+  );
+}
+// presença dentro de uma janela de tempo (pro relatório futuro)
+async function getPresenceInWindow(guildId, channelKind, startUTC, endUTC) {
+  const { rows } = await pool.query(
+    `SELECT * FROM voice_presence
+     WHERE guild_id=$1 AND channel_kind=$2
+       AND joined_at < $4 AND (left_at IS NULL OR left_at > $3)
+     ORDER BY user_id, joined_at`,
+    [guildId, channelKind, startUTC, endUTC]
+  );
+  return rows;
+}
+
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
   setBombThread, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
+  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
   getDueReminders, markReminderSent,

@@ -25,11 +25,13 @@ const CFG = {
   bombPingChannelId: process.env.BOMB_PING_CHANNEL_ID || null,
   bombRoleId: process.env.BOMB_ROLE_ID || null,
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
+  prepVoiceId: process.env.PREP_VOICE_ID || null,   // 🚨 Preparação
+  bombVoiceId: process.env.BOMB_VOICE_ID || null,   // 💣 Bomb Squad
   presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20").split(","),
 };
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Channel],
 });
 
@@ -72,6 +74,34 @@ function buildTimePicker(selected, callerId) {
 }
 
 // ======================  ROTEADOR  =========================================
+// ======================  PRESENÇA EM CALL (attendance)  ====================
+// mapeia um channelId pro tipo ('prep' | 'bomb' | null)
+function voiceKind(channelId) {
+  if (channelId && channelId === CFG.prepVoiceId) return "prep";
+  if (channelId && channelId === CFG.bombVoiceId) return "bomb";
+  return null;
+}
+
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  try {
+    const oldCh = oldState.channelId;
+    const newCh = newState.channelId;
+    if (oldCh === newCh) return; // mudou mute/deaf/etc, não mudou de canal
+
+    const member = newState.member || oldState.member;
+    const username = member?.displayName || member?.user?.username || "?";
+    const guildId = (newState.guild || oldState.guild).id;
+
+    // saiu de uma call monitorada
+    const oldKind = voiceKind(oldCh);
+    if (oldKind) await db.voiceLeave(member.id, oldCh);
+
+    // entrou numa call monitorada
+    const newKind = voiceKind(newCh);
+    if (newKind) await db.voiceJoin(guildId, member.id, username, newCh, newKind);
+  } catch (e) { console.error("voiceState:", e); }
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isAutocomplete()) return cmds.handleAutocomplete(interaction);
@@ -835,6 +865,26 @@ client.once(Events.ClientReady, async (c) => {
     try { await cmds.registerCommands(c.user.id, gid); }
     catch (e) { console.error("registerCommands:", e); }
   }
+  // reconcilia presença de voz: fecha registros órfãos e reabre pra quem já está na call
+  await reconcileVoice(c);
 });
+
+// no boot: fecha sessões abertas (órfãs do restart) e reabre pra quem está nas calls agora
+async function reconcileVoice(client) {
+  try {
+    for (const chId of [CFG.prepVoiceId, CFG.bombVoiceId]) {
+      if (!chId) continue;
+      await db.voiceCloseAllOpen(chId); // fecha órfãos
+      const ch = await client.channels.fetch(chId).catch(() => null);
+      if (!ch || !ch.members) continue;
+      const kind = voiceKind(chId);
+      for (const [, member] of ch.members) {
+        const username = member.displayName || member.user.username;
+        await db.voiceJoin(ch.guild.id, member.id, username, chId, kind);
+      }
+      console.log(`✅ Presença reconciliada em ${kind}: ${ch.members.size} na call`);
+    }
+  } catch (e) { console.error("reconcileVoice:", e); }
+}
 
 (async () => { await db.init(); await client.login(CFG.token); })();
