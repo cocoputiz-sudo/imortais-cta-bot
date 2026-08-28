@@ -34,6 +34,9 @@ function commandDefs() {
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),
     new SlashCommandBuilder().setName("cta_clean").setDescription("Esvazia uma PT inteira")
       .addStringOption(ctaOpt).addIntegerOption(ptOpt),
+    new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
+    new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
+    new SlashCommandBuilder().setName("attendance_monthly").setDescription("Relatório de presença — últimos 30 dias"),
   ].map((c) => c.toJSON());
 }
 

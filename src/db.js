@@ -293,11 +293,22 @@ async function getPresenceInWindow(guildId, channelKind, startUTC, endUTC) {
   return rows;
 }
 
+// todos os CTAs (eventos) criados num período — pro relatório de attendance
+async function getEventsInRange(guildId, startUTC, endUTC) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_events
+     WHERE guild_id=$1 AND created_at >= $2 AND created_at <= $3
+     ORDER BY created_at ASC`,
+    [guildId, startUTC, endUTC]
+  );
+  return rows;
+}
+
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
   setBombThread, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
-  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow,
+  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
   getDueReminders, markReminderSent,

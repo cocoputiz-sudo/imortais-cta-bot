@@ -16,6 +16,7 @@ const db = require("./db");
 const { ROLES, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate } = require("./roster");
 const cmds = require("./commands");
+const attendance = require("./attendance");
 
 const CFG = {
   token: process.env.DISCORD_TOKEN,
@@ -453,6 +454,12 @@ async function onSlash(interaction) {
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
   const name = interaction.commandName;
+
+  // attendance não depende de um CTA específico — trata antes
+  if (name === "attendance_daily")   return slashAttendance(interaction, 1, "hoje");
+  if (name === "attendance_week")    return slashAttendance(interaction, 7, "últimos 7 dias");
+  if (name === "attendance_monthly") return slashAttendance(interaction, 30, "últimos 30 dias");
+
   const timeLabel = interaction.options.getString("cta");
   const ev = await db.getOpenEventByTime(interaction.guildId, timeLabel);
   if (!ev) return interaction.reply({ content: `Não achei um CTA aberto às ${timeLabel}.`, flags: MessageFlags.Ephemeral });
@@ -461,6 +468,90 @@ async function onSlash(interaction) {
   if (name === "cta_clean")  return slashClean(interaction, ev);
   if (name === "cta_move")   return slashMoveOrAdd(interaction, ev, false);
   if (name === "cta_add")    return slashMoveOrAdd(interaction, ev, true);
+}
+
+// gera o relatório de attendance e posta como HTML anexo
+async function slashAttendance(interaction, dias, rotulo) {
+  await interaction.deferReply();
+  const end = new Date();
+  const start = new Date(end.getTime() - dias * 24 * 60 * 60000);
+  const report = await attendance.buildReport(interaction.guildId, start, end);
+
+  if (!report.ctaCount)
+    return interaction.editReply({ content: `Nenhum CTA encontrado (${rotulo}).` });
+
+  const html = renderAttendanceHTML(report, rotulo, start, end);
+  const buf = Buffer.from(html, "utf-8");
+  const file = { attachment: buf, name: `attendance-${rotulo.replace(/\s+/g, "-")}.html` };
+
+  const top = report.rows.slice(0, 5).map((r, i) => `${i + 1}. ${r.username} — ${r.integral} integral, score ${r.score} (${r.cat})`).join("\n");
+  await interaction.editReply({
+    content: `📊 **Attendance — ${rotulo}** (${report.ctaCount} CTAs)\n\n**Top 5:**\n${top || "(sem dados)"}\n\nRelatório completo no anexo 👇`,
+    files: [file],
+  });
+}
+
+// gera o HTML do relatório
+function renderAttendanceHTML(report, rotulo, start, end) {
+  const catColor = { "Pilar": "#c9a227", "Regular": "#3f7a4d", "Intermitente": "#6ba7c4", "Fantasma": "#7a2222", "Ausente": "#555" };
+  const rowsHtml = report.rows.map((r, i) => `
+    <tr>
+      <td class="rank">${i + 1}</td>
+      <td class="name">${escapeHtml(r.username)}</td>
+      <td><span class="cat" style="background:${catColor[r.cat] || "#555"}">${r.cat}</span></td>
+      <td class="num gold">${r.integral}</td>
+      <td class="num">${r.parcial}</td>
+      <td class="num dim">${r.mencao}</td>
+      <td class="num red">${r.fantasma}</td>
+      <td class="num ice">${r.bomb}</td>
+      <td class="num score">${r.score}</td>
+    </tr>`).join("");
+
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Attendance IMORTAIS</title>
+<style>
+:root{--void:#0a0c10;--steel:#12161d;--line:#242c38;--gold:#c9a227;--ink:#e6e3da;--ink-dim:#9aa0ab;--ice:#6ba7c4}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:radial-gradient(1200px 500px at 50% -10%,rgba(201,162,39,.06),transparent 60%),var(--void);color:var(--ink);font-family:"Iowan Old Style",Palatino,Georgia,serif;padding:44px 20px 70px}
+.wrap{max-width:1080px;margin:0 auto}
+.eyebrow{font-family:"DIN Condensed","Arial Narrow",sans-serif;letter-spacing:.4em;text-transform:uppercase;font-size:12px;color:var(--gold);text-align:center;margin-bottom:12px}
+h1{font-size:clamp(32px,6vw,54px);font-weight:800;text-transform:uppercase;text-align:center;line-height:1;background:linear-gradient(180deg,#f3ead0,#c9a227 60%,#8a7220);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{text-align:center;color:var(--ink-dim);font-style:italic;margin:12px 0 8px}
+.meta{text-align:center;color:var(--ink-dim);font-size:13px;margin-bottom:30px}
+table{width:100%;border-collapse:collapse;background:var(--steel);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+th{font-family:"DIN Condensed","Arial Narrow",sans-serif;text-transform:uppercase;letter-spacing:.1em;font-size:12px;color:var(--gold);text-align:center;padding:12px 8px;border-bottom:2px solid var(--line);background:rgba(0,0,0,.3)}
+th.l,td.name{text-align:left}
+td{padding:9px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,.04);font-size:14px}
+.rank{color:var(--ink-dim);font-family:"DIN Condensed",sans-serif;width:40px}
+.name{font-weight:600;padding-left:14px}
+.cat{font-family:"DIN Condensed","Arial Narrow",sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#0a0c10;padding:2px 9px;border-radius:2px;font-weight:700}
+.num{font-family:"DIN Condensed",sans-serif;font-size:16px}
+.gold{color:var(--gold)}.ice{color:var(--ice)}.red{color:#e0a0a0}.dim{color:var(--ink-dim)}
+.score{color:#fff;font-weight:700}
+.legend{margin-top:24px;color:var(--ink-dim);font-size:13px;line-height:1.7}
+.legend b{color:var(--ink)}
+footer{text-align:center;margin-top:36px;color:var(--ink-dim);font-size:12px;font-style:italic}
+</style></head><body><div class="wrap">
+<div class="eyebrow">Imortais · Call to Arms</div>
+<h1>Attendance</h1>
+<p class="sub">Presença nos CTAs — ${report.ctaCount} CTAs no período</p>
+<p class="meta">${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)} · ${rotulo}</p>
+<table>
+<thead><tr>
+<th>#</th><th class="l">Jogador</th><th>Categoria</th><th>Integral</th><th>Parcial</th><th>Menção</th><th>Fantasma</th><th>Bomb</th><th>Score</th>
+</tr></thead>
+<tbody>${rowsHtml}</tbody>
+</table>
+<div class="legend">
+<b>Integral:</b> pingou no CTA, chegou no começo e ficou até o fim · <b>Parcial:</b> pingou e veio, mas chegou tarde ou saiu cedo · <b>Menção:</b> veio na call sem pingar · <b>Fantasma:</b> pingou mas não apareceu · <b>Bomb:</b> confirmou/esteve no bomb.<br>
+<b>Score:</b> Integral×3 + Parcial×1 − Fantasma×1. <b>Categorias:</b> Pilar (≥70% integral) · Regular (≥40% presente) · Intermitente · Ausente · Fantasma.
+</div>
+<footer>Gerado pelo bot · Imortais CTA</footer>
+</div></body></html>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 async function slashRemove(interaction, ev) {
