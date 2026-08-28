@@ -112,7 +112,7 @@ const PARTY1 = [
   slot("Support", [["G.A",1],["ARVORE",1]]),                                   // 05
   slot("Support", [["JURADOR",1]]),                                            // 06
   slot("Support", [["SHADOW CALLER",1]]),                                      // 07
-  slot("Support", [["SHADOW CALLER",1],["PÚTRIDO",2],["DANAÇÃO",3],["EXECRADO",2]]),          // 08 (nudge)
+  { ...slot("Support", [["SHADOW CALLER",1],["PÚTRIDO",2],["DANAÇÃO",3],["EXECRADO",2]]), scDynamic: true }, // 08 peso dinâmico
   slot("Support", [["CAÇA ESPÍRITOS",1],["ENTALHADA",1],["EXECRADO",2]]),                     // 09
   slot("Support", [["SILENCE",1]]),                                            // 10
   slot("Melee",   [["QUEBRA REINOS",1]]),                                      // 11

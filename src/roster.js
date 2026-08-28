@@ -107,18 +107,43 @@ function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = PARTIE
 
 // score de uma arma numa vaga: exato (custo = peso) ou afinidade (peso + 10).
 // null = a arma não serve nem por afinidade.
-function affinityScore(slot, weapon) {
-  const exact = slot.accepts.find((a) => U(a.weapon) === U(weapon));
+// pesos efetivos de uma vaga, considerando regras dinâmicas (contexto).
+// ctx.scInPt1 = quantos Shadow Caller já estão alocados na PT1.
+// Na vaga scDynamic (PT1 v8): se já tem SC na PT1, despriorize SC.
+function effectiveAccepts(slot, ctx) {
+  if (!slot.scDynamic || !ctx || !ctx.scInPt1) return slot.accepts;
+  // já tem SC na PT1 -> Pútrido(1), Execrado(1), Danação(2), Shadow Caller(3)
+  const remap = { "PÚTRIDO": 1, "EXECRADO": 1, "DANAÇÃO": 2, "SHADOW CALLER": 3 };
+  return slot.accepts.map((a) => {
+    const w = remap[U(a.weapon)];
+    return w != null ? { weapon: a.weapon, weight: w } : a;
+  });
+}
+
+function affinityScore(slot, weapon, ctx) {
+  const accepts = effectiveAccepts(slot, ctx);
+  const exact = accepts.find((a) => U(a.weapon) === U(weapon));
   if (exact) return { kind: "exact", cost: exact.weight };
   const fam = WEAPON_FAMILY[U(weapon)];
   if (!fam) return null;
-  const kin = slot.accepts.find((a) => WEAPON_FAMILY[U(a.weapon)] === fam);
+  const kin = accepts.find((a) => WEAPON_FAMILY[U(a.weapon)] === fam);
   if (kin) return { kind: "affinity", cost: kin.weight + 10 };
   return null;
 }
 
 // resolve a alocação de todos os inscritos.
 // retorna { assignment: Map(user_id -> {partyIndex, slotIndex, kind}), reserves: [user_id] }
+// conta quantas cópias de uma arma estão numa PT específica (na alocação atual).
+// assignment: Map(user_id -> {partyIndex, slotIndex}); precisa cruzar com signups.
+// como o solve não tem os signups por user_id aqui, contamos via um mapa auxiliar.
+function countWeaponInParty(assignment, weapon, partyIndex) {
+  let n = 0;
+  for (const [, loc] of assignment) {
+    if (loc && loc.partyIndex === partyIndex && loc._weapon && U(loc._weapon) === U(weapon)) n++;
+  }
+  return n;
+}
+
 function solve(signups, numParties = PARTIES.length) {
   // vagas disponíveis (menos as locked), em ordem: pt asc, vaga asc
   const cells = [];
@@ -136,7 +161,7 @@ function solve(signups, numParties = PARTIES.length) {
   // caller / locked: quem já está numa vaga locked fica fixo
   for (const su of signups) {
     if (su.party_index != null && PARTIES[su.party_index]?.slots[su.slot_index]?.locked) {
-      assignment.set(su.user_id, { partyIndex: su.party_index, slotIndex: su.slot_index, kind: "caller" });
+      assignment.set(su.user_id, { partyIndex: su.party_index, slotIndex: su.slot_index, kind: "caller", _weapon: su.weapon });
       usedUsers.add(su.user_id);
       usedCells.add(`${su.party_index}:${su.slot_index}`);
       weaponCount[U(su.weapon)] = (weaponCount[U(su.weapon)] || 0) + 1;
@@ -149,10 +174,13 @@ function solve(signups, numParties = PARTIES.length) {
   for (const pass of ["exact", "affinity"]) {
     for (const cell of cells) {
       if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
+      // contexto p/ regras dinâmicas: quantos Shadow Caller já estão na PT1
+      const scInPt1 = countWeaponInParty(assignment, "SHADOW CALLER", 0);
+      const ctx = { scInPt1 };
       let best = null;
       for (const su of signups) {
         if (usedUsers.has(su.user_id)) continue;
-        const sc = affinityScore(cell.slot, su.weapon);
+        const sc = affinityScore(cell.slot, su.weapon, ctx);
         if (!sc || sc.kind !== pass) continue;
         const cap = capFor(su.weapon, numParties);
         if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
@@ -160,7 +188,7 @@ function solve(signups, numParties = PARTIES.length) {
         if (!best || sc.cost < best.cost) best = { su, cost: sc.cost, kind: sc.kind };
       }
       if (best) {
-        assignment.set(best.su.user_id, { partyIndex: cell.p, slotIndex: cell.i, kind: best.kind });
+        assignment.set(best.su.user_id, { partyIndex: cell.p, slotIndex: cell.i, kind: best.kind, _weapon: best.su.weapon });
         usedUsers.add(best.su.user_id);
         usedCells.add(`${cell.p}:${cell.i}`);
         weaponCount[U(best.su.weapon)] = (weaponCount[U(best.su.weapon)] || 0) + 1;
