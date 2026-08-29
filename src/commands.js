@@ -34,6 +34,11 @@ function commandDefs() {
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),
     new SlashCommandBuilder().setName("cta_clean").setDescription("Esvazia uma PT inteira")
       .addStringOption(ctaOpt).addIntegerOption(ptOpt),
+    new SlashCommandBuilder().setName("cta_change_time").setDescription("Muda o horário de um CTA já criado")
+      .addStringOption(ctaOpt)
+      .addStringOption((o) => o.setName("novo").setDescription("Novo horário, ex 23:00").setRequired(true)),
+    new SlashCommandBuilder().setName("cta_finish").setDescription("Encerra um CTA (qualquer staff, qualquer caller)")
+      .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
     new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
     new SlashCommandBuilder().setName("attendance_monthly").setDescription("Relatório de presença — últimos 30 dias"),

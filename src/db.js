@@ -162,6 +162,10 @@ async function setStatus(eventId, status) {
   await pool.query(`UPDATE cta_events SET status=$1 WHERE id=$2`, [status, eventId]);
 }
 
+async function setTimeLabel(eventId, timeLabel) {
+  await pool.query(`UPDATE cta_events SET time_label=$1 WHERE id=$2`, [timeLabel, eventId]);
+}
+
 
 // CTAs abertos (pro autocomplete do slash command)
 async function getOpenEvents(guildId) {
@@ -310,6 +314,6 @@ module.exports = {
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
-  getSignups, getSignup, upsertSignup, deleteSignup, setStatus,
+  getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
 };

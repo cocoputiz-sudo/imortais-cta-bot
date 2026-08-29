@@ -180,6 +180,7 @@ function solve(signups, numParties = PARTIES.length) {
       let best = null;
       for (const su of signups) {
         if (usedUsers.has(su.user_id)) continue;
+        if (U(su.weapon) === "LOOTER") continue; // looter não compete por arma
         const sc = affinityScore(cell.slot, su.weapon, ctx);
         if (!sc || sc.kind !== pass) continue;
         const cap = capFor(su.weapon, numParties);
@@ -194,6 +195,23 @@ function solve(signups, numParties = PARTIES.length) {
         weaponCount[U(best.su.weapon)] = (weaponCount[U(best.su.weapon)] || 0) + 1;
       }
     }
+  }
+
+  // PASSE DO LOOTER: prioridade mínima. Preenche buracos que sobraram, FORA da PT1.
+  // Roda por último -> qualquer arma real já pegou sua vaga; o looter só tampa o resto.
+  const looters = signups.filter((su) => !usedUsers.has(su.user_id) && U(su.weapon) === "LOOTER");
+  for (const su of looters) {
+    let placed = false;
+    for (const cell of cells) {
+      if (cell.p === 0) continue;                 // nunca na PT1
+      if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
+      assignment.set(su.user_id, { partyIndex: cell.p, slotIndex: cell.i, kind: "looter", _weapon: "LOOTER" });
+      usedUsers.add(su.user_id);
+      usedCells.add(`${cell.p}:${cell.i}`);
+      placed = true;
+      break;
+    }
+    // se não achou buraco fora da PT1 -> fica de fora (reserva)
   }
 
   const reserves = signups.filter((su) => !usedUsers.has(su.user_id)).map((su) => su.user_id);

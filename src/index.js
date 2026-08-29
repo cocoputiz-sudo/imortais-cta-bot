@@ -28,7 +28,7 @@ const CFG = {
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
   prepVoiceId: process.env.PREP_VOICE_ID || null,   // 🚨 Preparação
   bombVoiceId: process.env.BOMB_VOICE_ID || null,   // 💣 Bomb Squad
-  presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20").split(","),
+  presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20,23:00").split(","),
 };
 
 const client = new Client({
@@ -126,6 +126,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (k === "calleryes") return onCallerYes(interaction);
       if (k === "callerno")  return onCallerNo(interaction);
       if (k === "presence") return onPresence(interaction);
+      if (k === "looter") return onLooter(interaction);
       if (k === "swapyes")  return onSwapYes(interaction);
       if (k === "swapno")   return onSwapNo(interaction);
       if (k === "leave")    return onLeave(interaction);
@@ -210,12 +211,13 @@ function buildRolePicker(eventId) {
   const roleBtns = Object.entries(ROLES).map(([name, meta]) => new ButtonBuilder()
     .setCustomId(`role|${eventId}|${name}`).setLabel(name).setEmoji(meta.emoji).setStyle(ButtonStyle.Secondary));
   const leave = new ButtonBuilder().setCustomId(`leave|${eventId}`).setLabel("Sair da função").setEmoji("🚪").setStyle(ButtonStyle.Danger);
+  const looter = new ButtonBuilder().setCustomId(`looter|${eventId}`).setLabel("Sou Looter").setEmoji("💰").setStyle(ButtonStyle.Secondary);
   const montar = new ButtonBuilder().setCustomId(`montar|${eventId}`).setLabel("Montar PT (caller)").setStyle(ButtonStyle.Success);
   const cancel = new ButtonBuilder().setCustomId(`cancel|${eventId}`).setLabel("Cancelar (caller)").setStyle(ButtonStyle.Danger);
   const fechar = new ButtonBuilder().setCustomId(`fechar|${eventId}`).setLabel("Fechar CTA (caller)").setStyle(ButtonStyle.Secondary);
   const rows = [];
   for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
-  rows.push(new ActionRowBuilder().addComponents(leave, montar));
+  rows.push(new ActionRowBuilder().addComponents(looter, leave, montar));
   rows.push(new ActionRowBuilder().addComponents(fechar, cancel));
   return rows;
 }
@@ -282,6 +284,25 @@ async function onPresence(interaction) {
     ? `✅ Fechado! **Party ${myLoc.partyIndex + 1}**, vaga ${myLoc.slotIndex + 1} (${weapon}).`
     : `📝 Anotado como **reserva** (${weapon}) — sem vaga nem por afinidade.`;
   await interaction.editReply({ content: msg, components: [] });
+}
+
+// entra como LOOTER: sem arma, prioridade mínima, preenche buraco fora da PT1
+async function onLooter(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open") return interaction.reply({ content: "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const username = interaction.member?.displayName || interaction.user.username;
+  await db.upsertSignup({
+    eventId, userId: interaction.user.id, username, weapon: "LOOTER", presence: "online",
+    partyIndex: null, slotIndex: null,
+  });
+  const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
+  const dest = myLoc ? `Party ${myLoc.partyIndex + 1} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
+  await logStaff(interaction.guild, `💰 **${username}** entrou como **Looter** → ${dest} · CTA ${ev.time_label}`);
+  await interaction.editReply({
+    content: myLoc ? `💰 Você entrou como **Looter** em ${dest}. Cede a vaga se uma arma titular pingar.` : `💰 Anotado como **Looter** na reserva (sem buraco livre agora).`,
+  });
 }
 
 // ==========================================================================
@@ -475,6 +496,33 @@ async function onSlash(interaction) {
   if (name === "cta_clean")  return slashClean(interaction, ev);
   if (name === "cta_move")   return slashMoveOrAdd(interaction, ev, false);
   if (name === "cta_add")    return slashMoveOrAdd(interaction, ev, true);
+  if (name === "cta_change_time") return slashChangeTime(interaction, ev);
+  if (name === "cta_finish") return slashFinish(interaction, ev);
+}
+
+// muda o horário de um CTA já criado (rótulo, lembretes, janela seguem o novo)
+async function slashChangeTime(interaction, ev) {
+  const novo = interaction.options.getString("novo").trim();
+  if (!/^\d{1,2}:\d{2}$/.test(novo))
+    return interaction.reply({ content: "Formato inválido. Use HH:MM, ex 23:00.", flags: MessageFlags.Ephemeral });
+  const antigo = ev.time_label;
+  await db.setTimeLabel(ev.id, novo);
+  // renomeia a thread se possível
+  if (ev.thread_id) {
+    const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
+    if (thread) await thread.setName(`Planilha CTA ${novo}`).catch(() => {});
+  }
+  await interaction.reply({ content: `🕐 CTA **${antigo} → ${novo}**. Lembretes e janela atualizados.` });
+  await logStaff(interaction.guild, `🕐 ${interaction.user} mudou horário do CTA **${antigo} → ${novo}**`);
+}
+
+// encerra um CTA — staff, qualquer caller (resolve o caso de outro caller ter aberto)
+async function slashFinish(interaction, ev) {
+  if (ev.status !== "open")
+    return interaction.reply({ content: `CTA ${ev.time_label} já está encerrado.`, flags: MessageFlags.Ephemeral });
+  await db.setStatus(ev.id, "closed");
+  await interaction.reply({ content: `🏁 **CTA ${ev.time_label} ENCERRADO** por staff — inscrições travadas.` });
+  await logStaff(interaction.guild, `🏁 ${interaction.user} encerrou o CTA **${ev.time_label} UTC** (via /cta_finish)`);
 }
 
 // gera o relatório de attendance e posta como HTML anexo
