@@ -512,7 +512,22 @@ async function slashChangeTime(interaction, ev) {
     const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
     if (thread) await thread.setName(`Planilha CTA ${novo}`).catch(() => {});
   }
-  await interaction.reply({ content: `🕐 CTA **${antigo} → ${novo}**. Lembretes e janela atualizados.` });
+  // atualiza o BOMB também (mensagem do ping + thread de contagem)
+  if (ev.bomb_ping_msg && CFG.bombPingChannelId) {
+    const ch = await client.channels.fetch(CFG.bombPingChannelId).catch(() => null);
+    if (ch) {
+      const pingMsg = await ch.messages.fetch(ev.bomb_ping_msg).catch(() => null);
+      if (pingMsg) {
+        const roleMention = CFG.bombRoleId ? `<@&${CFG.bombRoleId}>` : "@Bomb";
+        await pingMsg.edit({ content: `${roleMention} 💣 **BOMB** — Vai no CTA das **${novo} UTC** hoje?` }).catch(() => {});
+      }
+    }
+  }
+  if (ev.bomb_thread) {
+    const bt = await client.channels.fetch(ev.bomb_thread).catch(() => null);
+    if (bt) await bt.setName(`Bomb ${novo} — contagem`).catch(() => {});
+  }
+  await interaction.reply({ content: `🕐 CTA **${antigo} → ${novo}**. Planilha, bomb, lembretes e janela atualizados.` });
   await logStaff(interaction.guild, `🕐 ${interaction.user} mudou horário do CTA **${antigo} → ${novo}**`);
 }
 
@@ -740,6 +755,7 @@ async function postBombPing(guild, ev, time) {
     content: `${roleMention} 💣 **BOMB** — Vai no CTA das **${time} UTC** hoje?`,
     components: [row],
   });
+  await db.setBombPingMsg(ev.id, msg.id); // guarda pra poder editar se o horário mudar
   // thread de contagem pro líder do bomb
   const thread = await msg.startThread({ name: `Bomb ${time} — contagem`, autoArchiveDuration: 1440 }).catch(() => null);
   if (thread) {

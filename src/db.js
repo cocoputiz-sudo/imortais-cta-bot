@@ -25,6 +25,7 @@ async function init() {
       bomb_thread TEXT,                             -- thread de contagem do bomb
       bomb_comp   TEXT,                             -- 'invi'|'melee'|'kite' (fase B)
       bomb_roster TEXT,                             -- ids das msgs da planilha do bomb
+      bomb_ping_msg TEXT,                           -- id da msg "Vai no CTA?" no bomb-ping
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -217,6 +218,9 @@ async function moveSignupToSlot(eventId, userId, partyIndex, slotIndex) {
 async function setBombThread(eventId, threadId) {
   await pool.query(`UPDATE cta_events SET bomb_thread=$1 WHERE id=$2`, [threadId, eventId]);
 }
+async function setBombPingMsg(eventId, msgId) {
+  await pool.query(`UPDATE cta_events SET bomb_ping_msg=$1 WHERE id=$2`, [msgId, eventId]);
+}
 async function upsertBombConfirm(eventId, userId, username, coming) {
   await pool.query(
     `INSERT INTO bomb_confirms (event_id, user_id, username, coming)
@@ -310,7 +314,7 @@ async function getEventsInRange(guildId, startUTC, endUTC) {
 
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent,
-  setBombThread, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
+  setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
