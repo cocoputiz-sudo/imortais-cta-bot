@@ -29,6 +29,15 @@ async function init() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS seasons (
+      id          BIGSERIAL PRIMARY KEY,
+      guild_id    TEXT NOT NULL,
+      number      INT NOT NULL,
+      started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ended_at    TIMESTAMPTZ,                        -- null = temporada aberta
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS voice_presence (
       id          BIGSERIAL PRIMARY KEY,
       guild_id    TEXT NOT NULL,
@@ -320,11 +329,37 @@ async function getEventsInRange(guildId, startUTC, endUTC) {
   return rows;
 }
 
+// ---- TEMPORADAS ----
+// temporada atual (aberta) do servidor, ou null se em off-season/nenhuma
+async function getCurrentSeason(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM seasons WHERE guild_id=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+    [guildId]
+  );
+  return rows[0];
+}
+// inicia uma temporada: fecha a atual (se houver) e cria a nova
+async function startSeason(guildId, number) {
+  await pool.query(`UPDATE seasons SET ended_at=now() WHERE guild_id=$1 AND ended_at IS NULL`, [guildId]);
+  const { rows } = await pool.query(
+    `INSERT INTO seasons (guild_id, number) VALUES ($1,$2) RETURNING *`, [guildId, number]
+  );
+  return rows[0];
+}
+// fecha a temporada atual
+async function finishSeason(guildId) {
+  const { rows } = await pool.query(
+    `UPDATE seasons SET ended_at=now() WHERE guild_id=$1 AND ended_at IS NULL RETURNING *`, [guildId]
+  );
+  return rows[0];
+}
+
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,
+  getCurrentSeason, startSeason, finishSeason,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,

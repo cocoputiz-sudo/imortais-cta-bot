@@ -612,10 +612,19 @@ async function onCallerNo(interaction) {
 
 // ==================  SLASH COMMANDS  ======================================
 async function onSlash(interaction) {
+  const name = interaction.commandName;
+
+  // comandos ABERTOS a qualquer Imortal (rank) — antes da checagem de staff
+  if (name === "cta_rank")    return slashRank(interaction, false);
+  if (name === "cta_meurank") return slashRank(interaction, true);
+
+  // daqui pra baixo, só Mestre de Guerra
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
-  const name = interaction.commandName;
+  // temporadas (staff)
+  if (name === "cta_start_temporada")  return slashStartSeason(interaction);
+  if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
 
   // attendance não depende de um CTA específico — trata antes
   if (name === "attendance_daily")   return slashAttendance(interaction, 1, "hoje");
@@ -693,6 +702,66 @@ async function slashAttendance(interaction, dias, rotulo) {
     content: `📊 **Attendance — ${rotulo}** (${report.ctaCount} CTAs)\n\n**Top 5:**\n${top || "(sem dados)"}\n\nRelatório completo no anexo 👇`,
     files: [file],
   });
+}
+
+// ==================  TEMPORADAS + RANK  ===================================
+async function slashStartSeason(interaction) {
+  const numero = interaction.options.getInteger("numero");
+  const s = await db.startSeason(interaction.guildId, numero);
+  await interaction.reply({ content: `🏁 **Temporada ${numero} iniciada!** A contagem de presença começa agora. Boa sorte, IMORTAIS! ⚔️` });
+  await logStaff(interaction.guild, `🏁 ${interaction.user} iniciou a **Temporada ${numero}**`);
+}
+
+async function slashFinishSeason(interaction) {
+  const s = await db.finishSeason(interaction.guildId);
+  if (!s) return interaction.reply({ content: "Não há temporada aberta pra encerrar.", flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: `🔒 **Temporada ${s.number} encerrada.** O placar final está congelado — rode /cta_rank pra ver o resultado.` });
+  await logStaff(interaction.guild, `🔒 ${interaction.user} encerrou a **Temporada ${s.number}**`);
+}
+
+// rank: pessoal (meu=true, efêmero) ou geral (meu=false, embed público)
+async function slashRank(interaction, meu) {
+  await interaction.deferReply({ flags: meu ? MessageFlags.Ephemeral : undefined });
+  const season = await db.getCurrentSeason(interaction.guildId);
+  if (!season)
+    return interaction.editReply({ content: "Nenhuma temporada ativa ainda. Peça a um Mestre de Guerra pra iniciar com **/cta_start_temporada**." });
+
+  const start = new Date(season.started_at);
+  const end = new Date();
+  const report = await attendance.buildReport(interaction.guildId, start, end);
+  const rows = report.rows.filter((r) => r.integral + r.parcial + r.rapida > 0 || r.fantasma > 0); // só quem participou
+
+  if (meu) {
+    // rank pessoal
+    const idx = rows.findIndex((r) => r.user_id === interaction.user.id);
+    if (idx === -1)
+      return interaction.editReply({ content: `📊 **Teu rank — Temporada ${season.number}**\n\nVocê ainda não tem presença registrada nesta temporada. Aparece nos CTAs! ⚔️` });
+    const r = rows[idx];
+    const nextCat = r.cat === "Regular" ? "Pilar" : r.cat === "Intermitente" ? "Regular" : null;
+    let dica = "";
+    if (nextCat === "Pilar") { const falta = Math.ceil(report.ctaCount * 0.7) - (r.integral + r.parcial); if (falta > 0) dica = `\n\nFaltam **${falta}** presença(s) pra virar **Pilar** 💪`; }
+    else if (nextCat === "Regular") { const falta = Math.ceil(report.ctaCount * 0.4) - (r.integral + r.parcial); if (falta > 0) dica = `\n\nFaltam **${falta}** presença(s) pra virar **Regular** 💪`; }
+    await interaction.editReply({
+      content: `📊 **Teu rank — Temporada ${season.number}**\n\n` +
+        `**Posição:** ${idx + 1}º de ${rows.length}\n` +
+        `**Score:** ${r.score} pts\n` +
+        `**Presença:** ${r.integral + r.parcial}/${report.ctaCount} CTAs\n` +
+        `   • ${r.integral} integrais, ${r.parcial} parciais${r.rapida ? `, ${r.rapida} rápidas` : ""}\n` +
+        `${r.fantasma ? `   • ⚠️ ${r.fantasma} fantasma(s) (pingou e não veio)\n` : ""}` +
+        `**Categoria:** ${r.cat}${dica}`,
+    });
+    return;
+  }
+
+  // rank geral (embed, quebra em 2 se precisar)
+  const linhas = rows.map((r, i) => `\`${String(i + 1).padStart(2)}\` **${r.username}** · ${r.score} pts · ${r.integral + r.parcial}/${report.ctaCount}`);
+  const header = `🏆 **Placar — Temporada ${season.number}** (${report.ctaCount} CTAs)\n`;
+  // divide em blocos de ~25 linhas pra caber
+  const chunks = [];
+  for (let i = 0; i < linhas.length; i += 25) chunks.push(linhas.slice(i, i + 25).join("\n"));
+  if (!chunks.length) return interaction.editReply({ content: header + "\n_(ninguém pontuou ainda nesta temporada)_" });
+  await interaction.editReply({ content: header + "\n" + chunks[0] });
+  for (let i = 1; i < chunks.length; i++) await interaction.followUp({ content: chunks[i] });
 }
 
 // gera o HTML do relatório

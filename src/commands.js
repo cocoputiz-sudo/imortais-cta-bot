@@ -42,6 +42,11 @@ function commandDefs() {
     new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
     new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
     new SlashCommandBuilder().setName("attendance_monthly").setDescription("Relatório de presença — últimos 30 dias"),
+    new SlashCommandBuilder().setName("cta_start_temporada").setDescription("Inicia uma temporada (Mestre de Guerra)")
+      .addIntegerOption((o) => o.setName("numero").setDescription("Número da temporada, ex: 34").setRequired(true).setMinValue(1).setMaxValue(999)),
+    new SlashCommandBuilder().setName("cta_finish_temporada").setDescription("Encerra a temporada atual (Mestre de Guerra)"),
+    new SlashCommandBuilder().setName("cta_rank").setDescription("Placar de presença da temporada atual"),
+    new SlashCommandBuilder().setName("cta_meurank").setDescription("Tua pontuação de presença na temporada atual"),
   ].map((c) => c.toJSON());
 }
 
