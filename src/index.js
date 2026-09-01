@@ -28,6 +28,7 @@ const CFG = {
   bombRoleId: process.env.BOMB_ROLE_ID || null,
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
   prepVoiceId: process.env.PREP_VOICE_ID || null,   // 🚨 Preparação
+  contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640", // ping-de-conteúdo
   bombVoiceId: process.env.BOMB_VOICE_ID || null,   // 💣 Bomb Squad
   presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20,23:00").split(","),
 };
@@ -296,6 +297,15 @@ async function onTimeConfirm(interaction) {
     await db.setRosterMsg(ev.id, ids.join(","));
     created.push(`• **${time}** → ${thread}`);
     await logStaff(interaction.guild, `🆕 CTA **${time} UTC** criado por <@${callerId}>.`);
+    // aviso no ping-de-conteúdo: saiu CTA, com link direto pra thread
+    if (CFG.contentPingChannelId) {
+      const cch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
+      if (cch) {
+        const link = `https://discord.com/channels/${interaction.guildId}/${thread.id}`;
+        const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+        await cch.send({ content: `${mention} 🗡️ **Saiu CTA — ${time} UTC!** Loga e pinga tua função.\n👉 ${link}`, ...allow }).catch(() => {});
+      }
+    }
     await postBombPing(interaction.guild, ev, time); // aviso no bomb-ping
     await new Promise((r) => setTimeout(r, 1200)); // respiro anti rate-limit
   }
@@ -1252,6 +1262,25 @@ async function logStaff(guild, text) {
 }
 
 // ======================  LEMBRETES (verificador a cada minuto)  =============
+// posta um aviso no canal principal do CTA (menção de cargo pinga de verdade lá)
+async function pingMainChannel(ev, text) {
+  if (!ev.channel_id) return;
+  const ch = await client.channels.fetch(ev.channel_id).catch(() => null);
+  if (!ch) return;
+  const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+  await ch.send({ content: text, ...allow }).catch(() => {});
+}
+
+// posta no canal ping-de-conteúdo com LINK clicável pra thread da planilha
+async function pingContentChannel(ev, text) {
+  if (!CFG.contentPingChannelId || !ev.thread_id || !ev.guild_id) return;
+  const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
+  if (!ch) return;
+  const link = `https://discord.com/channels/${ev.guild_id}/${ev.thread_id}`;
+  const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+  await ch.send({ content: `${text}\n👉 ${link}`, ...allow }).catch(() => {});
+}
+
 async function checkReminders() {
   try {
     const due = await db.getDueReminders(new Date());
@@ -1259,13 +1288,19 @@ async function checkReminders() {
       const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
       if (!thread) continue;
       const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+      const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
       const now = Date.now();
       if (!ev.sent_30 && ev.remind_30 && new Date(ev.remind_30).getTime() <= now) {
-        await thread.send({ content: `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 minutos!** Prepara o set e loga.` }).catch(()=>{});
+        await thread.send({ content: `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 minutos!** Prepara o set e loga.`, ...allow }).catch(()=>{});
+        // reforço no canal principal (na thread, menção de cargo repetida não re-pinga)
+        await pingMainChannel(ev, `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 min!** Loga e entra na thread pra pingar tua função.`);
+        await pingContentChannel(ev, `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 min!** Bora pro conteúdo.`);
         await db.markReminderSent(ev.id, 30);
       }
       if (!ev.sent_10 && ev.remind_10 && new Date(ev.remind_10).getTime() <= now) {
-        await thread.send({ content: `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 minutos!** Entra na call AGORA.` }).catch(()=>{});
+        await thread.send({ content: `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 minutos!** Entra na call AGORA.`, ...allow }).catch(()=>{});
+        await pingMainChannel(ev, `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 min!** Entra na call AGORA.`);
+        await pingContentChannel(ev, `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 min!** Entra na call AGORA.`);
         await db.markReminderSent(ev.id, 10);
       }
     }
