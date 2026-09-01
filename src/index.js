@@ -10,6 +10,7 @@ const {
   Client, GatewayIntentBits, Partials, Events,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, ChannelType, MessageFlags,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require("discord.js");
 
 const db = require("./db");
@@ -53,13 +54,105 @@ function timeToTodayUTC(label) {
 client.on(Events.MessageCreate, async (msg) => {
   try {
     if (msg.author.bot) return;
-    if (msg.channelId !== CFG.ctaChannelId) return;
-    await msg.reply({
-      content: `🗡️ **CTA detectado.** ${msg.author}, escolhe os horários (UTC / horário do jogo):`,
-      components: buildTimePicker(new Set(), msg.author.id),
-    });
+    if (msg.channelId === CFG.ctaChannelId) {
+      await msg.reply({
+        content: `🗡️ **CTA detectado.** ${msg.author}, escolhe os horários (UTC / horário do jogo):`,
+        components: buildTimePicker(new Set(), msg.author.id),
+      });
+      return;
+    }
+    // reconhecimento de texto DENTRO das threads de planilha de CTA
+    if (msg.channel?.isThread?.()) await onThreadText(msg);
   } catch (e) { console.error("trigger:", e); }
 });
+
+// mapa de palavras -> papel
+const ROLE_WORDS = {
+  tank: "Tank",
+  sup: "Support", suporte: "Support", support: "Support",
+  dps: "Melee", melee: "Melee",
+  range: "Ranged", ranged: "Ranged",
+  heal: "Healer", healer: "Healer", cura: "Healer",
+  loot: "Looter", looter: "Looter",
+};
+
+// tira acento e normaliza pra comparar
+function norm(s) {
+  return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+// interpreta uma mensagem curta na thread como inscrição (papel ou arma)
+async function onThreadText(msg) {
+  const text = norm(msg.content);
+  if (!text || text.length > 40) return;          // só mensagens curtas
+  const words = text.split(/\s+/);
+  if (words.length > 4) return;                     // ignora frases longas (conversa)
+
+  // acha o CTA daquela thread
+  const ev = await db.getEventByThread(msg.channelId);
+  if (!ev || ev.status !== "open") return;
+
+  // 1) tenta casar NOME DE ARMA (a mensagem inteira ou parte dela)
+  const weapons = Object.keys(WEAPONS);
+  let matchedWeapon = null;
+  for (const w of weapons) {
+    if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
+  }
+  // "x healer" / "healer queda santa": última palavra pode ser arma
+  if (matchedWeapon) return startSignupFromText(msg, ev, null, matchedWeapon);
+
+  // 2) tenta casar PAPEL
+  for (const word of words) {
+    if (ROLE_WORDS[word]) return startSignupFromText(msg, ev, ROLE_WORDS[word], null);
+  }
+  // não reconheceu -> ignora silenciosamente (era conversa normal)
+}
+
+// dispara o fluxo de inscrição a partir do texto reconhecido
+async function startSignupFromText(msg, ev, role, weapon) {
+  // LOOTER por texto
+  if (role === "Looter") {
+    const fakeInteraction = null; // looter via texto: grava direto
+    const username = msg.member?.displayName || msg.author.username;
+    await db.upsertSignup({ eventId: ev.id, userId: msg.author.id, username, weapon: "LOOTER", presence: "online", partyIndex: null, slotIndex: null, ip: null });
+    await applyReallocationMsg(ev, msg.guild);
+    await msg.reply({ content: `💰 ${msg.author}, você entrou como **Looter**.` }).catch(() => {});
+    return;
+  }
+  // se veio ARMA direto
+  if (weapon) {
+    const role2 = WEAPONS[weapon]?.role;
+    const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
+    if (IP_WEAPONS.includes(weapon.toUpperCase())) {
+      // precisa do IP -> manda a pessoa usar o botão (modal não abre a partir de msg de texto)
+      await msg.reply({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
+      return;
+    }
+    // pergunta presença
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+    );
+    await msg.reply({ content: `${msg.author}, **${weapon}** — e aí, presença?`, components: [row] }).catch(() => {});
+    return;
+  }
+  // se veio só PAPEL -> abre menu de armas daquele papel
+  const armas = WEAPON_CATALOG[role] || [];
+  if (!armas.length) return;
+  const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}`)
+    .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
+  await msg.reply({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+}
+
+// versão do applyReallocation chamada a partir de uma mensagem (sem interaction)
+async function applyReallocationMsg(ev, guild) {
+  const signups = await db.getSignups(ev.id);
+  const result = reallocate(signups);
+  for (const r of result) {
+    if (r.moved) await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
+  }
+  refreshRoster(ev);
+}
 
 function buildTimePicker(selected, callerId) {
   const btns = CFG.presetTimes.map((t) => new ButtonBuilder()
@@ -136,6 +229,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("weapon|"))
       return onWeaponPick(interaction);
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("ipmodal|"))
+      return onIpModal(interaction);
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("bombweapon|"))
       return onBombWeaponPick(interaction);
   } catch (e) {
@@ -239,6 +334,16 @@ async function onRolePick(interaction) {
 async function onWeaponPick(interaction) {
   const [, eventId] = interaction.customId.split("|");
   const weapon = interaction.values[0];
+  // Ursinas e Cravadas (vagas únicas): pede o IP antes, pra desempate
+  const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
+  if (IP_WEAPONS.includes(weapon.toUpperCase())) {
+    const modal = new ModalBuilder().setCustomId(`ipmodal|${eventId}|${encodeURIComponent(weapon)}`)
+      .setTitle(`IP da tua ${weapon}`);
+    const input = new TextInputBuilder().setCustomId("ip").setLabel("Qual teu IP? (ex: 1450)")
+      .setStyle(TextInputStyle.Short).setRequired(true).setMinLength(3).setMaxLength(5);
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return interaction.showModal(modal);
+  }
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
@@ -246,8 +351,24 @@ async function onWeaponPick(interaction) {
   await interaction.update({ content: `**${weapon}** selecionada. E aí:`, components: [row] });
 }
 
+// recebe o IP digitado (Ursinas/Cravadas) -> mostra botões de presença carregando o IP
+async function onIpModal(interaction) {
+  const [, eventId, wEnc] = interaction.customId.split("|");
+  const weapon = decodeURIComponent(wEnc);
+  const raw = interaction.fields.getTextInputValue("ip").replace(/\D/g, ""); // só dígitos
+  const ip = parseInt(raw, 10);
+  if (!ip || ip < 100 || ip > 2000)
+    return interaction.reply({ content: "IP inválido. Digita só o número, ex: 1450.", flags: MessageFlags.Ephemeral });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}|${ip}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}|${ip}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+  );
+  await interaction.reply({ content: `**${weapon}** (IP ${ip}) selecionada. E aí:`, components: [row], flags: MessageFlags.Ephemeral });
+}
+
 async function onPresence(interaction) {
-  const [, eventId, presence, weapon] = interaction.customId.split("|");
+  const [, eventId, presence, weapon, ipStr] = interaction.customId.split("|");
+  const ip = ipStr ? parseInt(ipStr, 10) : null;
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
@@ -257,7 +378,7 @@ async function onPresence(interaction) {
   // grava a inscrição (sem vaga) e realoca TODO MUNDO de forma ótima
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
-    partyIndex: null, slotIndex: null,
+    partyIndex: null, slotIndex: null, ip,
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
 
@@ -326,10 +447,23 @@ async function applyReallocation(ev, guild, focusUserId) {
       await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
       // notifica quem foi movido (menos quem acabou de entrar — esse recebe a confirmação normal)
       if (r.user_id !== focusUserId) {
-        const to = r.partyIndex != null
-          ? `**Party ${r.partyIndex + 1}**, vaga ${r.slotIndex + 1} (${r.weapon})`
-          : `**reserva**`;
-        scheduleNotify(ev, guild, r.user_id, `🔄 <@${r.user_id}> você foi remanejado para ${to}.`);
+        const isUnique = ["URSINAS", "CRAVADAS"].includes((r.weapon || "").toUpperCase());
+        if (r.partyIndex == null && isUnique) {
+          // perdeu a vaga única (Ursinas/Cravadas) por IP menor -> alerta especial c/ troca
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`role|${ev.id}|Melee`).setLabel("Trocar pra outra Melee").setStyle(ButtonStyle.Primary),
+          );
+          const thread = ev.thread_id ? await client.channels.fetch(ev.thread_id).catch(() => null) : null;
+          if (thread) await thread.send({
+            content: `⚠️ <@${r.user_id}> só existe **1 vaga de ${r.weapon}** e alguém com IP maior assumiu. Quer entrar de outra melee?`,
+            components: [row],
+          }).catch(() => {});
+        } else {
+          const to = r.partyIndex != null
+            ? `**Party ${r.partyIndex + 1}**, vaga ${r.slotIndex + 1} (${r.weapon})`
+            : `**reserva**`;
+          scheduleNotify(ev, guild, r.user_id, `🔄 <@${r.user_id}> você foi remanejado para ${to}.`);
+        }
       }
     }
   }

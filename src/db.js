@@ -73,6 +73,7 @@ async function init() {
       presence    TEXT NOT NULL,                     -- online | later
       party_index INT,                               -- null = reserva
       slot_index  INT,
+      ip          INT,                                -- IP (só p/ Ursinas/Cravadas, desempate vaga única)
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (event_id, user_id)                     -- 1 inscricao por pessoa por CTA
     );
@@ -120,6 +121,12 @@ async function getEvent(eventId) {
   return rows[0];
 }
 
+// acha o CTA pela thread da planilha (pro reconhecimento de texto)
+async function getEventByThread(threadId) {
+  const { rows } = await pool.query(`SELECT * FROM cta_events WHERE thread_id=$1 LIMIT 1`, [threadId]);
+  return rows[0];
+}
+
 async function getSignups(eventId) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_signups WHERE event_id=$1 ORDER BY created_at ASC`,
@@ -139,14 +146,15 @@ async function getSignup(eventId, userId) {
 async function upsertSignup(row) {
   const { rows } = await pool.query(
     `INSERT INTO cta_signups
-       (event_id, user_id, username, weapon, presence, party_index, slot_index)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+       (event_id, user_id, username, weapon, presence, party_index, slot_index, ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      ON CONFLICT (event_id, user_id) DO UPDATE SET
        weapon=EXCLUDED.weapon, presence=EXCLUDED.presence,
        party_index=EXCLUDED.party_index, slot_index=EXCLUDED.slot_index,
+       ip=COALESCE(EXCLUDED.ip, cta_signups.ip),
        created_at=now()
      RETURNING *`,
-    [row.eventId, row.userId, row.username, row.weapon, row.presence, row.partyIndex, row.slotIndex]
+    [row.eventId, row.userId, row.username, row.weapon, row.presence, row.partyIndex, row.slotIndex, row.ip ?? null]
   );
   return rows[0];
 }
@@ -313,7 +321,7 @@ async function getEventsInRange(guildId, startUTC, endUTC) {
 }
 
 module.exports = {
-  pool, init, createEvent, setThread, setRosterMsg, getEvent,
+  pool, init, createEvent, setThread, setRosterMsg, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,

@@ -185,11 +185,13 @@ function solve(signups, numParties = PARTIES.length) {
         if (!sc || sc.kind !== pass) continue;
         const cap = capFor(su.weapon, numParties);
         if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
-        // desempate: menor custo; PT1 já vem antes pela ordem das cells
-        if (!best || sc.cost < best.cost) best = { su, cost: sc.cost, kind: sc.kind };
+        // desempate: menor custo. Entre iguais, maior IP ganha (Ursinas/Cravadas).
+        if (!best || sc.cost < best.cost ||
+            (sc.cost === best.cost && (su.ip || 0) > (best.su.ip || 0)))
+          best = { su, cost: sc.cost, kind: sc.kind };
       }
       if (best) {
-        assignment.set(best.su.user_id, { partyIndex: cell.p, slotIndex: cell.i, kind: best.kind, _weapon: best.su.weapon });
+        assignment.set(best.su.user_id, { partyIndex: cell.p, slotIndex: cell.i, kind: best.kind, _weapon: best.su.weapon, _ip: best.su.ip });
         usedUsers.add(best.su.user_id);
         usedCells.add(`${cell.p}:${cell.i}`);
         weaponCount[U(best.su.weapon)] = (weaponCount[U(best.su.weapon)] || 0) + 1;
@@ -268,7 +270,8 @@ function renderRoster(signups, numParties = PARTIES.length) {
       if (su) {
         filled++;
         const flag = su.presence === "online" ? "🟢" : "🕐";
-        lines.push(`\`${n}\` ${su.weapon} — **${su.username}** ${flag}`);
+        const ipTag = (su.ip && ["URSINAS", "CRAVADAS"].includes((su.weapon || "").toUpperCase())) ? ` \`IP ${su.ip}\`` : "";
+        lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${ipTag} ${flag}`);
       } else {
         lines.push(`\`${n}\` ${shortLabel(slot)} — *vazio*`);
       }
