@@ -79,6 +79,7 @@ async function processEvent(event) {
     const pres = presenceInWindow(o.prepSessions, win);
     const level = classify(o.pingou, pres, win);
     const bombPres = presenceInWindow(o.bombSessions, win);
+    const fmt = (d) => d ? new Date(d).toISOString().slice(11, 16) : null; // HH:MM UTC
     result.set(uid, {
       username: o.username,
       level,                              // INTEGRAL|PARCIAL|MENCAO|FANTASMA|null
@@ -86,6 +87,9 @@ async function processEvent(event) {
       pingou: o.pingou,
       bomb: o.bombConfirmou || bombPres.minutes > 0, // confirmou OU esteve na bomb squad
       bombMinutes: bombPres.minutes,
+      // detalhe pro drill-down:
+      prepIn: fmt(pres.firstJoin), prepOut: fmt(pres.lastLeave), prepMin: pres.minutes,
+      bombIn: fmt(bombPres.firstJoin), bombOut: fmt(bombPres.lastLeave), bombMin: bombPres.minutes,
     });
   }
   return result;
@@ -98,7 +102,7 @@ async function buildReport(guildId, startUTC, endUTC) {
 
   const ensure = (uid, uname) => {
     if (!perUser.has(uid))
-      perUser.set(uid, { username: uname, integral: 0, parcial: 0, mencao: 0, fantasma: 0, bomb: 0, ctasPossiveis: 0, minutos: 0 });
+      perUser.set(uid, { username: uname, integral: 0, parcial: 0, mencao: 0, fantasma: 0, bomb: 0, ctasPossiveis: 0, minutos: 0, detail: {} });
     const o = perUser.get(uid); if (uname) o.username = uname; return o;
   };
 
@@ -106,6 +110,7 @@ async function buildReport(guildId, startUTC, endUTC) {
   const peak = { prep: 0, bomb: 0 };
   for (const ev of events) {
     ctaCount++;
+    const dateKey = new Date(ev.created_at).toISOString().slice(0, 10); // YYYY-MM-DD
     const res = await processEvent(ev);
     for (const [uid, r] of res) {
       const o = ensure(uid, r.username);
@@ -115,6 +120,14 @@ async function buildReport(guildId, startUTC, endUTC) {
       else if (r.level === "FANTASMA") o.fantasma++;
       if (r.bomb) o.bomb++;
       o.minutos += r.minutes;
+      // guarda o detalhe por data -> CTA (só se teve alguma presença ou classificação)
+      if (r.level) {
+        (o.detail[dateKey] ||= []).push({
+          cta: ev.time_label, level: r.level,
+          prepIn: r.prepIn, prepOut: r.prepOut, prepMin: r.prepMin,
+          bombIn: r.bombIn, bombOut: r.bombOut, bombMin: r.bombMin,
+        });
+      }
     }
   }
 

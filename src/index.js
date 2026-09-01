@@ -698,10 +698,37 @@ async function slashAttendance(interaction, dias, rotulo) {
 // gera o HTML do relatório
 function renderAttendanceHTML(report, rotulo, start, end) {
   const catColor = { "Pilar": "#c9a227", "Regular": "#3f7a4d", "Intermitente": "#6ba7c4", "Fantasma": "#7a2222", "Ausente": "#555" };
+  const levelLabel = { INTEGRAL: "Integral", PARCIAL: "Parcial", MENCAO: "Menção", FANTASMA: "Fantasma" };
+  const levelColor = { INTEGRAL: "#c9a227", PARCIAL: "#6ba7c4", MENCAO: "#9aa0ab", FANTASMA: "#e0a0a0" };
+
+  // monta o detalhe (nível 1-3) embutido de cada pessoa
+  const detailHtml = (r) => {
+    const dates = Object.keys(r.detail || {}).sort();
+    if (!dates.length) return `<div class="empty">Sem presença registrada no período.</div>`;
+    return dates.map((d) => {
+      const ctas = r.detail[d];
+      const ctaBlocks = ctas.map((c) => {
+        const prep = c.prepMin ? `Preparação: ${c.prepIn}–${c.prepOut} (${c.prepMin} min)` : "Preparação: —";
+        const bomb = c.bombMin ? `Bomb Squad: ${c.bombIn}–${c.bombOut} (${c.bombMin} min)` : "";
+        const lvl = `<span class="lvl" style="color:${levelColor[c.level] || "#9aa0ab"}">${levelLabel[c.level] || c.level}</span>`;
+        return `<div class="ctarow">
+          <button class="ctabtn" onclick="tog(this)">🕐 CTA ${c.cta} — ${lvl}</button>
+          <div class="ctadetail">
+            <div>${prep}</div>${bomb ? `<div>${bomb}</div>` : ""}
+          </div>
+        </div>`;
+      }).join("");
+      return `<div class="daterow">
+        <button class="datebtn" onclick="tog(this)">📅 ${d}</button>
+        <div class="datedetail">${ctaBlocks}</div>
+      </div>`;
+    }).join("");
+  };
+
   const rowsHtml = report.rows.map((r, i) => `
-    <tr>
+    <tr class="prow" onclick="togRow(this)">
       <td class="rank">${i + 1}</td>
-      <td class="name">${escapeHtml(r.username)}</td>
+      <td class="name">▸ ${escapeHtml(r.username)}</td>
       <td><span class="cat" style="background:${catColor[r.cat] || "#555"}">${r.cat}</span></td>
       <td class="num gold">${r.integral}</td>
       <td class="num">${r.parcial}</td>
@@ -709,7 +736,8 @@ function renderAttendanceHTML(report, rotulo, start, end) {
       <td class="num red">${r.fantasma}</td>
       <td class="num ice">${r.bomb}</td>
       <td class="num score">${r.score}</td>
-    </tr>`).join("");
+    </tr>
+    <tr class="drow"><td colspan="9"><div class="drill">${detailHtml(r)}</div></td></tr>`).join("");
 
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Attendance IMORTAIS</title>
@@ -728,18 +756,35 @@ th.l,td.name{text-align:left}
 td{padding:9px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,.04);font-size:14px}
 .rank{color:var(--ink-dim);font-family:"DIN Condensed",sans-serif;width:40px}
 .name{font-weight:600;padding-left:14px}
+.prow{cursor:pointer;transition:background .15s}
+.prow:hover{background:rgba(201,162,39,.06)}
 .cat{font-family:"DIN Condensed","Arial Narrow",sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#0a0c10;padding:2px 9px;border-radius:2px;font-weight:700}
 .num{font-family:"DIN Condensed",sans-serif;font-size:16px}
 .gold{color:var(--gold)}.ice{color:var(--ice)}.red{color:#e0a0a0}.dim{color:var(--ink-dim)}
 .score{color:#fff;font-weight:700}
+.drow{display:none}
+.drow.open{display:table-row}
+.drow td{padding:0;background:rgba(0,0,0,.25)}
+.drill{padding:8px 8px 8px 40px}
+.daterow,.ctarow{margin:4px 0}
+.datebtn,.ctabtn{background:none;border:1px solid var(--line);color:var(--ink);font-family:inherit;font-size:14px;padding:6px 12px;border-radius:3px;cursor:pointer;text-align:left}
+.datebtn:hover,.ctabtn:hover{border-color:var(--gold)}
+.datedetail,.ctadetail{display:none;padding:6px 0 6px 24px}
+.datedetail.open,.ctadetail.open{display:block}
+.ctabtn{font-size:13px;color:var(--ink-dim)}
+.ctadetail{font-size:13px;color:var(--ink-dim);line-height:1.6}
+.lvl{font-weight:700}
+.empty{color:var(--ink-dim);font-style:italic;padding:8px 0}
 .legend{margin-top:24px;color:var(--ink-dim);font-size:13px;line-height:1.7}
 .legend b{color:var(--ink)}
+.hint{text-align:center;color:var(--ice);font-size:13px;margin-bottom:18px;font-style:italic}
 footer{text-align:center;margin-top:36px;color:var(--ink-dim);font-size:12px;font-style:italic}
 </style></head><body><div class="wrap">
 <div class="eyebrow">Imortais · Call to Arms</div>
 <h1>Attendance</h1>
 <p class="sub">Presença nos CTAs — ${report.ctaCount} CTAs no período</p>
 <p class="meta">${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)} · ${rotulo}</p>
+<p class="hint">👆 Clica num nome pra ver os dias · clica no dia pra ver os CTAs · clica no CTA pra ver horário e tempo</p>
 <table>
 <thead><tr>
 <th>#</th><th class="l">Jogador</th><th>Categoria</th><th>Integral</th><th>Parcial</th><th>Menção</th><th>Fantasma</th><th>Bomb</th><th>Score</th>
@@ -751,7 +796,12 @@ footer{text-align:center;margin-top:36px;color:var(--ink-dim);font-size:12px;fon
 <b>Score:</b> Integral×3 + Parcial×1 − Fantasma×1. <b>Categorias:</b> Pilar (≥70% integral) · Regular (≥40% presente) · Intermitente · Ausente · Fantasma.
 </div>
 <footer>Gerado pelo bot · Imortais CTA</footer>
-</div></body></html>`;
+</div>
+<script>
+function togRow(tr){ var d=tr.nextElementSibling; if(d&&d.classList.contains("drow")) d.classList.toggle("open"); }
+function tog(btn){ var d=btn.nextElementSibling; if(d) d.classList.toggle("open"); event.stopPropagation(); }
+</script>
+</body></html>`;
 }
 
 function escapeHtml(s) {
