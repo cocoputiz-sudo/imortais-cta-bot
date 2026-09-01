@@ -698,8 +698,8 @@ async function slashAttendance(interaction, dias, rotulo) {
 // gera o HTML do relatório
 function renderAttendanceHTML(report, rotulo, start, end) {
   const catColor = { "Pilar": "#c9a227", "Regular": "#3f7a4d", "Intermitente": "#6ba7c4", "Fantasma": "#7a2222", "Ausente": "#555" };
-  const levelLabel = { INTEGRAL: "Integral", PARCIAL: "Parcial", MENCAO: "Menção", FANTASMA: "Fantasma" };
-  const levelColor = { INTEGRAL: "#c9a227", PARCIAL: "#6ba7c4", MENCAO: "#9aa0ab", FANTASMA: "#e0a0a0" };
+  const levelLabel = { INTEGRAL: "Integral", PARCIAL: "Parcial", RAPIDA: "Rápida", FANTASMA: "Fantasma" };
+  const levelColor = { INTEGRAL: "#c9a227", PARCIAL: "#6ba7c4", RAPIDA: "#9aa0ab", FANTASMA: "#e0a0a0" };
 
   // monta o detalhe (nível 1-3) embutido de cada pessoa
   const detailHtml = (r) => {
@@ -710,9 +710,10 @@ function renderAttendanceHTML(report, rotulo, start, end) {
       const ctaBlocks = ctas.map((c) => {
         const prep = c.prepMin ? `Preparação: ${c.prepIn}–${c.prepOut} (${c.prepMin} min)` : "Preparação: —";
         const bomb = c.bombMin ? `Bomb Squad: ${c.bombIn}–${c.bombOut} (${c.bombMin} min)` : "";
+        const pingSeal = c.pingou ? ` · 🎯 pingou` : " · não pingou";
         const lvl = `<span class="lvl" style="color:${levelColor[c.level] || "#9aa0ab"}">${levelLabel[c.level] || c.level}</span>`;
         return `<div class="ctarow">
-          <button class="ctabtn" onclick="tog(this)">🕐 CTA ${c.cta} — ${lvl}</button>
+          <button class="ctabtn" onclick="tog(this)">🕐 CTA ${c.cta} — ${lvl}${pingSeal}</button>
           <div class="ctadetail">
             <div>${prep}</div>${bomb ? `<div>${bomb}</div>` : ""}
           </div>
@@ -732,9 +733,9 @@ function renderAttendanceHTML(report, rotulo, start, end) {
       <td><span class="cat" style="background:${catColor[r.cat] || "#555"}">${r.cat}</span></td>
       <td class="num gold">${r.integral}</td>
       <td class="num">${r.parcial}</td>
-      <td class="num dim">${r.mencao}</td>
+      <td class="num dim">${r.rapida}</td>
       <td class="num red">${r.fantasma}</td>
-      <td class="num ice">${r.bomb}</td>
+      <td class="num ice">${r.pingou}</td>
       <td class="num score">${r.score}</td>
     </tr>
     <tr class="drow"><td colspan="9"><div class="drill">${detailHtml(r)}</div></td></tr>`).join("");
@@ -782,18 +783,18 @@ footer{text-align:center;margin-top:36px;color:var(--ink-dim);font-size:12px;fon
 </style></head><body><div class="wrap">
 <div class="eyebrow">Imortais · Call to Arms</div>
 <h1>Attendance</h1>
-<p class="sub">Presença nos CTAs — ${report.ctaCount} CTAs no período</p>
-<p class="meta">${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)} · ${rotulo}</p>
+<p class="sub">Presença medida pelo tempo na call (Preparação)</p>
+<p class="meta">${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)} · ${rotulo} · <b style="color:var(--gold)">${report.ctaCount} CTAs no período</b></p>
 <p class="hint">👆 Clica num nome pra ver os dias · clica no dia pra ver os CTAs · clica no CTA pra ver horário e tempo</p>
 <table>
 <thead><tr>
-<th>#</th><th class="l">Jogador</th><th>Categoria</th><th>Integral</th><th>Parcial</th><th>Menção</th><th>Fantasma</th><th>Bomb</th><th>Score</th>
+<th>#</th><th class="l">Jogador</th><th>Categoria</th><th>Integral</th><th>Parcial</th><th>Rápida</th><th>Fantasma</th><th>Pingou</th><th>Score</th>
 </tr></thead>
 <tbody>${rowsHtml}</tbody>
 </table>
 <div class="legend">
-<b>Integral:</b> pingou no CTA, chegou no começo e ficou até o fim · <b>Parcial:</b> pingou e veio, mas chegou tarde ou saiu cedo · <b>Menção:</b> veio na call sem pingar · <b>Fantasma:</b> pingou mas não apareceu · <b>Bomb:</b> confirmou/esteve no bomb.<br>
-<b>Score:</b> Integral×3 + Parcial×1 − Fantasma×1. <b>Categorias:</b> Pilar (≥70% integral) · Regular (≥40% presente) · Intermitente · Ausente · Fantasma.
+<b>Integral:</b> esteve na call desde o começo até o fim · <b>Parcial:</b> ficou ≥30 min mas não o CTA todo · <b>Rápida:</b> passou menos de 30 min · <b>Fantasma:</b> pingou mas não apareceu na call · <b>Pingou:</b> quantas vezes usou o ping no cta-mandatório (informativo).<br>
+<b>Score:</b> Integral×3 + Parcial×1 + Rápida×0.5 − Fantasma×1. <b>Categorias</b> (sobre ${report.ctaCount} CTAs): Pilar (≥70% presente) · Regular (≥40%) · Intermitente · Fantasma · Ausente.
 </div>
 <footer>Gerado pelo bot · Imortais CTA</footer>
 </div>
