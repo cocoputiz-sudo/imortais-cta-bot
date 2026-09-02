@@ -14,7 +14,7 @@ const {
 } = require("discord.js");
 
 const db = require("./db");
-const { ROLES, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comps");
+const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
