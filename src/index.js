@@ -129,18 +129,18 @@ async function startSignupFromText(msg, ev, role, weapon) {
       await msg.reply({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
       return;
     }
-    // pergunta presença
+    // pergunta presença — botões amarrados ao AUTOR (só ele pode clicar)
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}|0|${msg.author.id}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}|0|${msg.author.id}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
     );
     await msg.reply({ content: `${msg.author}, **${weapon}** — e aí, presença?`, components: [row] }).catch(() => {});
     return;
   }
-  // se veio só PAPEL -> abre menu de armas daquele papel
+  // se veio só PAPEL -> abre menu de armas daquele papel (amarrado ao autor)
   const armas = WEAPON_CATALOG[role] || [];
   if (!armas.length) return;
-  const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}`)
+  const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
     .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
   await msg.reply({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
@@ -342,7 +342,10 @@ async function onRolePick(interaction) {
 }
 
 async function onWeaponPick(interaction) {
-  const [, eventId] = interaction.customId.split("|");
+  const [, eventId, ownerId] = interaction.customId.split("|");
+  // se o menu veio do reconhecimento de texto (tem ownerId), só o autor pode usar
+  if (ownerId && interaction.user.id !== ownerId)
+    return interaction.reply({ content: "Esse menu é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const weapon = interaction.values[0];
   // Ursinas e Cravadas (vagas únicas): pede o IP antes, pra desempate
   const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
@@ -355,8 +358,8 @@ async function onWeaponPick(interaction) {
     return interaction.showModal(modal);
   }
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}|0|${ownerId || ""}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}|0|${ownerId || ""}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
   );
   await interaction.update({ content: `**${weapon}** selecionada. E aí:`, components: [row] });
 }
@@ -377,8 +380,11 @@ async function onIpModal(interaction) {
 }
 
 async function onPresence(interaction) {
-  const [, eventId, presence, weapon, ipStr] = interaction.customId.split("|");
-  const ip = ipStr ? parseInt(ipStr, 10) : null;
+  const [, eventId, presence, weapon, ipStr, ownerId] = interaction.customId.split("|");
+  const ip = ipStr && ipStr !== "0" ? parseInt(ipStr, 10) : null;
+  // se o botão veio do reconhecimento de texto (tem ownerId), só o autor pode clicar
+  if (ownerId && interaction.user.id !== ownerId)
+    return interaction.reply({ content: "Esse botão é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
