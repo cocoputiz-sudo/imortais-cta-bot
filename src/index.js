@@ -99,19 +99,18 @@ async function onThreadText(msg) {
   for (const w of weapons) {
     if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
   }
-  // "x healer" / "healer queda santa": última palavra pode ser arma
-  if (matchedWeapon) return startSignupFromText(msg, ev, null, matchedWeapon);
+  if (matchedWeapon) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, null, matchedWeapon); }
 
   // 2) tenta casar PAPEL
   for (const word of words) {
-    if (ROLE_WORDS[word]) return startSignupFromText(msg, ev, ROLE_WORDS[word], null);
+    if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, ROLE_WORDS[word], null); }
   }
 
   // 3) tenta casar NÚMERO DE VAGA (1-20): lista todas as armas cabíveis naquela
   //    posição em QUALQUER PT (a função é consistente entre PTs; a arma varia)
   if (/^\d{1,2}$/.test(text)) {
     const vaga = parseInt(text, 10);
-    if (vaga >= 1 && vaga <= 20) return startSignupFromSlotNumber(msg, ev, vaga);
+    if (vaga >= 1 && vaga <= 20) { await msg.delete().catch(() => {}); return startSignupFromSlotNumber(msg, ev, vaga); }
   }
   // não reconheceu -> ignora silenciosamente (era conversa normal)
 }
@@ -124,7 +123,7 @@ async function startSignupFromText(msg, ev, role, weapon) {
     const username = msg.member?.displayName || msg.author.username;
     await db.upsertSignup({ eventId: ev.id, userId: msg.author.id, username, weapon: "LOOTER", presence: "online", partyIndex: null, slotIndex: null, ip: null });
     await applyReallocationMsg(ev, msg.guild);
-    await msg.reply({ content: `💰 ${msg.author}, você entrou como **Looter**.` }).catch(() => {});
+    await msg.channel.send({ content: `💰 ${msg.author}, você entrou como **Looter**.` }).catch(() => {});
     return;
   }
   // se veio ARMA direto
@@ -133,7 +132,7 @@ async function startSignupFromText(msg, ev, role, weapon) {
     const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
     if (IP_WEAPONS.includes(weapon.toUpperCase())) {
       // precisa do IP -> manda a pessoa usar o botão (modal não abre a partir de msg de texto)
-      await msg.reply({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
+      await msg.channel.send({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
       return;
     }
     // pergunta presença — botões amarrados ao AUTOR (só ele pode clicar)
@@ -141,7 +140,7 @@ async function startSignupFromText(msg, ev, role, weapon) {
       new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}|0|${msg.author.id}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}|0|${msg.author.id}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
     );
-    await msg.reply({ content: `${msg.author}, **${weapon}** — e aí, presença?`, components: [row] }).catch(() => {});
+    await msg.channel.send({ content: `${msg.author}, **${weapon}** — e aí, presença?`, components: [row] }).catch(() => {});
     return;
   }
   // se veio só PAPEL -> abre menu de armas daquele papel (amarrado ao autor)
@@ -149,7 +148,7 @@ async function startSignupFromText(msg, ev, role, weapon) {
   if (!armas.length) return;
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
     .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await msg.reply({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+  await msg.channel.send({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
 
 // entrada por NÚMERO DE VAGA: junta todas as armas cabíveis naquela posição
@@ -165,12 +164,12 @@ async function startSignupFromSlotNumber(msg, ev, vaga) {
   }
   const armas = [...armasSet];
   if (!armas.length) {
-    await msg.reply({ content: `${msg.author}, a vaga ${vaga} não tem armas pra escolher (ou é a vaga do caller).` }).catch(() => {});
+    await msg.channel.send({ content: `${msg.author}, a vaga ${vaga} não tem armas pra escolher (ou é a vaga do caller).` }).catch(() => {});
     return;
   }
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
     .setPlaceholder(`Arma da vaga ${vaga}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await msg.reply({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+  await msg.channel.send({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
 
 // versão do applyReallocation chamada a partir de uma mensagem (sem interaction)
