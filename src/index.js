@@ -106,6 +106,13 @@ async function onThreadText(msg) {
   for (const word of words) {
     if (ROLE_WORDS[word]) return startSignupFromText(msg, ev, ROLE_WORDS[word], null);
   }
+
+  // 3) tenta casar NÚMERO DE VAGA (1-20): lista todas as armas cabíveis naquela
+  //    posição em QUALQUER PT (a função é consistente entre PTs; a arma varia)
+  if (/^\d{1,2}$/.test(text)) {
+    const vaga = parseInt(text, 10);
+    if (vaga >= 1 && vaga <= 20) return startSignupFromSlotNumber(msg, ev, vaga);
+  }
   // não reconheceu -> ignora silenciosamente (era conversa normal)
 }
 
@@ -143,6 +150,27 @@ async function startSignupFromText(msg, ev, role, weapon) {
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
     .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
   await msg.reply({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+}
+
+// entrada por NÚMERO DE VAGA: junta todas as armas cabíveis naquela posição
+// em qualquer PT e deixa a pessoa escolher (a função é a mesma; a arma varia)
+async function startSignupFromSlotNumber(msg, ev, vaga) {
+  const idx = vaga - 1;
+  const { PARTIES } = require("./comps");
+  const armasSet = new Set();
+  for (let p = 0; p < PARTIES.length; p++) {
+    const slot = PARTIES[p].slots[idx];
+    if (!slot || slot.locked) continue; // pula vaga do caller
+    for (const a of slot.accepts) armasSet.add(a.weapon);
+  }
+  const armas = [...armasSet];
+  if (!armas.length) {
+    await msg.reply({ content: `${msg.author}, a vaga ${vaga} não tem armas pra escolher (ou é a vaga do caller).` }).catch(() => {});
+    return;
+  }
+  const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
+    .setPlaceholder(`Arma da vaga ${vaga}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
+  await msg.reply({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
 
 // versão do applyReallocation chamada a partir de uma mensagem (sem interaction)
