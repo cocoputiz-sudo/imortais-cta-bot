@@ -30,7 +30,7 @@ const CFG = {
   prepVoiceId: process.env.PREP_VOICE_ID || null,   // 🚨 Preparação
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640", // ping-de-conteúdo
   bombVoiceId: process.env.BOMB_VOICE_ID || null,   // 💣 Bomb Squad
-  presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20,23:00").split(","),
+  presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20,23:00,01:20").split(","),
 };
 
 const client = new Client({
@@ -1201,14 +1201,24 @@ async function onBombWeaponPick(interaction) {
   const others = signups.filter((s) => s.user_id !== interaction.user.id);
   const taken = new Set(others.filter((s) => s.slot_index != null).map((s) => s.slot_index));
   const slots = BOMB_COMPS[ev.bomb_comp].slots;
+
+  // Líder do Bomb assume a vaga 01 (caller/locked) se escolher a arma dela e ela estiver livre
+  const isLeader = CFG.bombLeaderRoleId && interaction.member?.roles?.cache?.has(CFG.bombLeaderRoleId);
   let slotIndex = null;
-  for (let i = 0; i < slots.length; i++) {
-    if (taken.has(i) || slots[i].locked) continue;
-    if (slots[i].accepts.some((a) => a.weapon.toUpperCase() === weapon.toUpperCase())) { slotIndex = i; break; }
+  if (isLeader && slots[0].locked && !taken.has(0) &&
+      slots[0].accepts.some((a) => a.weapon.toUpperCase() === weapon.toUpperCase())) {
+    slotIndex = 0; // caller do bomb
+  } else {
+    for (let i = 0; i < slots.length; i++) {
+      if (taken.has(i) || slots[i].locked) continue;
+      if (slots[i].accepts.some((a) => a.weapon.toUpperCase() === weapon.toUpperCase())) { slotIndex = i; break; }
+    }
   }
   await db.upsertBombSignup(eventId, interaction.user.id, username, weapon, slotIndex);
   await refreshBombRoster(ev);
-  const msg = slotIndex != null ? `✅ Você entrou como **${weapon}** (vaga ${slotIndex + 1}).` : `📝 Reserva (${weapon}) — sem vaga.`;
+  const msg = slotIndex === 0 ? `👑 Você é o **caller do bomb** — **${weapon}** (vaga 1).`
+    : slotIndex != null ? `✅ Você entrou como **${weapon}** (vaga ${slotIndex + 1}).`
+    : `📝 Reserva (${weapon}) — sem vaga.`;
   await interaction.editReply({ content: msg, components: [] });
 }
 
