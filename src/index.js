@@ -30,7 +30,7 @@ const CFG = {
   prepVoiceId: process.env.PREP_VOICE_ID || null,   // 🚨 Preparação
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640", // ping-de-conteúdo
   bombVoiceId: process.env.BOMB_VOICE_ID || null,   // 💣 Bomb Squad
-  presetTimes: (process.env.PRESET_TIMES || "17:20,19:20,21:20,23:00,01:20").split(","),
+  presetTimes: (process.env.PRESET_TIMES || "16:20,17:20,19:20,21:20,23:00,01:20").split(","),
 };
 
 const client = new Client({
