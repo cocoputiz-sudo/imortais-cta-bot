@@ -39,6 +39,8 @@ function commandDefs() {
       .addStringOption((o) => o.setName("novo").setDescription("Novo horário, ex 23:00").setRequired(true)),
     new SlashCommandBuilder().setName("cta_finish").setDescription("Encerra um CTA (qualquer staff, qualquer caller)")
       .addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
+      .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
     new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
     new SlashCommandBuilder().setName("attendance_monthly").setDescription("Relatório de presença — últimos 30 dias"),
@@ -83,7 +85,7 @@ async function handleAutocomplete(interaction) {
 // helper: acha vaga alvo (por vaga exata, ou primeira livre da arma na PT)
 function resolveTargetSlot(partyIndex, vaga, arma, signups) {
   const taken = new Set(signups.filter(s => s.party_index != null).map(s => `${s.party_index}:${s.slot_index}`));
-  if (vaga != null) return { partyIndex, slotIndex: vaga - 1 }; // vaga exata (força)
+  if (vaga != null) return { partyIndex, slotIndex: vaga - 1 }; // vaga exata (força — staff mandou o número)
   // por arma: primeira vaga livre da PT que aceite a arma
   const slots = PARTIES[partyIndex].slots;
   for (let i = 0; i < slots.length; i++) {
@@ -91,10 +93,8 @@ function resolveTargetSlot(partyIndex, vaga, arma, signups) {
     if (slots[i].accepts.some(a => a.weapon.toUpperCase() === (arma || "").toUpperCase()))
       return { partyIndex, slotIndex: i };
   }
-  // se não achou vaga da arma, primeira livre da PT (forçar)
-  for (let i = 0; i < slots.length; i++)
-    if (!taken.has(`${partyIndex}:${i}`)) return { partyIndex, slotIndex: i };
-  return null; // PT cheia
+  // NÃO acha vaga da arma -> retorna null (o handler avisa, NÃO força em vaga de função errada)
+  return null;
 }
 
 module.exports = {

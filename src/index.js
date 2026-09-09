@@ -15,7 +15,7 @@ const {
 
 const db = require("./db");
 const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comps");
-const { findBestSlot, suggestUpgrade, renderRoster, reallocate } = require("./roster");
+const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
 
@@ -475,10 +475,34 @@ async function onLooter(interaction) {
 // Notificação com DEBOUNCE POR PESSOA (não spamma no pico).
 // ==========================================================================
 const notifyTimers = new Map();   // eventId:userId -> timeout
+const ctaFrozen = new Set();      // eventIds com formação congelada (consolidou / perto da hora)
 const notifyPending = new Map();  // eventId:userId -> {guild, threadId, text}
 
 async function applyReallocation(ev, guild, focusUserId) {
   const signups = await db.getSignups(ev.id);
+  // se a formação está congelada (consolidou / perto da hora): não remaneja ninguém.
+  // só encaixa quem acabou de entrar (focusUserId) numa vaga vazia, sem mexer nos demais.
+  if (ctaFrozen.has(String(ev.id))) {
+    const taken = new Set(signups.filter(s => s.party_index != null && s.user_id !== focusUserId).map(s => `${s.party_index}:${s.slot_index}`));
+    const me = signups.find(s => s.user_id === focusUserId);
+    let myLoc = me && me.party_index != null ? { partyIndex: me.party_index, slotIndex: me.slot_index } : null;
+    if (me && myLoc == null) {
+      // procura primeira vaga vazia que aceite a arma (sem mover ninguém)
+      const { PARTIES } = require("./comps");
+      outer: for (let p = 0; p < PARTIES.length; p++) {
+        for (let i = 0; i < PARTIES[p].slots.length; i++) {
+          if (taken.has(`${p}:${i}`) || PARTIES[p].slots[i].locked) continue;
+          if (PARTIES[p].slots[i].accepts.some(a => a.weapon.toUpperCase() === (me.weapon||"").toUpperCase())) {
+            await db.moveSignupToSlot(ev.id, focusUserId, p, i);
+            myLoc = { partyIndex: p, slotIndex: i };
+            break outer;
+          }
+        }
+      }
+    }
+    refreshRoster(ev);
+    return myLoc;
+  }
   const result = reallocate(signups); // [{user_id, partyIndex, slotIndex, moved, ...}]
 
   // persiste só quem mudou de vaga
@@ -684,6 +708,27 @@ async function onSlash(interaction) {
   if (name === "cta_add")    return slashMoveOrAdd(interaction, ev, true);
   if (name === "cta_change_time") return slashChangeTime(interaction, ev);
   if (name === "cta_finish") return slashFinish(interaction, ev);
+  if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
+}
+
+// aplica a consolidação (amontoamento por função prima) e persiste
+async function applyConsolidation(ev, guild) {
+  const signups = await db.getSignups(ev.id);
+  const result = consolidate(signups);
+  for (const r of result) {
+    if (r.moved) await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
+  }
+  refreshRoster(ev);
+  return result;
+}
+
+async function slashConsolidar(interaction, ev) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await applyConsolidation(ev, interaction.guild);
+  await interaction.editReply({ content: `🧲 Participantes amontoados nas PTs da frente (CTA ${ev.time_label}).` });
+  await logStaff(interaction.guild, `🧲 ${interaction.user} disparou o amontoamento · CTA ${ev.time_label}`);
+  // trava a realocação a partir daqui (consolidou = formação fecha)
+  ctaFrozen.add(String(ev.id));
 }
 
 // muda o horário de um CTA já criado (rótulo, lembretes, janela seguem o novo)
@@ -970,7 +1015,7 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
 
   const others = signups.filter((s) => s.user_id !== user.id);
   const target = cmds.resolveTargetSlot(pt - 1, vaga, arma, others);
-  if (!target) return interaction.reply({ content: `A PT${pt} está cheia.`, flags: MessageFlags.Ephemeral });
+  if (!target) return interaction.reply({ content: `Não há vaga livre de **${arma || (existing && existing.weapon) || "essa arma"}** na PT${pt}. Use o campo **vaga** pra forçar numa posição específica, ou tente outra PT.`, flags: MessageFlags.Ephemeral });
 
   // vaga ocupada? pergunta interativa
   const occupant = await db.getSignupAtSlot(ev.id, target.partyIndex, target.slotIndex);
@@ -1350,10 +1395,61 @@ async function checkReminders() {
   } catch (e) { console.error("reminders:", e); }
 }
 
+// ---- avisos de consolidação (25/20/15 min antes da saída) + amontoamento aos 10 ----
+// saída = horário cheio = ping (time_label) + 40 min. Marcos são antes da saída.
+const consolidWarned = new Map(); // eventId -> Set de marcos já avisados
+async function checkConsolidation() {
+  try {
+    const guilds = client.guilds.cache;
+    for (const [gid] of guilds) {
+      const abertos = await db.getOpenEvents(gid);
+      for (const ev of abertos) {
+        const m = /^(\d{1,2}):(\d{2})$/.exec((ev.time_label||"").trim());
+        if (!m) continue;
+        const base = new Date(ev.created_at);
+        const ping = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), +m[1], +m[2], 0, 0));
+        const saida = new Date(ping.getTime() + 40*60000); // horário cheio
+        const minAteSaida = Math.round((saida.getTime() - Date.now())/60000);
+        const done = consolidWarned.get(String(ev.id)) || new Set();
+
+        const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+        const avisar = async (txt) => {
+          const th = ev.thread_id ? await client.channels.fetch(ev.thread_id).catch(()=>null) : null;
+          const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+          if (th) await th.send({ content: txt, ...allow }).catch(()=>{});
+          await pingMainChannel(ev, txt);
+        };
+
+        if (minAteSaida <= 25 && minAteSaida > 20 && !done.has(25)) {
+          await avisar(`${mention} ⚠️ **CTA ${ev.time_label}** — precisamos ajustar as vagas faltantes!`);
+          done.add(25);
+        }
+        if (minAteSaida <= 20 && minAteSaida > 15 && !done.has(20)) {
+          await avisar(`${mention} ⚠️ **CTA ${ev.time_label}** — ajustem o quanto antes pra não haver lacunas na sua equipe!`);
+          done.add(20);
+        }
+        if (minAteSaida <= 15 && minAteSaida > 10 && !done.has(15)) {
+          await avisar(`${mention} 🧲 **CTA ${ev.time_label}** — amontoamento de participantes disparado.`);
+          done.add(15);
+        }
+        if (minAteSaida <= 10 && minAteSaida > -5 && !done.has(10)) {
+          // amontoamento automático
+          await applyConsolidation(ev, client.guilds.cache.get(gid));
+          ctaFrozen.add(String(ev.id));
+          await avisar(`${mention} 🔒 **CTA ${ev.time_label}** — formação consolidada e travada. Entrem nas suas vagas!`);
+          done.add(10);
+        }
+        consolidWarned.set(String(ev.id), done);
+      }
+    }
+  } catch (e) { console.error("consolidation:", e); }
+}
+
 // ======================  BOOT  =============================================
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Online como ${c.user.tag}`);
   setInterval(checkReminders, 60 * 1000); // a cada minuto
+  setInterval(checkConsolidation, 60 * 1000); // avisos de consolidação + amontoamento
   // registra slash commands em cada servidor onde o bot está
   for (const [gid] of c.guilds.cache) {
     try { await cmds.registerCommands(c.user.id, gid); }

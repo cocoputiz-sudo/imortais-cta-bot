@@ -111,13 +111,19 @@ function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = PARTIE
 // ctx.scInPt1 = quantos Shadow Caller já estão alocados na PT1.
 // Na vaga scDynamic (PT1 v8): se já tem SC na PT1, despriorize SC.
 function effectiveAccepts(slot, ctx) {
-  if (!slot.scDynamic || !ctx || !ctx.scInPt1) return slot.accepts;
-  // já tem SC na PT1 -> Pútrido(1), Execrado(1), Danação(2), Shadow Caller(3)
-  const remap = { "PÚTRIDO": 1, "EXECRADO": 1, "DANAÇÃO": 2, "SHADOW CALLER": 3 };
-  return slot.accepts.map((a) => {
-    const w = remap[U(a.weapon)];
-    return w != null ? { weapon: a.weapon, weight: w } : a;
-  });
+  if (slot.scDynamic && ctx && ctx.scInPt1) {
+    // já tem SC na PT1 -> Pútrido(1), Execrado(1), Danação(2), Shadow Caller(3)
+    const remap = { "PÚTRIDO": 1, "EXECRADO": 1, "DANAÇÃO": 2, "SHADOW CALLER": 3 };
+    return slot.accepts.map((a) => {
+      const w = remap[U(a.weapon)];
+      return w != null ? { weapon: a.weapon, weight: w } : a;
+    });
+  }
+  if (slot.gaDynamic && ctx && ctx.gaInParty) {
+    // já tem G.A na PT -> despriorize G.A (peso 9), mantém o resto (Arvore preferida)
+    return slot.accepts.map((a) => U(a.weapon) === "G.A" ? { weapon: a.weapon, weight: 9 } : a);
+  }
+  return slot.accepts;
 }
 
 function affinityScore(slot, weapon, ctx) {
@@ -174,9 +180,10 @@ function solve(signups, numParties = PARTIES.length) {
   for (const pass of ["exact", "affinity"]) {
     for (const cell of cells) {
       if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
-      // contexto p/ regras dinâmicas: quantos Shadow Caller já estão na PT1
+      // contexto p/ regras dinâmicas: quantos Shadow Caller já estão na PT1, quantos G.A na PT desta vaga
       const scInPt1 = countWeaponInParty(assignment, "SHADOW CALLER", 0);
-      const ctx = { scInPt1 };
+      const gaInParty = countWeaponInParty(assignment, "G.A", cell.p);
+      const ctx = { scInPt1, gaInParty };
       let best = null;
       for (const su of signups) {
         if (usedUsers.has(su.user_id)) continue;
@@ -218,6 +225,63 @@ function solve(signups, numParties = PARTIES.length) {
 
   const reserves = signups.filter((su) => !usedUsers.has(su.user_id)).map((su) => su.user_id);
   return { assignment, reserves };
+}
+
+// ==========================================================================
+// CONSOLIDAÇÃO / AMONTOAMENTO (perto da hora do CTA)
+// Enche as PTs de trás usando "funções primas" quando não tem a arma exata.
+// PT1 é INTOCÁVEL (só o solve normal mexe nela). PT2 aceita primo só em último caso.
+// Matriz de primos: quem pode cobrir a vaga de quem.
+// ==========================================================================
+const ROLE_PRIMES = {
+  Tank:    ["Tank", "Support"],           // tank cobre suporte
+  Support: ["Support", "Tank"],           // suporte cobre tank
+  Melee:   ["Melee", "Ranged"],           // DPS melee/ranged se cobrem
+  Ranged:  ["Ranged", "Melee"],
+  Healer:  ["Healer"],                     // healer só healer
+};
+// Jurador é caso especial: pode ir de Support e Tank (já coberto por Support acima)
+
+// a função da pessoa é definida pela arma dela (via catálogo WEAPONS)
+function weaponRole(weapon) {
+  return (WEAPONS[U(weapon)] || {}).role || null;
+}
+
+// consolida: pega o resultado do solve e tenta encaixar reservas/PT4 em vagas
+// vazias das PTs da frente, usando função prima. Não toca na PT1.
+// retorna a alocação final (mesmo formato do reallocate).
+function consolidate(signups, numParties = PARTIES.length) {
+  // parte da alocação normal
+  const base = reallocate(signups, numParties);
+  const taken = new Set();
+  for (const r of base) if (r.partyIndex != null) taken.add(`${r.partyIndex}:${r.slotIndex}`);
+
+  // quem está sem vaga (reserva) ou nas PTs de trás incompletas = candidatos a mover pra frente
+  // ordem de preenchimento: PT2 (só último caso), depois PT3, PT4. PT1 nunca.
+  const semVaga = base.filter(r => r.partyIndex == null);
+
+  for (const r of semVaga) {
+    const role = weaponRole(r.weapon);
+    if (!role) continue;
+    const primos = ROLE_PRIMES[role] || [role];
+    // procura vaga vazia (PT2->PT3->PT4) cuja função seja prima da função da pessoa
+    let colocado = false;
+    for (let p = 1; p < numParties && !colocado; p++) {       // começa na PT2 (nunca PT1)
+      for (let i = 0; i < PARTIES[p].slots.length; i++) {
+        if (taken.has(`${p}:${i}`)) continue;
+        if (PARTIES[p].slots[i].locked) continue;
+        const vagaRole = PARTIES[p].slots[i].role;
+        if (primos.includes(vagaRole)) {
+          // encaixa aqui (amontoamento por função prima)
+          r.partyIndex = p; r.slotIndex = i; r.moved = true; r.kind = "consolidado";
+          taken.add(`${p}:${i}`);
+          colocado = true;
+          break;
+        }
+      }
+    }
+  }
+  return base;
 }
 
 // roda o solver e devolve, pra cada inscrito, a posição nova + se MUDOU de vaga.
@@ -285,6 +349,6 @@ function renderRoster(signups, numParties = PARTIES.length) {
 
 module.exports = {
   findBestSlot, suggestUpgrade, renderRoster,
-  solve, reallocate, affinityScore,
+  solve, reallocate, consolidate, affinityScore,
   findOpenSlot: (w, s) => findBestSlot(w, s),
 };
