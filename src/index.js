@@ -18,6 +18,9 @@ const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comp
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
+const roaming = require("./roaming");
+const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
+const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
 const CFG = {
   token: process.env.DISCORD_TOKEN,
@@ -221,6 +224,14 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     // entrou numa call monitorada
     const newKind = voiceKind(newCh);
     if (newKind) await db.voiceJoin(guildId, member.id, username, newCh, newKind);
+
+    // ROAMING: a sala é dinâmica — checa se old/new é sala de algum roaming contando
+    const roamings = await db.getOpenRoamings(guildId).catch(()=>[]);
+    for (const r of roamings) {
+      if (r.status !== "contando" || !r.voice_id) continue;
+      if (oldCh === r.voice_id) await db.roamingVoiceLeave(r.id, member.id);
+      if (newCh === r.voice_id) await db.roamingVoiceJoin(r.id, member.id, username);
+    }
   } catch (e) { console.error("voiceState:", e); }
 });
 
@@ -236,6 +247,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (bk === "bombcomp") return onBombCompChoice(interaction);
       if (bk === "bombrole") return onBombRolePick(interaction);
       if (bk === "bombleave") return onBombLeave(interaction);
+      if (bk === "rmf") return onRoamingRolePick(interaction);
+      if (bk === "rmleave") return onRoamingLeave(interaction);
       if (bk === "cleanyes") return onCleanConfirm(interaction);
       if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
     }
@@ -685,6 +698,9 @@ async function onSlash(interaction) {
   if (name === "cta_rank")    return slashRank(interaction, false);
   if (name === "cta_meurank") return slashRank(interaction, true);
 
+  // ROAMING (permissão própria: caller dono ou GM)
+  if (name.startsWith("roaming")) return onRoamingCommand(interaction);
+
   // daqui pra baixo, só Mestre de Guerra
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
@@ -729,6 +745,211 @@ async function slashConsolidar(interaction, ev) {
   await logStaff(interaction.guild, `🧲 ${interaction.user} disparou o amontoamento · CTA ${ev.time_label}`);
   // trava a realocação a partir daqui (consolidou = formação fecha)
   ctaFrozen.add(String(ev.id));
+}
+
+// ==================  ROAMING  =============================================
+function isCaller(interaction) {
+  return interaction.member?.roles?.cache?.has(CALLER_TAG_ID);
+}
+function isGM(interaction) {
+  return process.env.STAFF_ROLE_ID && interaction.member?.roles?.cache?.has(process.env.STAFF_ROLE_ID);
+}
+// pode gerenciar este roaming? (dono ou GM)
+function canManageRoaming(interaction, r) {
+  return isGM(interaction) || (isCaller(interaction) && r.owner_id === interaction.user.id);
+}
+
+async function onRoamingCommand(interaction) {
+  const name = interaction.commandName;
+  if (name === "roaming") return roamingCreate(interaction);
+  if (name === "roaming_meu_saldo") return roamingMeuSaldo(interaction);
+  if (name === "roaming_saldo") return roamingSaldo(interaction);
+
+  // demais: precisam do roaming + permissão de gestão
+  const nome = interaction.options.getString("nome");
+  const r = await db.getRoaming(interaction.guildId, nome);
+  if (!r) return interaction.reply({ content: `Roaming "${nome}" não encontrado.`, flags: MessageFlags.Ephemeral });
+  if (!canManageRoaming(interaction, r))
+    return interaction.reply({ content: "Só o caller que criou este roaming (ou o GM) pode gerenciá-lo.", flags: MessageFlags.Ephemeral });
+
+  if (name === "roaming_start")  return roamingStart(interaction, r);
+  if (name === "roaming_value")  return roamingValue(interaction, r);
+  if (name === "roaming_finish") return roamingFinish(interaction, r);
+  if (name === "roaming_remove") return roamingRemove(interaction, r);
+  if (name === "roaming_fill")   return roamingFill(interaction, r);
+  if (name === "roaming_pago")   return roamingPago(interaction, r);
+}
+
+async function roamingCreate(interaction) {
+  if (!isCaller(interaction) && !isGM(interaction))
+    return interaction.reply({ content: "Só quem tem a tag de caller cria roaming.", flags: MessageFlags.Ephemeral });
+  const nome = interaction.options.getString("nome").toLowerCase();
+  const vagas = interaction.options.getInteger("vagas");
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const r = await db.createRoaming({ guildId: interaction.guildId, nome, ownerId: interaction.user.id, vagas });
+
+  // cria a sala de voz na categoria, com limite = vagas
+  let voice = null;
+  try {
+    voice = await interaction.guild.channels.create({
+      name: `roaming ${nome}`, type: ChannelType.GuildVoice,
+      parent: ROAMING_CATEGORY_ID || undefined, userLimit: vagas,
+    });
+    await db.setRoamingField(r.id, "voice_id", voice.id);
+  } catch (e) { console.error("criar sala roaming:", e); }
+
+  // posta a thread no ping-de-conteúdo
+  let thread = null;
+  if (CFG.contentPingChannelId) {
+    const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(()=>null);
+    if (ch) {
+      const roleMention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+      // anexa a imagem do roaming (arquivo local na pasta assets), se existir
+      const fs = require("fs"); const path = require("path");
+      const imgPath = path.join(__dirname, "..", "assets", "roaming.png");
+      const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "roaming.png" }] : [];
+      const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+      const msg = await ch.send({
+        content: `${roleMention} 🧭 **ROAMING "${nome}"** (${vagas} vagas) — conteúdo novo! Pinga tua função pra participar 👇`,
+        components: buildRoamingRolePicker(r.id),
+        files,
+        ...allow,
+      }).catch((e)=>{ console.error("post roaming:", e); return null; });
+      if (msg) { thread = await msg.startThread({ name: `Roaming ${nome}`, autoArchiveDuration: 1440 }).catch(()=>null); }
+      if (thread) {
+        await db.setRoamingField(r.id, "thread_id", thread.id);
+        const rm = await thread.send({ content: roamingRosterText(r, []) });
+        await db.setRoamingField(r.id, "roster_msg", rm.id);
+      }
+    }
+  }
+  await interaction.editReply({ content: `✅ Roaming **${nome}** criado (${vagas} vagas)${voice?`, sala <#${voice.id}> criada`:""}. Use **/roaming_start ${nome}** quando começar.` });
+}
+
+function buildRoamingRolePicker(roamingId) {
+  const funcs = [["Tank","🛡️"],["Support","🎺"],["DPS","⚔️"],["Healer","💚"],["Caller","👑"]];
+  const btns = funcs.map(([f,e]) => new ButtonBuilder().setCustomId(`rmf|${roamingId}|${f}`).setLabel(f).setEmoji(e).setStyle(ButtonStyle.Secondary));
+  const leave = new ButtonBuilder().setCustomId(`rmleave|${roamingId}`).setLabel("Sair").setEmoji("🚪").setStyle(ButtonStyle.Danger);
+  const rows = [];
+  for (let i=0;i<btns.length;i+=5) rows.push(new ActionRowBuilder().addComponents(btns.slice(i,i+5)));
+  rows.push(new ActionRowBuilder().addComponents(leave));
+  return rows;
+}
+
+function roamingRosterText(r, signups) {
+  const comp = roaming.ROAMING_COMPS[r.vagas];
+  const porFunc = {}; for (const s of signups) (porFunc[s.funcao] ||= []).push(s.username);
+  let t = `🧭 **Roaming ${r.nome}** (${signups.length}/${r.vagas})\n`;
+  for (const [funcao, qtd] of Object.entries(comp)) {
+    const gente = porFunc[funcao] || [];
+    t += `\n**${funcao}** (${gente.length}/${qtd}): ${gente.join(", ") || "*vazio*"}`;
+  }
+  return t.slice(0,1900);
+}
+
+async function refreshRoamingRoster(r) {
+  const fresh = await db.getRoamingById(r.id);
+  if (!fresh.thread_id || !fresh.roster_msg) return;
+  const th = await client.channels.fetch(fresh.thread_id).catch(()=>null);
+  if (!th) return;
+  const m = await th.messages.fetch(fresh.roster_msg).catch(()=>null);
+  if (!m) return;
+  const signups = await db.getRoamingSignups(r.id);
+  await m.edit({ content: roamingRosterText(fresh, signups) }).catch(()=>{});
+}
+
+async function onRoamingRolePick(interaction) {
+  const [, roamingId, funcao] = interaction.customId.split("|");
+  const r = await db.getRoamingById(roamingId);
+  if (!r || r.status === "pago" || r.status === "fechado")
+    return interaction.reply({ content: "Esse roaming não está aberto.", flags: MessageFlags.Ephemeral });
+  const username = interaction.member?.displayName || interaction.user.username;
+  await db.upsertRoamingSignup(roamingId, interaction.user.id, username, funcao);
+  await refreshRoamingRoster(r);
+  await interaction.reply({ content: `🧭 Você pingou **${funcao}** no roaming ${r.nome}. Entra na sala de voz!`, flags: MessageFlags.Ephemeral });
+}
+async function onRoamingLeave(interaction) {
+  const [, roamingId] = interaction.customId.split("|");
+  const r = await db.getRoamingById(roamingId);
+  await db.deleteRoamingSignup(roamingId, interaction.user.id);
+  if (r) await refreshRoamingRoster(r);
+  await interaction.reply({ content: "🚪 Saiu do roaming.", flags: MessageFlags.Ephemeral });
+}
+
+async function roamingStart(interaction, r) {
+  await db.setRoamingField(r.id, "status", "contando");
+  await db.setRoamingField(r.id, "started_at", new Date());
+  // reconcilia: quem já está na sala começa a contar agora
+  if (r.voice_id) {
+    const vc = await client.channels.fetch(r.voice_id).catch(()=>null);
+    if (vc && vc.members) for (const [, mb] of vc.members)
+      await db.roamingVoiceJoin(r.id, mb.id, mb.displayName || mb.user.username);
+  }
+  await interaction.reply({ content: `▶️ Roaming **${r.nome}** — contagem de presença iniciada!` });
+}
+async function roamingValue(interaction, r) {
+  const valor = interaction.options.getInteger("valor");
+  await db.setRoamingField(r.id, "valor", valor);
+  await interaction.reply({ content: `💰 Roaming **${r.nome}** — valor registrado: **${valor.toLocaleString("pt-BR")}** prata.` });
+}
+async function roamingFinish(interaction, r) {
+  await interaction.deferReply();
+  await db.setRoamingField(r.id, "status", "fechado");
+  if (r.voice_id) await db.roamingCloseAllOpen(r.id); // fecha presenças abertas
+  const linhas = await calcRoamingDivisao(r);
+  const elegiveis = linhas.filter(l=>l.elegivel);
+  const top = elegiveis.slice(0,15).map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
+  await interaction.editReply({ content: `🏁 **Roaming ${r.nome} encerrado.**\nValor: ${(r.valor||0).toLocaleString("pt-BR")} prata · ${elegiveis.length} elegíveis\n\n${top || "(ninguém elegível)"}\n\nUse **/roaming_saldo ${r.nome}** pra ver todos.` });
+}
+async function calcRoamingDivisao(r) {
+  const fresh = await db.getRoamingById(r.id);
+  const signups = await db.getRoamingSignups(r.id);
+  const presence = await db.getRoamingPresence(r.id);
+  const start = fresh.started_at ? new Date(fresh.started_at) : new Date(fresh.created_at);
+  const end = new Date();
+  const presMin = roaming.presenceMinutes(presence, start, end);
+  return roaming.dividir(fresh.valor || 0, signups, presMin, 10);
+}
+async function roamingSaldo(interaction) {
+  const nome = interaction.options.getString("nome");
+  const r = await db.getRoaming(interaction.guildId, nome);
+  if (!r) return interaction.reply({ content: `Roaming "${nome}" não encontrado.`, flags: MessageFlags.Ephemeral });
+  await interaction.deferReply();
+  const linhas = await calcRoamingDivisao(r);
+  const eleg = linhas.filter(l=>l.elegivel);
+  const txt = eleg.map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
+  await interaction.editReply({ content: `💰 **Saldo do roaming ${r.nome}** (${(r.valor||0).toLocaleString("pt-BR")} prata)\n${txt || "(ninguém elegível ainda)"}` });
+}
+async function roamingMeuSaldo(interaction) {
+  const nome = interaction.options.getString("nome");
+  const r = await db.getRoaming(interaction.guildId, nome);
+  if (!r) return interaction.reply({ content: `Roaming "${nome}" não encontrado.`, flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const linhas = await calcRoamingDivisao(r);
+  const meu = linhas.find(l=>l.user_id === interaction.user.id);
+  if (!meu) return interaction.editReply({ content: `Você não está no roaming ${r.nome}.` });
+  if (!meu.elegivel) return interaction.editReply({ content: `Roaming ${r.nome}: você não está elegível (${meu.motivo}).` });
+  await interaction.editReply({ content: `💰 **Teu saldo no roaming ${r.nome}:** ${meu.valor.toLocaleString("pt-BR")} prata (${meu.minutos}min de presença).` });
+}
+async function roamingRemove(interaction, r) {
+  const user = interaction.options.getUser("usuario");
+  await db.deleteRoamingSignup(r.id, user.id);
+  await refreshRoamingRoster(r);
+  await interaction.reply({ content: `🗑️ ${user} removido do roaming ${r.nome}.` });
+}
+async function roamingFill(interaction, r) {
+  const user = interaction.options.getUser("usuario");
+  const funcao = roaming.normFunc(interaction.options.getString("funcao")) || interaction.options.getString("funcao");
+  const member = await interaction.guild.members.fetch(user.id).catch(()=>null);
+  const username = member?.displayName || user.username;
+  await db.upsertRoamingSignup(r.id, user.id, username, funcao);
+  await refreshRoamingRoster(r);
+  await interaction.reply({ content: `➕ ${user} adicionado como **${funcao}** no roaming ${r.nome}.` });
+}
+async function roamingPago(interaction, r) {
+  await db.setRoamingField(r.id, "status", "pago");
+  await interaction.reply({ content: `✅ Roaming **${r.nome}** marcado como PAGO.` });
 }
 
 // muda o horário de um CTA já criado (rótulo, lembretes, janela seguem o novo)

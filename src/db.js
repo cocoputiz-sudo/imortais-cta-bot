@@ -73,6 +73,41 @@ async function init() {
       UNIQUE (event_id, user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS roamings (
+      id          BIGSERIAL PRIMARY KEY,
+      guild_id    TEXT NOT NULL,
+      nome        TEXT NOT NULL,
+      owner_id    TEXT NOT NULL,                     -- quem criou (caller)
+      vagas       INT NOT NULL,
+      voice_id    TEXT,                              -- id da sala de voz criada
+      thread_id   TEXT,
+      roster_msg  TEXT,
+      status      TEXT NOT NULL DEFAULT 'aberto',    -- aberto | contando | fechado | pago
+      valor       BIGINT,                            -- prata arrecadada
+      started_at  TIMESTAMPTZ,                       -- quando deu roaming-start
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS roaming_signups (
+      id          BIGSERIAL PRIMARY KEY,
+      roaming_id  BIGINT NOT NULL REFERENCES roamings(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      funcao      TEXT NOT NULL,                     -- Tank|Support|Melee|Ranged|Healer|Caller
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (roaming_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS roaming_presence (
+      id          BIGSERIAL PRIMARY KEY,
+      roaming_id  BIGINT NOT NULL REFERENCES roamings(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      left_at     TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS cta_signups (
       id          BIGSERIAL PRIMARY KEY,
       event_id    BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
@@ -354,6 +389,66 @@ async function finishSeason(guildId) {
   return rows[0];
 }
 
+// ---- ROAMING ----
+async function createRoaming({ guildId, nome, ownerId, vagas }) {
+  const { rows } = await pool.query(
+    `INSERT INTO roamings (guild_id, nome, owner_id, vagas) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [guildId, nome, ownerId, vagas]
+  );
+  return rows[0];
+}
+async function getRoaming(guildId, nome) {
+  const { rows } = await pool.query(
+    `SELECT * FROM roamings WHERE guild_id=$1 AND nome=$2 AND status != 'pago' ORDER BY created_at DESC LIMIT 1`,
+    [guildId, nome]
+  );
+  return rows[0];
+}
+async function getRoamingById(id) {
+  const { rows } = await pool.query(`SELECT * FROM roamings WHERE id=$1`, [id]);
+  return rows[0];
+}
+async function getOpenRoamings(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM roamings WHERE guild_id=$1 AND status != 'pago' ORDER BY created_at DESC`, [guildId]
+  );
+  return rows;
+}
+async function setRoamingField(id, field, value) {
+  const allowed = ["voice_id","thread_id","roster_msg","status","valor","started_at"];
+  if (!allowed.includes(field)) return;
+  await pool.query(`UPDATE roamings SET ${field}=$1 WHERE id=$2`, [value, id]);
+}
+async function upsertRoamingSignup(roamingId, userId, username, funcao) {
+  await pool.query(
+    `INSERT INTO roaming_signups (roaming_id, user_id, username, funcao) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (roaming_id, user_id) DO UPDATE SET funcao=EXCLUDED.funcao`,
+    [roamingId, userId, username, funcao]
+  );
+}
+async function getRoamingSignups(roamingId) {
+  const { rows } = await pool.query(`SELECT * FROM roaming_signups WHERE roaming_id=$1 ORDER BY created_at ASC`, [roamingId]);
+  return rows;
+}
+async function deleteRoamingSignup(roamingId, userId) {
+  const { rows } = await pool.query(`DELETE FROM roaming_signups WHERE roaming_id=$1 AND user_id=$2 RETURNING *`, [roamingId, userId]);
+  return rows[0];
+}
+async function roamingVoiceJoin(roamingId, userId, username) {
+  await pool.query(`UPDATE roaming_presence SET left_at=now() WHERE roaming_id=$1 AND user_id=$2 AND left_at IS NULL`, [roamingId, userId]);
+  await pool.query(`INSERT INTO roaming_presence (roaming_id, user_id, username) VALUES ($1,$2,$3)`, [roamingId, userId, username]);
+}
+async function roamingVoiceLeave(roamingId, userId) {
+  await pool.query(`UPDATE roaming_presence SET left_at=now() WHERE roaming_id=$1 AND user_id=$2 AND left_at IS NULL`, [roamingId, userId]);
+}
+async function roamingCloseAllOpen(roamingId) {
+  await pool.query(`UPDATE roaming_presence SET left_at=now() WHERE roaming_id=$1 AND left_at IS NULL`, [roamingId]);
+}
+async function getRoamingPresence(roamingId) {
+  const { rows } = await pool.query(`SELECT * FROM roaming_presence WHERE roaming_id=$1 ORDER BY user_id, joined_at`, [roamingId]);
+  return rows;
+}
+
 module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
@@ -363,4 +458,7 @@ module.exports = {
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
+  createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
+  upsertRoamingSignup, getRoamingSignups, deleteRoamingSignup,
+  roamingVoiceJoin, roamingVoiceLeave, roamingCloseAllOpen, getRoamingPresence,
 };

@@ -49,6 +49,30 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_finish_temporada").setDescription("Encerra a temporada atual (Mestre de Guerra)"),
     new SlashCommandBuilder().setName("cta_rank").setDescription("Placar de presença da temporada atual"),
     new SlashCommandBuilder().setName("cta_meurank").setDescription("Tua pontuação de presença na temporada atual"),
+    // ---- ROAMING ----
+    new SlashCommandBuilder().setName("roaming").setDescription("Cria um roaming (caller)")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming, ex: badmack").setRequired(true))
+      .addIntegerOption(o=>o.setName("vagas").setDescription("12, 16 ou 20").setRequired(true).addChoices({name:"12",value:12},{name:"16",value:16},{name:"20",value:20})),
+    new SlashCommandBuilder().setName("roaming_start").setDescription("Começa a contar presença do roaming")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_value").setDescription("Informa a prata arrecadada")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addIntegerOption(o=>o.setName("valor").setDescription("Prata total, ex: 42000000").setRequired(true)),
+    new SlashCommandBuilder().setName("roaming_finish").setDescription("Encerra e calcula a divisão")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_saldo").setDescription("Mostra a divisão do roaming")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_meu_saldo").setDescription("Teu saldo no roaming")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_remove").setDescription("Remove alguém do roaming")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addUserOption(o=>o.setName("usuario").setDescription("Quem remover").setRequired(true)),
+    new SlashCommandBuilder().setName("roaming_fill").setDescription("Adiciona alguém no roaming")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addUserOption(o=>o.setName("usuario").setDescription("Quem adicionar").setRequired(true))
+      .addStringOption(o=>o.setName("funcao").setDescription("Função (tank/dps/healer/sup/caller)").setRequired(true)),
+    new SlashCommandBuilder().setName("roaming_pago").setDescription("Marca o roaming como pago")
+      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
   ].map((c) => c.toJSON());
 }
 
@@ -78,6 +102,11 @@ async function handleAutocomplete(interaction) {
     const q = (focused.value || "").toUpperCase();
     const all = Object.keys(WEAPONS).filter((w) => w.includes(q));
     return interaction.respond(all.slice(0, 25).map((w) => ({ name: w, value: w })));
+  }
+  if (focused.name === "nome") {
+    // autocomplete de roamings abertos
+    const rs = await db.getOpenRoamings(interaction.guildId);
+    return interaction.respond(rs.slice(0, 25).map((r) => ({ name: `${r.nome} (${r.vagas}v)`, value: r.nome })));
   }
   return interaction.respond([]);
 }
