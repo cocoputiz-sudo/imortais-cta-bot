@@ -71,6 +71,24 @@ function commandDefs() {
       .addStringOption((o) => o.setName("funcao").setDescription("Função (tank/dps/healer/sup/caller)").setRequired(true)),
     new SlashCommandBuilder().setName("roaming_pago").setDescription("Marca o roaming como pago")
       .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo").setDescription("Cria um castelo (caller)")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário UTC, ex: 21:20").setRequired(true)),
+    new SlashCommandBuilder().setName("castelo_start").setDescription("Começa a contar presença do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário do castelo").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_value").setDescription("Informa a prata do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true))
+      .addIntegerOption((o) => o.setName("valor").setDescription("Prata total").setRequired(true)),
+    new SlashCommandBuilder().setName("castelo_finish").setDescription("Encerra e divide a prata do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_saldo").setDescription("Mostra a divisão do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_meu_saldo").setDescription("Teu saldo no castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_pago").setDescription("Marca o castelo como pago")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_remove").setDescription("Remove alguém do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true))
+      .addUserOption((o) => o.setName("usuario").setDescription("Quem remover")),
   ].map((c) => c.toJSON());
 }
 
@@ -101,6 +119,10 @@ async function handleAutocomplete(interaction) {
   if (focused.name === "nome") {
     const rs = await db.getOpenRoamings(interaction.guildId);
     return interaction.respond(rs.slice(0, 25).map((r) => ({ name: `${r.nome} (${r.vagas}v)`, value: r.nome })));
+  }
+  if (focused.name === "horario") {
+    const cs = await db.getOpenCastelos(interaction.guildId).catch(()=>[]);
+    return interaction.respond(cs.slice(0, 25).map((c) => ({ name: `Castelo ${c.time_label}`, value: c.time_label })));
   }
   return interaction.respond([]);
 }

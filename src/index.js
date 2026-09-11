@@ -14,6 +14,7 @@ const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = 
 const cmds = require("./commands");
 const attendance = require("./attendance");
 const roaming = require("./roaming");
+const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
@@ -201,6 +202,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       if (oldCh === r.voice_id) await db.roamingVoiceLeave(r.id, member.id);
       if (newCh === r.voice_id) await db.roamingVoiceJoin(r.id, member.id, username);
     }
+    const castelos = await db.getOpenCastelos(guildId).catch(() => []);
+    for (const c of castelos) {
+      if (c.status !== "contando" || !c.voice_id) continue;
+      if (oldCh === c.voice_id) await db.casteloVoiceLeave(c.id, member.id);
+      if (newCh === c.voice_id) await db.casteloVoiceJoin(c.id, member.id, username);
+    }
   } catch (e) { console.error("voiceState:", e); }
 });
 
@@ -225,7 +232,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const [k] = interaction.customId.split("|");
       if (k === "time")     return onTimeToggle(interaction);
       if (k === "timeok")   return onTimeConfirm(interaction);
-      if (k === "role")     return onRolePick(interaction);
+      if (k === "role") {
+        const parts = interaction.customId.split("|");
+        if (parts[1] && parts[1].startsWith("c") && /^c\d+$/.test(parts[1])) return onCasteloRolePick(interaction);
+        return onRolePick(interaction);
+      }
       if (k === "calleryes") return onCallerYes(interaction);
       if (k === "callerno")  return onCallerNo(interaction);
       if (k === "presence") return onPresence(interaction);
@@ -243,6 +254,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return onIpModal(interaction);
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("bombweapon|"))
       return onBombWeaponPick(interaction);
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("cweapon|"))
+      return onCasteloWeaponPick(interaction);
   } catch (e) {
     console.error("interaction:", e);
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred)
@@ -711,6 +724,8 @@ async function onSlash(interaction) {
 
   if (name.startsWith("roaming")) return onRoamingCommand(interaction);
 
+  if (name.startsWith("castelo")) return onCasteloCommand(interaction);
+
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
@@ -1038,6 +1053,191 @@ async function roamingPago(interaction, r) {
   await db.setRoamingField(r.id, "status", "pago");
   const del = await deleteRoamingVoice(r);
   await interaction.reply({ content: `✅ Roaming **${r.nome}** marcado como PAGO.${del}` });
+}
+
+// ==================  CASTELO  ============================================
+// 3 PTs (press comp + PT1 + PT2 do CTA), sala de voz, presença por tempo, divisão de prata.
+function canManageCastelo(interaction, c) {
+  return isGM(interaction) || (isCaller(interaction) && c.owner_id === interaction.user.id);
+}
+async function onCasteloCommand(interaction) {
+  const name = interaction.commandName;
+  if (name === "castelo") return casteloCreate(interaction);
+  if (name === "castelo_meu_saldo") return casteloMeuSaldo(interaction);
+  if (name === "castelo_saldo") return casteloSaldo(interaction);
+
+  const horario = interaction.options.getString("horario");
+  const c = await db.getCastelo(interaction.guildId, horario);
+  if (!c) return interaction.reply({ content: `Castelo "${horario}" não encontrado.`, flags: MessageFlags.Ephemeral });
+  if (!canManageCastelo(interaction, c))
+    return interaction.reply({ content: "Só o caller que criou este castelo (ou o GM) pode gerenciá-lo.", flags: MessageFlags.Ephemeral });
+
+  if (name === "castelo_start")  return casteloStart(interaction, c);
+  if (name === "castelo_value")  return casteloValue(interaction, c);
+  if (name === "castelo_finish") return casteloFinish(interaction, c);
+  if (name === "castelo_pago")   return casteloPago(interaction, c);
+  if (name === "castelo_remove") return casteloRemove(interaction, c);
+}
+
+async function casteloCreate(interaction) {
+  if (!isCaller(interaction) && !isGM(interaction))
+    return interaction.reply({ content: "Só quem tem a tag de caller cria castelo.", flags: MessageFlags.Ephemeral });
+  const horario = interaction.options.getString("horario").trim();
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const c = await db.createCastelo({ guildId: interaction.guildId, timeLabel: horario, ownerId: interaction.user.id });
+
+  // sala de voz na categoria conteúdos e eventos
+  let voice = null;
+  try {
+    voice = await interaction.guild.channels.create({
+      name: `castelo ${horario}`, type: ChannelType.GuildVoice,
+      parent: ROAMING_CATEGORY_ID || undefined,
+    });
+    await db.setCasteloField(c.id, "voice_id", voice.id);
+  } catch (e) { console.error("criar sala castelo:", e); }
+
+  // posta no ping-de-conteúdo
+  if (CFG.contentPingChannelId) {
+    const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(()=>null);
+    if (ch) {
+      const roleMention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+      const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+      const msg = await ch.send({
+        content: `${roleMention} 🏰 **CASTELO ${horario} UTC** — conteúdo de guerra! Pinga tua função 👇`,
+        components: buildRolePicker(`c${c.id}`), // reusa o picker do CTA (prefixo c<id>)
+        ...allow,
+      }).catch(()=>null);
+      if (msg) {
+        const thread = await msg.startThread({ name: `Castelo ${horario}`, autoArchiveDuration: 1440 }).catch(()=>null);
+        if (thread) {
+          await db.setCasteloField(c.id, "thread_id", thread.id);
+          const blocks = renderRoster([], 3, castelo.CASTELO_PT_INDEX);
+          const ids = [];
+          for (const b of blocks) { const m = await thread.send({ content: b.slice(0,1990) }); ids.push(m.id); }
+          await db.setCasteloField(c.id, "roster_msg", ids.join(","));
+        }
+      }
+    }
+  }
+  await interaction.editReply({ content: `✅ Castelo **${horario}** criado${voice?`, sala <#${voice.id}>`:""}. Use **/castelo_start ${horario}** quando começar.` });
+}
+
+async function refreshCasteloRoster(c) {
+  const fresh = await db.getCasteloById(c.id);
+  if (!fresh.thread_id || !fresh.roster_msg) return;
+  const th = await client.channels.fetch(fresh.thread_id).catch(()=>null);
+  if (!th) return;
+  const ids = String(fresh.roster_msg).split(",");
+  const signups = await db.getCasteloSignups(c.id);
+  const blocks = renderRoster(signups, 3, castelo.CASTELO_PT_INDEX);
+  await Promise.all(ids.map(async (id, i) => {
+    const m = await th.messages.fetch(id).catch(()=>null);
+    if (m && blocks[i]) await m.edit({ content: blocks[i].slice(0,1990) }).catch(()=>{});
+  }));
+}
+
+// realoca no castelo (usa a engine do CTA com a lista de PTs do castelo)
+async function applyCasteloReallocation(c, focusUserId) {
+  const signups = await db.getCasteloSignups(c.id);
+  const result = reallocate(signups, 3, castelo.CASTELO_PT_INDEX);
+  let focusLoc = null;
+  for (const r of result) {
+    if (r.user_id === focusUserId) focusLoc = r.partyIndex != null ? { partyIndex: r.partyIndex, slotIndex: r.slotIndex } : null;
+    if (r.moved) await db.moveCasteloSignup(c.id, r.user_id, r.partyIndex, r.slotIndex);
+  }
+  await refreshCasteloRoster(c);
+  return focusLoc;
+}
+
+// pingar função no castelo (botões reusam o picker com prefixo c<id>)
+async function onCasteloRolePick(interaction) {
+  const [, cid, role] = interaction.customId.split("|");
+  const c = await db.getCasteloById(cid.replace(/^c/, ""));
+  if (!c || c.status === "pago" || c.status === "fechado")
+    return interaction.reply({ content: "Castelo não está aberto.", flags: MessageFlags.Ephemeral });
+  // menu de armas do papel (reusa WEAPON_CATALOG)
+  const armas = WEAPON_CATALOG[role] || [];
+  if (!armas.length) return interaction.reply({ content: "Sem armas nesse papel.", flags: MessageFlags.Ephemeral });
+  const menu = new StringSelectMenuBuilder().setCustomId(`cweapon|${c.id}|${interaction.user.id}`)
+    .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0,25).map(w=>({label:w,value:w})));
+  await interaction.reply({ content: `Escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+}
+async function onCasteloWeaponPick(interaction) {
+  const [, cid, ownerId] = interaction.customId.split("|");
+  if (ownerId && interaction.user.id !== ownerId)
+    return interaction.reply({ content: "Esse menu é de outra pessoa.", flags: MessageFlags.Ephemeral });
+  const weapon = interaction.values[0];
+  const c = await db.getCasteloById(cid);
+  if (!c) return interaction.update({ content: "Castelo não encontrado.", components: [] });
+  await interaction.deferUpdate();
+  const username = interaction.member?.displayName || interaction.user.username;
+  await db.upsertCasteloSignup({ casteloId: c.id, userId: interaction.user.id, username, weapon, presence: "online", partyIndex: null, slotIndex: null });
+  const loc = await applyCasteloReallocation(c, interaction.user.id);
+  await interaction.editReply({ content: loc ? `✅ Você entrou de **${weapon}** no castelo (Party ${castelo.CASTELO_PT_INDEX.indexOf(loc.partyIndex)+1}, vaga ${loc.slotIndex+1}).` : `📝 Reserva (${weapon}).`, components: [] });
+}
+
+async function casteloStart(interaction, c) {
+  await db.setCasteloField(c.id, "status", "contando");
+  await db.setCasteloField(c.id, "started_at", new Date());
+  if (c.voice_id) {
+    const vc = await client.channels.fetch(c.voice_id).catch(()=>null);
+    if (vc && vc.members) for (const [, mb] of vc.members) await db.casteloVoiceJoin(c.id, mb.id, mb.displayName || mb.user.username);
+  }
+  await interaction.reply({ content: `▶️ Castelo **${c.time_label}** — contagem de presença iniciada!` });
+}
+async function casteloValue(interaction, c) {
+  const valor = interaction.options.getInteger("valor");
+  await db.setCasteloField(c.id, "valor", valor);
+  await interaction.reply({ content: `💰 Castelo **${c.time_label}** — valor: **${valor.toLocaleString("pt-BR")}** prata.` });
+}
+async function calcCasteloDivisao(c) {
+  const fresh = await db.getCasteloById(c.id);
+  const signups = await db.getCasteloSignups(c.id);
+  const presence = await db.getCasteloPresence(c.id);
+  const start = fresh.started_at ? new Date(fresh.started_at) : new Date(fresh.created_at);
+  const presMin = castelo.presenceMinutes(presence, start, new Date());
+  return castelo.dividir(fresh.valor || 0, signups, presMin, 10);
+}
+async function casteloFinish(interaction, c) {
+  await interaction.deferReply();
+  await db.setCasteloField(c.id, "status", "fechado");
+  await db.casteloCloseAllOpen(c.id);
+  const linhas = await calcCasteloDivisao(c);
+  const eleg = linhas.filter(l=>l.elegivel);
+  const top = eleg.slice(0,15).map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
+  await interaction.editReply({ content: `🏰 **Castelo ${c.time_label} encerrado.**\nValor: ${(c.valor||0).toLocaleString("pt-BR")} prata · ${eleg.length} elegíveis\n\n${top||"(ninguém elegível)"}\n\nUse **/castelo_saldo ${c.time_label}** pra ver todos.` });
+  // apaga sala se vazia
+  if (c.voice_id) { const vc = await client.channels.fetch(c.voice_id).catch(()=>null); if (vc && vc.members && vc.members.size===0) { await vc.delete().catch(()=>{}); await db.setCasteloField(c.id,"voice_id",null); } }
+}
+async function casteloSaldo(interaction) {
+  const horario = interaction.options.getString("horario");
+  const c = await db.getCastelo(interaction.guildId, horario);
+  if (!c) return interaction.reply({ content: `Castelo "${horario}" não encontrado.`, flags: MessageFlags.Ephemeral });
+  await interaction.deferReply();
+  const eleg = (await calcCasteloDivisao(c)).filter(l=>l.elegivel);
+  const txt = eleg.map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
+  await interaction.editReply({ content: `💰 **Saldo do castelo ${c.time_label}** (${(c.valor||0).toLocaleString("pt-BR")} prata)\n${txt||"(ninguém elegível)"}` });
+}
+async function casteloMeuSaldo(interaction) {
+  const horario = interaction.options.getString("horario");
+  const c = await db.getCastelo(interaction.guildId, horario);
+  if (!c) return interaction.reply({ content: `Castelo "${horario}" não encontrado.`, flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const meu = (await calcCasteloDivisao(c)).find(l=>l.user_id===interaction.user.id);
+  if (!meu) return interaction.editReply({ content: `Você não está no castelo ${c.time_label}.` });
+  if (!meu.elegivel) return interaction.editReply({ content: `Castelo ${c.time_label}: não elegível (${meu.motivo}).` });
+  await interaction.editReply({ content: `💰 **Teu saldo no castelo ${c.time_label}:** ${meu.valor.toLocaleString("pt-BR")} prata (${meu.minutos}min).` });
+}
+async function casteloPago(interaction, c) {
+  await db.setCasteloField(c.id, "status", "pago");
+  await interaction.reply({ content: `✅ Castelo **${c.time_label}** marcado como PAGO.` });
+}
+async function casteloRemove(interaction, c) {
+  const user = interaction.options.getUser("usuario");
+  if (!user) return interaction.reply({ content: "Informe o @usuário.", flags: MessageFlags.Ephemeral });
+  await db.deleteCasteloSignup(c.id, user.id);
+  await applyCasteloReallocation(c, null);
+  await interaction.reply({ content: `🗑️ ${user} removido do castelo ${c.time_label}.` });
 }
 
 async function deleteRoamingVoice(r) {

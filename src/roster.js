@@ -8,7 +8,7 @@ const U = (w) => (w || "").trim().toUpperCase();
 function capFor(weapon, numParties = 4) {
   const meta = WEAPONS[U(weapon)] || {};
   if (meta.unica) {
-    if (U(weapon) === "URSINAS" && numParties >= 5) return 2; // PT1 e PT5
+    if (U(weapon) === "URSINAS" && numParties >= 5) return 2; // PT1 e PT5 têm Ursinas
     return 1;
   }
   if (meta.tetoPorPt) return Math.max(1, numParties - 1);
@@ -32,7 +32,7 @@ function findBestSlot(weapon, signups, numParties = 4) {
     if (s.party_index != null) taken.add(`${s.party_index}:${s.slot_index}`);
   }
 
-  // Passo 1: PT1 (prioridade absoluta)
+  // ---- passo 1: tenta PT1 (prioridade absoluta) ----
   let best1 = null;
   for (let i = 0; i < PARTIES[0].slots.length; i++) {
     if (taken.has(`0:${i}`)) continue;
@@ -44,7 +44,7 @@ function findBestSlot(weapon, signups, numParties = 4) {
   }
   if (best1) return best1;
 
-  // Passo 2: PT2..ptN
+  // ---- passo 2: PT2..ptN por peso global ----
   let best = null;
   for (let p = 1; p < numParties; p++) {
     for (let i = 0; i < PARTIES[p].slots.length; i++) {
@@ -123,9 +123,11 @@ function countWeaponInParty(assignment, weapon, partyIndex) {
   return n;
 }
 
-function solve(signups, numParties = 4) {
+function solve(signups, numParties = 4, partyList = null) {
+  // partyList: lista específica de índices de PT (ex castelo [4,0,1]). Se null, usa 0..numParties.
+  const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
   const cells = [];
-  for (let p = 0; p < numParties; p++) {
+  for (const p of parties) {
     for (let i = 0; i < PARTIES[p].slots.length; i++) {
       if (PARTIES[p].slots[i].locked) continue;
       cells.push({ p, i, slot: PARTIES[p].slots[i] });
@@ -249,8 +251,8 @@ function consolidate(signups, numParties = 4) {
   return base;
 }
 
-function reallocate(signups, numParties = 4) {
-  const { assignment } = solve(signups, numParties);
+function reallocate(signups, numParties = 4, partyList = null) {
+  const { assignment } = solve(signups, numParties, partyList);
   return signups.map((su) => {
     const a = assignment.get(su.user_id);
     const np = a ? a.partyIndex : null;
@@ -273,18 +275,16 @@ function shortLabel(slot) {
   const ws = slot.accepts.map((a) => a.weapon);
   if (slot.locked) return "👑 CALLER";
   if (ws.length === 1) return ws[0];
-  if (ws[0] === "EXALTADO" && (slot.accepts[1]?.weight || 1) > 1) return "EXALTADO";
   if (ws.includes("SHADOW CALLER") || ws.includes("DANAÇÃO") || ws.includes("PÚTRIDO")) return "DEBUFF";
   if (ws.includes("CAÇA ESPÍRITOS") || ws.includes("ENTALHADA")) return "DEBUFF MELEE";
-  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "HEALER NATURE";
-  if (ws.includes("QUEDA SANTA") || ws.includes("EXALTADO") || ws.includes("CORROMPIDO")) return "HEALER HOLY";
+  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "NATURE";
   if (slot.role === "Healer") return "HEALER";
   if (slot.role === "Tank") return "TANK";
   if (slot.role === "Support") return "SUPORTE";
   return "DPS";
 }
 
-function renderRoster(signups, numParties = 4) {
+function renderRoster(signups, numParties = 4, partyList = null) {
   const bySlot = new Map();
   const reserves = [];
   for (const su of signups) {
@@ -292,8 +292,12 @@ function renderRoster(signups, numParties = 4) {
     else reserves.push(su);
   }
   const blocks = [];
-  for (let p = 0; p < numParties; p++) {
+  const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
+  let displayNum = 0;
+  for (const p of parties) {
+    displayNum++;
     const party = PARTIES[p];
+    const label = partyList ? `Party ${displayNum}` : party.name; // castelo renomeia 1,2,3
     const lines = [];
     let filled = 0;
     for (let i = 0; i < party.slots.length; i++) {
@@ -312,7 +316,7 @@ function renderRoster(signups, numParties = 4) {
         lines.push(`\`${n}\` ${shortLabel(slot)} — *vazio*`);
       }
     }
-    blocks.push(`__**${party.name}** (${filled}/${party.slots.length})__\n${lines.join("\n")}`);
+    blocks.push(`__**${label}** (${filled}/${party.slots.length})__\n${lines.join("\n")}`);
   }
   if (reserves.length) {
     blocks.push(

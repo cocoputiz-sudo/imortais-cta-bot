@@ -73,6 +73,41 @@ async function init() {
       UNIQUE (event_id, user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS castelos (
+      id          BIGSERIAL PRIMARY KEY,
+      guild_id    TEXT NOT NULL,
+      time_label  TEXT NOT NULL,
+      owner_id    TEXT NOT NULL,
+      voice_id    TEXT,
+      thread_id   TEXT,
+      roster_msg  TEXT,
+      status      TEXT NOT NULL DEFAULT 'aberto',    -- aberto | contando | fechado | pago
+      valor       BIGINT,
+      started_at  TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS castelo_signups (
+      id          BIGSERIAL PRIMARY KEY,
+      castelo_id  BIGINT NOT NULL REFERENCES castelos(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      weapon      TEXT NOT NULL,
+      presence    TEXT NOT NULL DEFAULT 'online',
+      party_index INT,
+      slot_index  INT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (castelo_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS castelo_presence (
+      id          BIGSERIAL PRIMARY KEY,
+      castelo_id  BIGINT NOT NULL REFERENCES castelos(id) ON DELETE CASCADE,
+      user_id     TEXT NOT NULL,
+      username    TEXT NOT NULL,
+      joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      left_at     TIMESTAMPTZ,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS roamings (
       id          BIGSERIAL PRIMARY KEY,
       guild_id    TEXT NOT NULL,
@@ -375,6 +410,62 @@ async function finishSeason(guildId) {
   return rows[0];
 }
 
+// ---- CASTELO ----
+async function createCastelo({ guildId, timeLabel, ownerId }) {
+  const { rows } = await pool.query(`INSERT INTO castelos (guild_id, time_label, owner_id) VALUES ($1,$2,$3) RETURNING *`, [guildId, timeLabel, ownerId]);
+  return rows[0];
+}
+async function getCastelo(guildId, timeLabel) {
+  const { rows } = await pool.query(`SELECT * FROM castelos WHERE guild_id=$1 AND time_label=$2 AND status!='pago' ORDER BY created_at DESC LIMIT 1`, [guildId, timeLabel]);
+  return rows[0];
+}
+async function getCasteloById(id) {
+  const { rows } = await pool.query(`SELECT * FROM castelos WHERE id=$1`, [id]);
+  return rows[0];
+}
+async function getOpenCastelos(guildId) {
+  const { rows } = await pool.query(`SELECT * FROM castelos WHERE guild_id=$1 AND status!='pago' ORDER BY created_at DESC`, [guildId]);
+  return rows;
+}
+async function setCasteloField(id, field, value) {
+  const allowed = ["voice_id","thread_id","roster_msg","status","valor","started_at"];
+  if (!allowed.includes(field)) return;
+  await pool.query(`UPDATE castelos SET ${field}=$1 WHERE id=$2`, [value, id]);
+}
+async function upsertCasteloSignup(row) {
+  await pool.query(
+    `INSERT INTO castelo_signups (castelo_id, user_id, username, weapon, presence, party_index, slot_index)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (castelo_id, user_id) DO UPDATE SET weapon=EXCLUDED.weapon, presence=EXCLUDED.presence, party_index=EXCLUDED.party_index, slot_index=EXCLUDED.slot_index`,
+    [row.casteloId, row.userId, row.username, row.weapon, row.presence, row.partyIndex, row.slotIndex]
+  );
+}
+async function getCasteloSignups(casteloId) {
+  const { rows } = await pool.query(`SELECT * FROM castelo_signups WHERE castelo_id=$1 ORDER BY created_at ASC`, [casteloId]);
+  return rows;
+}
+async function deleteCasteloSignup(casteloId, userId) {
+  const { rows } = await pool.query(`DELETE FROM castelo_signups WHERE castelo_id=$1 AND user_id=$2 RETURNING *`, [casteloId, userId]);
+  return rows[0];
+}
+async function moveCasteloSignup(casteloId, userId, partyIndex, slotIndex) {
+  await pool.query(`UPDATE castelo_signups SET party_index=$3, slot_index=$4 WHERE castelo_id=$1 AND user_id=$2`, [casteloId, userId, partyIndex, slotIndex]);
+}
+async function casteloVoiceJoin(casteloId, userId, username) {
+  await pool.query(`UPDATE castelo_presence SET left_at=now() WHERE castelo_id=$1 AND user_id=$2 AND left_at IS NULL`, [casteloId, userId]);
+  await pool.query(`INSERT INTO castelo_presence (castelo_id, user_id, username) VALUES ($1,$2,$3)`, [casteloId, userId, username]);
+}
+async function casteloVoiceLeave(casteloId, userId) {
+  await pool.query(`UPDATE castelo_presence SET left_at=now() WHERE castelo_id=$1 AND user_id=$2 AND left_at IS NULL`, [casteloId, userId]);
+}
+async function casteloCloseAllOpen(casteloId) {
+  await pool.query(`UPDATE castelo_presence SET left_at=now() WHERE castelo_id=$1 AND left_at IS NULL`, [casteloId]);
+}
+async function getCasteloPresence(casteloId) {
+  const { rows } = await pool.query(`SELECT * FROM castelo_presence WHERE castelo_id=$1 ORDER BY user_id, joined_at`, [casteloId]);
+  return rows;
+}
+
 // ---- ROAMING ----
 async function createRoaming({ guildId, nome, ownerId, vagas }) {
   const { rows } = await pool.query(
@@ -447,4 +538,7 @@ module.exports = {
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
   upsertRoamingSignup, getRoamingSignups, deleteRoamingSignup,
   roamingVoiceJoin, roamingVoiceLeave, roamingCloseAllOpen, getRoamingPresence,
+  createCastelo, getCastelo, getCasteloById, getOpenCastelos, setCasteloField,
+  upsertCasteloSignup, getCasteloSignups, deleteCasteloSignup, moveCasteloSignup,
+  casteloVoiceJoin, casteloVoiceLeave, casteloCloseAllOpen, getCasteloPresence,
 };
