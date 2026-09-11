@@ -1,29 +1,24 @@
 // ============================================================================
-// SLASH COMMANDS de gestão do CTA (Onda 1)
-//   /cta_move   - move alguém já inscrito pra outra vaga (PT+arma ou PT+vaga)
-//   /cta_remove - tira a pessoa do CTA (igual "sair da função")
-//   /cta_add    - adiciona alguém (mesmo sem ter pingado) numa vaga
-//   /cta_clean  - esvazia uma PT inteira (com confirmação)
-// Todos: só cargo Mestre de Guerra, usados no cta-log-staff, cta via autocomplete.
+// SLASH COMMANDS de gestão do CTA
 // ============================================================================
 const {
   REST, Routes, SlashCommandBuilder,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } = require("discord.js");
 const db = require("./db");
 const { PARTIES, WEAPONS } = require("./comps");
 
-const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null; // Mestre de Guerra
+const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 
-// -------- definição dos comandos --------
 function commandDefs() {
   const ctaOpt = (o) => o.setName("cta").setDescription("Qual CTA (horário)").setRequired(true).setAutocomplete(true);
   const userOpt = (o) => o.setName("usuario").setDescription("Jogador").setRequired(true);
-  const ptOpt = (o) => o.setName("pt").setDescription("Número da PT (1-4)").setRequired(true).setMinValue(1).setMaxValue(4);
+  const ptOpt = (o) => o.setName("pt").setDescription("Número da PT (1-5)").setRequired(true).setMinValue(1).setMaxValue(5);
   const vagaOpt = (o) => o.setName("vaga").setDescription("Número da vaga (1-20)").setMinValue(1).setMaxValue(20);
   const armaOpt = (o) => o.setName("arma").setDescription("Arma").setAutocomplete(true);
 
   return [
+    new SlashCommandBuilder().setName("cta_press_pt").setDescription("Adiciona a Party 5 (PT5) ao CTA")
+      .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("cta_move").setDescription("Move um jogador já inscrito pra outra vaga")
       .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),
@@ -51,32 +46,31 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_meurank").setDescription("Tua pontuação de presença na temporada atual"),
     // ---- ROAMING ----
     new SlashCommandBuilder().setName("roaming").setDescription("Cria um roaming (caller)")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming, ex: badmack").setRequired(true))
-      .addIntegerOption(o=>o.setName("vagas").setDescription("12, 16 ou 20").setRequired(true).addChoices({name:"12",value:12},{name:"16",value:16},{name:"20",value:20})),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming, ex: badmack").setRequired(true))
+      .addIntegerOption((o) => o.setName("vagas").setDescription("12, 16 ou 20").setRequired(true).addChoices({ name: "12", value: 12 }, { name: "16", value: 16 }, { name: "20", value: 20 })),
     new SlashCommandBuilder().setName("roaming_start").setDescription("Começa a contar presença do roaming")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
     new SlashCommandBuilder().setName("roaming_value").setDescription("Informa a prata arrecadada")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
-      .addIntegerOption(o=>o.setName("valor").setDescription("Prata total, ex: 42000000").setRequired(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addIntegerOption((o) => o.setName("valor").setDescription("Prata total, ex: 42000000").setRequired(true)),
     new SlashCommandBuilder().setName("roaming_finish").setDescription("Encerra e calcula a divisão")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
     new SlashCommandBuilder().setName("roaming_saldo").setDescription("Mostra a divisão do roaming")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
     new SlashCommandBuilder().setName("roaming_meu_saldo").setDescription("Teu saldo no roaming")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
     new SlashCommandBuilder().setName("roaming_remove").setDescription("Remove alguém do roaming")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
-      .addUserOption(o=>o.setName("usuario").setDescription("Quem remover").setRequired(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addUserOption((o) => o.setName("usuario").setDescription("Quem remover").setRequired(true)),
     new SlashCommandBuilder().setName("roaming_fill").setDescription("Adiciona alguém no roaming")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
-      .addUserOption(o=>o.setName("usuario").setDescription("Quem adicionar").setRequired(true))
-      .addStringOption(o=>o.setName("funcao").setDescription("Função (tank/dps/healer/sup/caller)").setRequired(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addUserOption((o) => o.setName("usuario").setDescription("Quem adicionar").setRequired(true))
+      .addStringOption((o) => o.setName("funcao").setDescription("Função (tank/dps/healer/sup/caller)").setRequired(true)),
     new SlashCommandBuilder().setName("roaming_pago").setDescription("Marca o roaming como pago")
-      .addStringOption(o=>o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
   ].map((c) => c.toJSON());
 }
 
-// -------- registro no servidor (instantâneo, por guild) --------
 async function registerCommands(clientId, guildId) {
   if (!process.env.DISCORD_TOKEN) return;
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -84,13 +78,11 @@ async function registerCommands(clientId, guildId) {
   console.log("✅ Slash commands registrados no servidor", guildId);
 }
 
-// -------- checagem de permissão (Mestre de Guerra) --------
 function isStaff(interaction) {
-  if (!STAFF_ROLE_ID) return true; // se não configurado, não bloqueia (mas avisa no log)
+  if (!STAFF_ROLE_ID) return true;
   return interaction.member?.roles?.cache?.has(STAFF_ROLE_ID);
 }
 
-// -------- autocomplete (cta e arma) --------
 async function handleAutocomplete(interaction) {
   const focused = interaction.options.getFocused(true);
   if (focused.name === "cta") {
@@ -104,25 +96,22 @@ async function handleAutocomplete(interaction) {
     return interaction.respond(all.slice(0, 25).map((w) => ({ name: w, value: w })));
   }
   if (focused.name === "nome") {
-    // autocomplete de roamings abertos
     const rs = await db.getOpenRoamings(interaction.guildId);
     return interaction.respond(rs.slice(0, 25).map((r) => ({ name: `${r.nome} (${r.vagas}v)`, value: r.nome })));
   }
   return interaction.respond([]);
 }
 
-// helper: acha vaga alvo (por vaga exata, ou primeira livre da arma na PT)
 function resolveTargetSlot(partyIndex, vaga, arma, signups) {
-  const taken = new Set(signups.filter(s => s.party_index != null).map(s => `${s.party_index}:${s.slot_index}`));
-  if (vaga != null) return { partyIndex, slotIndex: vaga - 1 }; // vaga exata (força — staff mandou o número)
-  // por arma: primeira vaga livre da PT que aceite a arma
-  const slots = PARTIES[partyIndex].slots;
+  const taken = new Set(signups.filter((s) => s.party_index != null).map((s) => `${s.party_index}:${s.slot_index}`));
+  if (vaga != null) return { partyIndex, slotIndex: vaga - 1 };
+  const slots = PARTIES[partyIndex]?.slots || [];
   for (let i = 0; i < slots.length; i++) {
     if (taken.has(`${partyIndex}:${i}`)) continue;
-    if (slots[i].accepts.some(a => a.weapon.toUpperCase() === (arma || "").toUpperCase()))
+    if (slots[i].accepts.some((a) => a.weapon.toUpperCase() === (arma || "").toUpperCase())) {
       return { partyIndex, slotIndex: i };
+    }
   }
-  // NÃO acha vaga da arma -> retorna null (o handler avisa, NÃO força em vaga de função errada)
   return null;
 }
 

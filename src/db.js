@@ -1,4 +1,4 @@
-// Camada de banco (Postgres). Reaproveita o mesmo padrão do albion-attendance.
+// Camada de banco (Postgres)
 const { Pool } = require("pg");
 
 const pool = new Pool({
@@ -6,7 +6,6 @@ const pool = new Pool({
   ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false },
 });
 
-// Cria/atualiza as tabelas se ainda não existirem (roda no boot).
 async function init() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cta_events (
@@ -15,17 +14,18 @@ async function init() {
       channel_id  TEXT NOT NULL,
       thread_id   TEXT,
       caller_id   TEXT NOT NULL,
-      time_label  TEXT NOT NULL DEFAULT '',        -- AGORA: 1 horario por evento
-      status      TEXT NOT NULL DEFAULT 'open',      -- open | closed | cancelled
-      roster_msg  TEXT,                              -- id da msg de planilha ao vivo
-      remind_30   TIMESTAMPTZ,                       -- quando mandar aviso 30min
-      remind_10   TIMESTAMPTZ,                       -- quando mandar aviso 10min
+      time_label  TEXT NOT NULL DEFAULT '',
+      status      TEXT NOT NULL DEFAULT 'open',
+      num_parties INT NOT NULL DEFAULT 4,
+      roster_msg  TEXT,
+      remind_30   TIMESTAMPTZ,
+      remind_10   TIMESTAMPTZ,
       sent_30     BOOLEAN NOT NULL DEFAULT false,
       sent_10     BOOLEAN NOT NULL DEFAULT false,
-      bomb_thread TEXT,                             -- thread de contagem do bomb
-      bomb_comp   TEXT,                             -- 'invi'|'melee'|'kite' (fase B)
-      bomb_roster TEXT,                             -- ids das msgs da planilha do bomb
-      bomb_ping_msg TEXT,                           -- id da msg "Vai no CTA?" no bomb-ping
+      bomb_thread TEXT,
+      bomb_comp   TEXT,
+      bomb_roster TEXT,
+      bomb_ping_msg TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -34,7 +34,7 @@ async function init() {
       guild_id    TEXT NOT NULL,
       number      INT NOT NULL,
       started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-      ended_at    TIMESTAMPTZ,                        -- null = temporada aberta
+      ended_at    TIMESTAMPTZ,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -44,9 +44,9 @@ async function init() {
       user_id     TEXT NOT NULL,
       username    TEXT NOT NULL,
       channel_id  TEXT NOT NULL,
-      channel_kind TEXT NOT NULL,                    -- 'prep' | 'bomb'
+      channel_kind TEXT NOT NULL,
       joined_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-      left_at     TIMESTAMPTZ,                        -- null = ainda na call
+      left_at     TIMESTAMPTZ,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_voice_open ON voice_presence(user_id, channel_id) WHERE left_at IS NULL;
@@ -57,7 +57,7 @@ async function init() {
       event_id    BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
       user_id     TEXT NOT NULL,
       username    TEXT NOT NULL,
-      coming      BOOLEAN NOT NULL DEFAULT true,   -- true = vai, false = nao vai
+      coming      BOOLEAN NOT NULL DEFAULT true,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (event_id, user_id)
     );
@@ -68,7 +68,7 @@ async function init() {
       user_id     TEXT NOT NULL,
       username    TEXT NOT NULL,
       weapon      TEXT NOT NULL,
-      slot_index  INT,                               -- vaga na comp do bomb (null=reserva)
+      slot_index  INT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (event_id, user_id)
     );
@@ -77,14 +77,14 @@ async function init() {
       id          BIGSERIAL PRIMARY KEY,
       guild_id    TEXT NOT NULL,
       nome        TEXT NOT NULL,
-      owner_id    TEXT NOT NULL,                     -- quem criou (caller)
+      owner_id    TEXT NOT NULL,
       vagas       INT NOT NULL,
-      voice_id    TEXT,                              -- id da sala de voz criada
+      voice_id    TEXT,
       thread_id   TEXT,
       roster_msg  TEXT,
-      status      TEXT NOT NULL DEFAULT 'aberto',    -- aberto | contando | fechado | pago
-      valor       BIGINT,                            -- prata arrecadada
-      started_at  TIMESTAMPTZ,                       -- quando deu roaming-start
+      status      TEXT NOT NULL DEFAULT 'aberto',
+      valor       BIGINT,
+      started_at  TIMESTAMPTZ,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -93,7 +93,7 @@ async function init() {
       roaming_id  BIGINT NOT NULL REFERENCES roamings(id) ON DELETE CASCADE,
       user_id     TEXT NOT NULL,
       username    TEXT NOT NULL,
-      funcao      TEXT NOT NULL,                     -- Tank|Support|Melee|Ranged|Healer|Caller
+      funcao      TEXT NOT NULL,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (roaming_id, user_id)
     );
@@ -114,28 +114,27 @@ async function init() {
       user_id     TEXT NOT NULL,
       username    TEXT NOT NULL,
       weapon      TEXT NOT NULL,
-      presence    TEXT NOT NULL,                     -- online | later
-      party_index INT,                               -- null = reserva
+      presence    TEXT NOT NULL,
+      party_index INT,
       slot_index  INT,
-      ip          INT,                                -- IP (só p/ Ursinas/Cravadas, desempate vaga única)
+      ip          INT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE (event_id, user_id)                     -- 1 inscricao por pessoa por CTA
+      UNIQUE (event_id, user_id)
     );
   `);
-  // migracao leve: se veio da Fase 0 com coluna "times", ignora — as novas
-  // colunas acima cobrem o novo modelo.
+
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
   const { rows } = await pool.query(
-    `INSERT INTO cta_events (guild_id, channel_id, caller_id, time_label, remind_30, remind_10)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    `INSERT INTO cta_events (guild_id, channel_id, caller_id, time_label, remind_30, remind_10, num_parties)
+     VALUES ($1,$2,$3,$4,$5,$6, 4) RETURNING *`,
     [guildId, channelId, callerId, timeLabel, remind30 || null, remind10 || null]
   );
   return rows[0];
 }
 
-// lembretes vencidos ainda nao enviados (pro verificador periodico)
 async function getDueReminders(now) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_events
@@ -160,12 +159,15 @@ async function setRosterMsg(eventId, msgId) {
   await pool.query(`UPDATE cta_events SET roster_msg=$1 WHERE id=$2`, [msgId, eventId]);
 }
 
+async function setNumParties(eventId, numParties) {
+  await pool.query(`UPDATE cta_events SET num_parties=$1 WHERE id=$2`, [numParties, eventId]);
+}
+
 async function getEvent(eventId) {
   const { rows } = await pool.query(`SELECT * FROM cta_events WHERE id=$1`, [eventId]);
   return rows[0];
 }
 
-// acha o CTA pela thread da planilha (pro reconhecimento de texto)
 async function getEventByThread(threadId) {
   const { rows } = await pool.query(`SELECT * FROM cta_events WHERE thread_id=$1 LIMIT 1`, [threadId]);
   return rows[0];
@@ -219,8 +221,6 @@ async function setTimeLabel(eventId, timeLabel) {
   await pool.query(`UPDATE cta_events SET time_label=$1 WHERE id=$2`, [timeLabel, eventId]);
 }
 
-
-// CTAs abertos (pro autocomplete do slash command)
 async function getOpenEvents(guildId) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_events WHERE guild_id=$1 AND status='open' ORDER BY created_at DESC`,
@@ -229,7 +229,6 @@ async function getOpenEvents(guildId) {
   return rows;
 }
 
-// acha evento aberto por rótulo de horário (ex "17:20")
 async function getOpenEventByTime(guildId, timeLabel) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_events WHERE guild_id=$1 AND status='open' AND time_label=$2
@@ -239,7 +238,6 @@ async function getOpenEventByTime(guildId, timeLabel) {
   return rows[0];
 }
 
-// quem está numa vaga específica (ou null)
 async function getSignupAtSlot(eventId, partyIndex, slotIndex) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_signups WHERE event_id=$1 AND party_index=$2 AND slot_index=$3`,
@@ -248,7 +246,6 @@ async function getSignupAtSlot(eventId, partyIndex, slotIndex) {
   return rows[0];
 }
 
-// remove todos os signups de uma PT (cta_clean) -> retorna quantos saíram
 async function clearParty(eventId, partyIndex) {
   const { rowCount } = await pool.query(
     `DELETE FROM cta_signups WHERE event_id=$1 AND party_index=$2`,
@@ -257,7 +254,6 @@ async function clearParty(eventId, partyIndex) {
   return rowCount;
 }
 
-// move um signup pra uma vaga (usado por cta_move/add); mantém arma/presença
 async function moveSignupToSlot(eventId, userId, partyIndex, slotIndex) {
   await pool.query(
     `UPDATE cta_signups SET party_index=$3, slot_index=$4 WHERE event_id=$1 AND user_id=$2`,
@@ -265,8 +261,7 @@ async function moveSignupToSlot(eventId, userId, partyIndex, slotIndex) {
   );
 }
 
-
-// ---- BOMB (fase A: contagem) ----
+// ---- BOMB ----
 async function setBombThread(eventId, threadId) {
   await pool.query(`UPDATE cta_events SET bomb_thread=$1 WHERE id=$2`, [threadId, eventId]);
 }
@@ -314,10 +309,8 @@ async function deleteBombSignup(eventId, userId) {
   return rows[0];
 }
 
-// ---- PRESENÇA EM CALL (attendance camada 1) ----
-// abre um registro de presença (entrou na call)
+// ---- PRESENÇA EM CALL ----
 async function voiceJoin(guildId, userId, username, channelId, channelKind) {
-  // fecha qualquer registro aberto dessa pessoa nesse canal (segurança contra duplicata)
   await pool.query(
     `UPDATE voice_presence SET left_at=now() WHERE user_id=$1 AND channel_id=$2 AND left_at IS NULL`,
     [userId, channelId]
@@ -328,20 +321,17 @@ async function voiceJoin(guildId, userId, username, channelId, channelKind) {
     [guildId, userId, username, channelId, channelKind]
   );
 }
-// fecha o registro aberto (saiu da call)
 async function voiceLeave(userId, channelId) {
   await pool.query(
     `UPDATE voice_presence SET left_at=now() WHERE user_id=$1 AND channel_id=$2 AND left_at IS NULL`,
     [userId, channelId]
   );
 }
-// fecha TODOS os registros abertos (usado no boot, pra não deixar sessão órfã de antes do restart)
 async function voiceCloseAllOpen(channelId) {
   await pool.query(
     `UPDATE voice_presence SET left_at=now() WHERE channel_id=$1 AND left_at IS NULL`, [channelId]
   );
 }
-// presença dentro de uma janela de tempo (pro relatório futuro)
 async function getPresenceInWindow(guildId, channelKind, startUTC, endUTC) {
   const { rows } = await pool.query(
     `SELECT * FROM voice_presence
@@ -353,7 +343,6 @@ async function getPresenceInWindow(guildId, channelKind, startUTC, endUTC) {
   return rows;
 }
 
-// todos os CTAs (eventos) criados num período — pro relatório de attendance
 async function getEventsInRange(guildId, startUTC, endUTC) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_events
@@ -365,7 +354,6 @@ async function getEventsInRange(guildId, startUTC, endUTC) {
 }
 
 // ---- TEMPORADAS ----
-// temporada atual (aberta) do servidor, ou null se em off-season/nenhuma
 async function getCurrentSeason(guildId) {
   const { rows } = await pool.query(
     `SELECT * FROM seasons WHERE guild_id=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
@@ -373,7 +361,6 @@ async function getCurrentSeason(guildId) {
   );
   return rows[0];
 }
-// inicia uma temporada: fecha a atual (se houver) e cria a nova
 async function startSeason(guildId, number) {
   await pool.query(`UPDATE seasons SET ended_at=now() WHERE guild_id=$1 AND ended_at IS NULL`, [guildId]);
   const { rows } = await pool.query(
@@ -381,7 +368,6 @@ async function startSeason(guildId, number) {
   );
   return rows[0];
 }
-// fecha a temporada atual
 async function finishSeason(guildId) {
   const { rows } = await pool.query(
     `UPDATE seasons SET ended_at=now() WHERE guild_id=$1 AND ended_at IS NULL RETURNING *`, [guildId]
@@ -415,7 +401,7 @@ async function getOpenRoamings(guildId) {
   return rows;
 }
 async function setRoamingField(id, field, value) {
-  const allowed = ["voice_id","thread_id","roster_msg","status","valor","started_at"];
+  const allowed = ["voice_id", "thread_id", "roster_msg", "status", "valor", "started_at"];
   if (!allowed.includes(field)) return;
   await pool.query(`UPDATE roamings SET ${field}=$1 WHERE id=$2`, [value, id]);
 }
@@ -450,7 +436,7 @@ async function getRoamingPresence(roamingId) {
 }
 
 module.exports = {
-  pool, init, createEvent, setThread, setRosterMsg, getEvent, getEventByThread,
+  pool, init, createEvent, setThread, setRosterMsg, setNumParties, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,

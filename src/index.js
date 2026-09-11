@@ -1,10 +1,5 @@
 // ============================================================================
 // BOT CTA — IMORTAIS  |  Fase 1
-// - post no #cta-mandatorio -> caller escolhe horarios -> 1 thread por horario
-// - inscricao (papel -> arma -> presenca) com engine de PESO + tetos
-// - NUDGE de troca (Sim/Nao) quando ha vaga melhor da mesma familia
-// - "Sair da funcao", "Cancelar CTA", log ao vivo no #cta-log-staff
-// - LEMBRETES 30 e 10 min antes (robustos: verificador le do banco)
 // ============================================================================
 const {
   Client, GatewayIntentBits, Partials, Events,
@@ -30,9 +25,9 @@ const CFG = {
   bombPingChannelId: process.env.BOMB_PING_CHANNEL_ID || null,
   bombRoleId: process.env.BOMB_ROLE_ID || null,
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
-  prepVoiceId: process.env.PREP_VOICE_ID || null,   // 🚨 Preparação
-  contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640", // ping-de-conteúdo
-  bombVoiceId: process.env.BOMB_VOICE_ID || null,   // 💣 Bomb Squad
+  prepVoiceId: process.env.PREP_VOICE_ID || null,
+  contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
+  bombVoiceId: process.env.BOMB_VOICE_ID || null,
   presetTimes: (process.env.PRESET_TIMES || "16:20,17:20,19:20,21:20,23:00,01:20").split(","),
 };
 
@@ -41,17 +36,14 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-// menu do papel pra armas do catalogo
 function catalog(role) { return WEAPON_CATALOG[role] || []; }
 
-// ======= util de horario: "17:20" -> Date de HOJE em UTC ===================
 function timeToTodayUTC(label) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(label.trim());
   if (!m) return null;
   const now = new Date();
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
     parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
-  return d;
 }
 
 // ======================  1) GATILHO  =======================================
@@ -65,12 +57,10 @@ client.on(Events.MessageCreate, async (msg) => {
       });
       return;
     }
-    // reconhecimento de texto DENTRO das threads de planilha de CTA
     if (msg.channel?.isThread?.()) await onThreadText(msg);
   } catch (e) { console.error("trigger:", e); }
 });
 
-// mapa de palavras -> papel
 const ROLE_WORDS = {
   tank: "Tank",
   sup: "Support", suporte: "Support", support: "Support",
@@ -80,23 +70,19 @@ const ROLE_WORDS = {
   loot: "Looter", looter: "Looter",
 };
 
-// tira acento e normaliza pra comparar
 function norm(s) {
   return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 }
 
-// interpreta uma mensagem curta na thread como inscrição (papel ou arma)
 async function onThreadText(msg) {
   const text = norm(msg.content);
-  if (!text || text.length > 40) return;          // só mensagens curtas
+  if (!text || text.length > 40) return;
   const words = text.split(/\s+/);
-  if (words.length > 4) return;                     // ignora frases longas (conversa)
+  if (words.length > 4) return;
 
-  // acha o CTA daquela thread
   const ev = await db.getEventByThread(msg.channelId);
   if (!ev || ev.status !== "open") return;
 
-  // 1) tenta casar NOME DE ARMA (a mensagem inteira ou parte dela)
   const weapons = Object.keys(WEAPONS);
   let matchedWeapon = null;
   for (const w of weapons) {
@@ -104,41 +90,31 @@ async function onThreadText(msg) {
   }
   if (matchedWeapon) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, null, matchedWeapon); }
 
-  // 2) tenta casar PAPEL
   for (const word of words) {
     if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, ROLE_WORDS[word], null); }
   }
 
-  // 3) tenta casar NÚMERO DE VAGA (1-20): lista todas as armas cabíveis naquela
-  //    posição em QUALQUER PT (a função é consistente entre PTs; a arma varia)
   if (/^\d{1,2}$/.test(text)) {
     const vaga = parseInt(text, 10);
     if (vaga >= 1 && vaga <= 20) { await msg.delete().catch(() => {}); return startSignupFromSlotNumber(msg, ev, vaga); }
   }
-  // não reconheceu -> ignora silenciosamente (era conversa normal)
 }
 
-// dispara o fluxo de inscrição a partir do texto reconhecido
 async function startSignupFromText(msg, ev, role, weapon) {
-  // LOOTER por texto
   if (role === "Looter") {
-    const fakeInteraction = null; // looter via texto: grava direto
     const username = msg.member?.displayName || msg.author.username;
     await db.upsertSignup({ eventId: ev.id, userId: msg.author.id, username, weapon: "LOOTER", presence: "online", partyIndex: null, slotIndex: null, ip: null });
     await applyReallocationMsg(ev, msg.guild);
     await msg.channel.send({ content: `💰 ${msg.author}, você entrou como **Looter**.` }).catch(() => {});
     return;
   }
-  // se veio ARMA direto
   if (weapon) {
     const role2 = WEAPONS[weapon]?.role;
     const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
     if (IP_WEAPONS.includes(weapon.toUpperCase())) {
-      // precisa do IP -> manda a pessoa usar o botão (modal não abre a partir de msg de texto)
       await msg.channel.send({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
       return;
     }
-    // pergunta presença — botões amarrados ao AUTOR (só ele pode clicar)
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}|0|${msg.author.id}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}|0|${msg.author.id}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
@@ -146,7 +122,6 @@ async function startSignupFromText(msg, ev, role, weapon) {
     await msg.channel.send({ content: `${msg.author}, **${weapon}** — e aí, presença?`, components: [row] }).catch(() => {});
     return;
   }
-  // se veio só PAPEL -> abre menu de armas daquele papel (amarrado ao autor)
   const armas = WEAPON_CATALOG[role] || [];
   if (!armas.length) return;
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
@@ -154,15 +129,13 @@ async function startSignupFromText(msg, ev, role, weapon) {
   await msg.channel.send({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
 
-// entrada por NÚMERO DE VAGA: junta todas as armas cabíveis naquela posição
-// em qualquer PT e deixa a pessoa escolher (a função é a mesma; a arma varia)
 async function startSignupFromSlotNumber(msg, ev, vaga) {
   const idx = vaga - 1;
   const { PARTIES } = require("./comps");
   const armasSet = new Set();
   for (let p = 0; p < PARTIES.length; p++) {
     const slot = PARTIES[p].slots[idx];
-    if (!slot || slot.locked) continue; // pula vaga do caller
+    if (!slot || slot.locked) continue;
     for (const a of slot.accepts) armasSet.add(a.weapon);
   }
   const armas = [...armasSet];
@@ -175,14 +148,15 @@ async function startSignupFromSlotNumber(msg, ev, vaga) {
   await msg.channel.send({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
 
-// versão do applyReallocation chamada a partir de uma mensagem (sem interaction)
 async function applyReallocationMsg(ev, guild) {
-  const signups = await db.getSignups(ev.id);
-  const result = reallocate(signups);
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  const numParties = fresh.num_parties || 4;
+  const signups = await db.getSignups(fresh.id);
+  const result = reallocate(signups, numParties);
   for (const r of result) {
-    if (r.moved) await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
+    if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
-  refreshRoster(ev);
+  refreshRoster(fresh);
 }
 
 function buildTimePicker(selected, callerId) {
@@ -198,9 +172,7 @@ function buildTimePicker(selected, callerId) {
   return rows;
 }
 
-// ======================  ROTEADOR  =========================================
-// ======================  PRESENÇA EM CALL (attendance)  ====================
-// mapeia um channelId pro tipo ('prep' | 'bomb' | null)
+// ======================  PRESENÇA EM CALL ==================================
 function voiceKind(channelId) {
   if (channelId && channelId === CFG.prepVoiceId) return "prep";
   if (channelId && channelId === CFG.bombVoiceId) return "bomb";
@@ -211,22 +183,19 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   try {
     const oldCh = oldState.channelId;
     const newCh = newState.channelId;
-    if (oldCh === newCh) return; // mudou mute/deaf/etc, não mudou de canal
+    if (oldCh === newCh) return;
 
     const member = newState.member || oldState.member;
     const username = member?.displayName || member?.user?.username || "?";
     const guildId = (newState.guild || oldState.guild).id;
 
-    // saiu de uma call monitorada
     const oldKind = voiceKind(oldCh);
     if (oldKind) await db.voiceLeave(member.id, oldCh);
 
-    // entrou numa call monitorada
     const newKind = voiceKind(newCh);
     if (newKind) await db.voiceJoin(guildId, member.id, username, newCh, newKind);
 
-    // ROAMING: a sala é dinâmica — checa se old/new é sala de algum roaming contando
-    const roamings = await db.getOpenRoamings(guildId).catch(()=>[]);
+    const roamings = await db.getOpenRoamings(guildId).catch(() => []);
     for (const r of roamings) {
       if (r.status !== "contando" || !r.voice_id) continue;
       if (oldCh === r.voice_id) await db.roamingVoiceLeave(r.id, member.id);
@@ -241,7 +210,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isChatInputCommand()) return onSlash(interaction);
     if (interaction.isButton()) {
       const [bk] = interaction.customId.split("|");
-      if (bk === "occ") return onOccupantChoice(interaction); // pergunta interativa
+      if (bk === "occ") return onOccupantChoice(interaction);
       if (bk === "bombyes") return onBombConfirm(interaction, true);
       if (bk === "bombno")  return onBombConfirm(interaction, false);
       if (bk === "bombcomp") return onBombCompChoice(interaction);
@@ -300,7 +269,6 @@ async function onTimeConfirm(interaction) {
   const times = csv.split(",").filter(Boolean);
   if (!times.length) return interaction.reply({ content: "Marca um horário.", flags: MessageFlags.Ephemeral });
 
-  // ordena cronologicamente (mais cedo primeiro), independente da ordem de clique
   times.sort((a, b) => {
     const [ha, ma] = a.split(":").map(Number);
     const [hb, mb] = b.split(":").map(Number);
@@ -331,13 +299,12 @@ async function onTimeConfirm(interaction) {
       content: `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`,
       components: buildRolePicker(ev.id),
     });
-    const chunks = rosterChunks([]);
+    const chunks = rosterChunks([], 4);
     const ids = [];
     for (const c of chunks) { const m = await thread.send({ content: c }); ids.push(m.id); }
     await db.setRosterMsg(ev.id, ids.join(","));
     created.push(`• **${time}** → ${thread}`);
     await logStaff(interaction.guild, `🆕 CTA **${time} UTC** criado por <@${callerId}>.`);
-    // aviso no ping-de-conteúdo: saiu CTA, com link direto pra thread
     if (CFG.contentPingChannelId) {
       const cch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
       if (cch) {
@@ -346,8 +313,8 @@ async function onTimeConfirm(interaction) {
         await cch.send({ content: `${mention} 🗡️ **Saiu CTA — ${time} UTC!** Loga e pinga tua função.\n👉 ${link}`, ...allow }).catch(() => {});
       }
     }
-    await postBombPing(interaction.guild, ev, time); // aviso no bomb-ping
-    await new Promise((r) => setTimeout(r, 1200)); // respiro anti rate-limit
+    await postBombPing(interaction.guild, ev, time);
+    await new Promise((r) => setTimeout(r, 1200));
   }
   await interaction.editReply({ content: `✅ Planilha(s):\n${created.join("\n")}`, components: [] });
 }
@@ -371,7 +338,7 @@ async function onRolePick(interaction) {
   const [, eventId, role] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
   if (!ev)
-    return interaction.reply({ content: "⚠️ Não achei esse CTA no sistema (evento perdido). Avisa o caller.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: "⚠️ Não achei esse CTA no sistema. Avisa o caller.", flags: MessageFlags.Ephemeral });
   if (ev.status !== "open")
     return interaction.reply({ content: `Esse CTA está **${ev.status === "cancelled" ? "cancelado" : "fechado"}**.`, flags: MessageFlags.Ephemeral });
   const weapons = catalog(role);
@@ -383,11 +350,9 @@ async function onRolePick(interaction) {
 
 async function onWeaponPick(interaction) {
   const [, eventId, ownerId] = interaction.customId.split("|");
-  // se o menu veio do reconhecimento de texto (tem ownerId), só o autor pode usar
   if (ownerId && interaction.user.id !== ownerId)
     return interaction.reply({ content: "Esse menu é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const weapon = interaction.values[0];
-  // Ursinas e Cravadas (vagas únicas): pede o IP antes, pra desempate
   const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
   if (IP_WEAPONS.includes(weapon.toUpperCase())) {
     const modal = new ModalBuilder().setCustomId(`ipmodal|${eventId}|${encodeURIComponent(weapon)}`)
@@ -404,11 +369,10 @@ async function onWeaponPick(interaction) {
   await interaction.update({ content: `**${weapon}** selecionada. E aí:`, components: [row] });
 }
 
-// recebe o IP digitado (Ursinas/Cravadas) -> mostra botões de presença carregando o IP
 async function onIpModal(interaction) {
   const [, eventId, wEnc] = interaction.customId.split("|");
   const weapon = decodeURIComponent(wEnc);
-  const raw = interaction.fields.getTextInputValue("ip").replace(/\D/g, ""); // só dígitos
+  const raw = interaction.fields.getTextInputValue("ip").replace(/\D/g, "");
   const ip = parseInt(raw, 10);
   if (!ip || ip < 100 || ip > 2000)
     return interaction.reply({ content: "IP inválido. Digita só o número, ex: 1450.", flags: MessageFlags.Ephemeral });
@@ -422,23 +386,20 @@ async function onIpModal(interaction) {
 async function onPresence(interaction) {
   const [, eventId, presence, weapon, ipStr, ownerId] = interaction.customId.split("|");
   const ip = ipStr && ipStr !== "0" ? parseInt(ipStr, 10) : null;
-  // se o botão veio do reconhecimento de texto (tem ownerId), só o autor pode clicar
   if (ownerId && interaction.user.id !== ownerId)
     return interaction.reply({ content: "Esse botão é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
-  await interaction.deferUpdate(); // responde ao Discord em <3s; trabalho pesado a seguir
+  await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
 
-  // grava a inscrição (sem vaga) e realoca TODO MUNDO de forma ótima
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
     partyIndex: null, slotIndex: null, ip,
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
 
-  // se escolheu arma de caller E é quem criou o CTA -> pergunta se é o caller
   const CALLER_WEAPONS = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO"];
   if (CALLER_WEAPONS.includes(weapon.toUpperCase()) && interaction.user.id === ev.caller_id) {
     const row = new ActionRowBuilder().addComponents(
@@ -463,7 +424,6 @@ async function onPresence(interaction) {
   await interaction.editReply({ content: msg, components: [] });
 }
 
-// entra como LOOTER: sem arma, prioridade mínima, preenche buraco fora da PT1
 async function onLooter(interaction) {
   const [, eventId] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
@@ -482,77 +442,68 @@ async function onLooter(interaction) {
   });
 }
 
-// ==========================================================================
-// REALOCAÇÃO: roda o solver em todos, persiste mudanças, notifica quem moveu.
-// Retorna a posição do usuário `focusUserId` (pra mensagem de confirmação dele).
-// Notificação com DEBOUNCE POR PESSOA (não spamma no pico).
-// ==========================================================================
-const notifyTimers = new Map();   // eventId:userId -> timeout
-const ctaFrozen = new Set();      // eventIds com formação congelada (consolidou / perto da hora)
-const notifyPending = new Map();  // eventId:userId -> {guild, threadId, text}
+const notifyTimers = new Map();
+const ctaFrozen = new Set();
+const notifyPending = new Map();
 
 async function applyReallocation(ev, guild, focusUserId) {
-  const signups = await db.getSignups(ev.id);
-  // se a formação está congelada (consolidou / perto da hora): não remaneja ninguém.
-  // só encaixa quem acabou de entrar (focusUserId) numa vaga vazia, sem mexer nos demais.
-  if (ctaFrozen.has(String(ev.id))) {
-    const taken = new Set(signups.filter(s => s.party_index != null && s.user_id !== focusUserId).map(s => `${s.party_index}:${s.slot_index}`));
-    const me = signups.find(s => s.user_id === focusUserId);
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  const numParties = fresh.num_parties || 4;
+  const signups = await db.getSignups(fresh.id);
+
+  if (ctaFrozen.has(String(fresh.id))) {
+    const taken = new Set(signups.filter((s) => s.party_index != null && s.user_id !== focusUserId).map((s) => `${s.party_index}:${s.slot_index}`));
+    const me = signups.find((s) => s.user_id === focusUserId);
     let myLoc = me && me.party_index != null ? { partyIndex: me.party_index, slotIndex: me.slot_index } : null;
     if (me && myLoc == null) {
-      // procura primeira vaga vazia que aceite a arma (sem mover ninguém)
       const { PARTIES } = require("./comps");
-      outer: for (let p = 0; p < PARTIES.length; p++) {
+      outer: for (let p = 0; p < numParties; p++) {
         for (let i = 0; i < PARTIES[p].slots.length; i++) {
           if (taken.has(`${p}:${i}`) || PARTIES[p].slots[i].locked) continue;
-          if (PARTIES[p].slots[i].accepts.some(a => a.weapon.toUpperCase() === (me.weapon||"").toUpperCase())) {
-            await db.moveSignupToSlot(ev.id, focusUserId, p, i);
+          if (PARTIES[p].slots[i].accepts.some((a) => a.weapon.toUpperCase() === (me.weapon || "").toUpperCase())) {
+            await db.moveSignupToSlot(fresh.id, focusUserId, p, i);
             myLoc = { partyIndex: p, slotIndex: i };
             break outer;
           }
         }
       }
     }
-    refreshRoster(ev);
+    refreshRoster(fresh);
     return myLoc;
   }
-  const result = reallocate(signups); // [{user_id, partyIndex, slotIndex, moved, ...}]
 
-  // persiste só quem mudou de vaga
+  const result = reallocate(signups, numParties);
+
   let focusLoc = null;
   for (const r of result) {
     if (r.user_id === focusUserId)
       focusLoc = r.partyIndex != null ? { partyIndex: r.partyIndex, slotIndex: r.slotIndex } : null;
     if (r.moved) {
-      await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
-      // notifica quem foi movido (menos quem acabou de entrar — esse recebe a confirmação normal)
+      await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
       if (r.user_id !== focusUserId) {
         const isUnique = ["URSINAS", "CRAVADAS"].includes((r.weapon || "").toUpperCase());
         if (r.partyIndex == null && isUnique) {
-          // perdeu a vaga única (Ursinas/Cravadas) por IP menor -> alerta especial c/ troca
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`role|${ev.id}|Melee`).setLabel("Trocar pra outra Melee").setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`role|${fresh.id}|Melee`).setLabel("Trocar pra outra Melee").setStyle(ButtonStyle.Primary),
           );
-          const thread = ev.thread_id ? await client.channels.fetch(ev.thread_id).catch(() => null) : null;
+          const thread = fresh.thread_id ? await client.channels.fetch(fresh.thread_id).catch(() => null) : null;
           if (thread) await thread.send({
-            content: `⚠️ <@${r.user_id}> só existe **1 vaga de ${r.weapon}** e alguém com IP maior assumiu. Quer entrar de outra melee?`,
+            content: `⚠️ <@${r.user_id}> só existe(m) vaga(s) limitada(s) de **${r.weapon}** e alguém com IP maior assumiu. Quer entrar de outra melee?`,
             components: [row],
           }).catch(() => {});
         } else {
           const to = r.partyIndex != null
             ? `**Party ${r.partyIndex + 1}**, vaga ${r.slotIndex + 1} (${r.weapon})`
             : `**reserva**`;
-          scheduleNotify(ev, guild, r.user_id, `🔄 <@${r.user_id}> você foi remanejado para ${to}.`);
+          scheduleNotify(fresh, guild, r.user_id, `🔄 <@${r.user_id}> você foi remanejado para ${to}.`);
         }
       }
     }
   }
-  refreshRoster(ev); // atualiza a planilha (já tem debounce próprio)
+  refreshRoster(fresh);
   return focusLoc;
 }
 
-// agenda uma notificação de remanejamento com debounce por pessoa (3s).
-// se a pessoa for movida de novo antes de 3s, a msg é substituída pela mais recente.
 function scheduleNotify(ev, guild, userId, text) {
   const key = `${ev.id}:${userId}`;
   notifyPending.set(key, { threadId: ev.thread_id, text });
@@ -575,7 +526,6 @@ async function onSwapYes(interaction) {
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
 
   await interaction.deferUpdate();
-  // re-checa se a vaga sugerida ainda esta livre
   const signups = await db.getSignups(eventId);
   const others = signups.filter((s) => s.user_id !== interaction.user.id);
   const occupied = others.some((s) => String(s.party_index) === p && String(s.slot_index) === i);
@@ -586,12 +536,12 @@ async function onSwapYes(interaction) {
   }
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon,
-    presence: (signups.find(s => s.user_id === interaction.user.id)?.presence) || "online",
+    presence: (signups.find((s) => s.user_id === interaction.user.id)?.presence) || "online",
     partyIndex: parseInt(p, 10), slotIndex: parseInt(i, 10),
   });
-  await interaction.editReply({ content: `🔄 Trocado! Agora você é **${weapon}** na Party ${parseInt(p,10)+1}.`, components: [] });
+  await interaction.editReply({ content: `🔄 Trocado! Agora você é **${weapon}** na Party ${parseInt(p, 10) + 1}.`, components: [] });
   await refreshRoster(ev);
-  await logStaff(interaction.guild, `🔄 **${username}** trocou para **${weapon}** → Party ${parseInt(p,10)+1} · CTA ${ev.time_label}`);
+  await logStaff(interaction.guild, `🔄 **${username}** trocou para **${weapon}** → Party ${parseInt(p, 10) + 1} · CTA ${ev.time_label}`);
 }
 
 async function onSwapNo(interaction) {
@@ -607,7 +557,7 @@ async function onLeave(interaction) {
   const removed = await db.deleteSignup(eventId, interaction.user.id);
   if (!removed) return interaction.reply({ content: "Você não estava inscrito.", flags: MessageFlags.Ephemeral });
   await interaction.reply({ content: "🚪 Saiu da função. Vaga liberada.", flags: MessageFlags.Ephemeral });
-  await applyReallocation(ev, interaction.guild, null); // realoca: reserva pode subir pra vaga livre
+  await applyReallocation(ev, interaction.guild, null);
   const username = interaction.member?.displayName || interaction.user.username;
   await logStaff(interaction.guild, `➖ **${username}** saiu (era **${removed.weapon}**) · CTA ${ev.time_label}`);
 }
@@ -623,7 +573,7 @@ async function onCancel(interaction) {
   await interaction.reply({ content: `❌ **CTA ${ev.time_label} CANCELADO** — inscrições travadas.` });
   await logStaff(interaction.guild, `❌ CTA **${ev.time_label} UTC** cancelado por <@${ev.caller_id}>.`);
   const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
-  if (thread) { await thread.setLocked(true).catch(()=>{}); await thread.setArchived(true).catch(()=>{}); }
+  if (thread) { await thread.setLocked(true).catch(() => {}); await thread.setArchived(true).catch(() => {}); }
 }
 
 async function onMontar(interaction) {
@@ -632,18 +582,18 @@ async function onMontar(interaction) {
   if (!ev) return interaction.reply({ content: "CTA não encontrado.", flags: MessageFlags.Ephemeral });
   if (interaction.user.id !== ev.caller_id)
     return interaction.reply({ content: "Só o caller monta.", flags: MessageFlags.Ephemeral });
-  // NAO fecha o CTA — só publica a lista atual. Inscrições continuam abertas.
+  const fresh = (await db.getEvent(eventId)) || ev;
+  const numParties = fresh.num_parties || 4;
   const signups = await db.getSignups(eventId);
-  const blocks = renderRoster(signups);
+  const blocks = renderRoster(signups, numParties);
   const half = Math.ceil(blocks.length / 2);
-  const p1 = `📋 **PT — CTA ${ev.time_label} UTC (1/2)**\n\n` + blocks.slice(0, half).join("\n\n");
-  const p2 = `📋 **PT — CTA ${ev.time_label} UTC (2/2)**\n\n` + blocks.slice(half).join("\n\n");
+  const p1 = `📋 **PT — CTA ${fresh.time_label} UTC (1/2)**\n\n` + blocks.slice(0, half).join("\n\n");
+  const p2 = `📋 **PT — CTA ${fresh.time_label} UTC (2/2)**\n\n` + blocks.slice(half).join("\n\n");
   await interaction.reply({ content: p1.slice(0, 1990) });
   await interaction.followUp({ content: p2.slice(0, 1990) });
-  await logStaff(interaction.guild, `📋 PT publicada · CTA **${ev.time_label} UTC** (${signups.length} inscritos). (CTA segue aberto)`);
+  await logStaff(interaction.guild, `📋 PT publicada · CTA **${fresh.time_label} UTC** (${signups.length} inscritos). (CTA segue aberto)`);
 }
 
-// fechar de vez (trava inscrições) — botão separado do Montar
 async function onFechar(interaction) {
   const [, eventId] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
@@ -656,10 +606,6 @@ async function onFechar(interaction) {
   await logStaff(interaction.guild, `🔒 CTA **${ev.time_label} UTC** fechado por <@${ev.caller_id}>.`);
 }
 
-
-
-
-// respondeu "sim, sou o caller" -> move pra v1 da pt1
 async function onCallerYes(interaction) {
   const [, eventId, wEnc] = interaction.customId.split("|");
   const weapon = decodeURIComponent(wEnc);
@@ -674,11 +620,10 @@ async function onCallerYes(interaction) {
     partyIndex: 0, slotIndex: 0,
   });
   await interaction.editReply({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
-  await applyReallocation(ev, interaction.guild, null); // realoca o resto após o caller assumir
+  await applyReallocation(ev, interaction.guild, null);
   await logStaff(interaction.guild, `👑 **${username}** assumiu caller (${weapon}) · CTA ${ev.time_label}`);
 }
 
-// respondeu "não sou caller" -> mantém o encaixe normal que já foi feito
 async function onCallerNo(interaction) {
   const [, eventId] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
@@ -689,27 +634,21 @@ async function onCallerNo(interaction) {
   await interaction.update({ content: `👍 Beleza. Você está em ${dest}.`, components: [] });
 }
 
-
 // ==================  SLASH COMMANDS  ======================================
 async function onSlash(interaction) {
   const name = interaction.commandName;
 
-  // comandos ABERTOS a qualquer Imortal (rank) — antes da checagem de staff
   if (name === "cta_rank")    return slashRank(interaction, false);
   if (name === "cta_meurank") return slashRank(interaction, true);
 
-  // ROAMING (permissão própria: caller dono ou GM)
   if (name.startsWith("roaming")) return onRoamingCommand(interaction);
 
-  // daqui pra baixo, só Mestre de Guerra
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
-  // temporadas (staff)
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
 
-  // attendance não depende de um CTA específico — trata antes
   if (name === "attendance_daily")   return slashAttendance(interaction, 1, "hoje");
   if (name === "attendance_week")    return slashAttendance(interaction, 7, "últimos 7 dias");
   if (name === "attendance_monthly") return slashAttendance(interaction, 30, "últimos 30 dias");
@@ -718,6 +657,7 @@ async function onSlash(interaction) {
   const ev = await db.getOpenEventByTime(interaction.guildId, timeLabel);
   if (!ev) return interaction.reply({ content: `Não achei um CTA aberto às ${timeLabel}.`, flags: MessageFlags.Ephemeral });
 
+  if (name === "cta_press_pt") return slashPressPt(interaction, ev);
   if (name === "cta_remove") return slashRemove(interaction, ev);
   if (name === "cta_clean")  return slashClean(interaction, ev);
   if (name === "cta_move")   return slashMoveOrAdd(interaction, ev, false);
@@ -727,14 +667,60 @@ async function onSlash(interaction) {
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
 }
 
-// aplica a consolidação (amontoamento por função prima) e persiste
-async function applyConsolidation(ev, guild) {
-  const signups = await db.getSignups(ev.id);
-  const result = consolidate(signups);
-  for (const r of result) {
-    if (r.moved) await db.moveSignupToSlot(ev.id, r.user_id, r.partyIndex, r.slotIndex);
+async function slashPressPt(interaction, ev) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  const currentNum = fresh.num_parties || 4;
+  if (currentNum >= 5) {
+    return interaction.editReply({ content: `⚠️ A **Party 5** já foi criada para o CTA ${fresh.time_label} UTC.` });
   }
-  refreshRoster(ev);
+  if (!fresh.thread_id) {
+    return interaction.editReply({ content: "⚠️ Thread deste CTA não encontrada." });
+  }
+  const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
+  if (!thread) {
+    return interaction.editReply({ content: "⚠️ Não foi possível acessar a thread do CTA no Discord." });
+  }
+
+  await db.setNumParties(fresh.id, 5);
+  fresh.num_parties = 5;
+
+  const signups = await db.getSignups(fresh.id);
+  const blocks = renderRoster(signups, 5);
+  const msg5 = await thread.send({
+    content: (blocks[4] || "__**Party 5** (0/20)__\n*vazio*").slice(0, 1990),
+  });
+
+  const currentIds = fresh.roster_msg ? String(fresh.roster_msg).split(",").filter(Boolean) : [];
+  currentIds.push(msg5.id);
+  const newRosterMsg = currentIds.join(",");
+  await db.setRosterMsg(fresh.id, newRosterMsg);
+  fresh.roster_msg = newRosterMsg;
+
+  const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+  const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+  await thread.send({
+    content: `${mention} 🛡️⚔️ **PARTY 5 LIBERADA!** (CTA ${fresh.time_label} UTC)\nMais 20 vagas abertas. Escolha sua função abaixo para entrar 👇`,
+    components: buildRolePicker(fresh.id),
+    ...allow,
+  });
+
+  await applyReallocation(fresh, interaction.guild, null);
+  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **Party 5** no CTA **${fresh.time_label} UTC**! (+20 vagas)`);
+  await interaction.editReply({
+    content: `✅ **Party 5 criada com sucesso** para o CTA **${fresh.time_label} UTC**!\nA mensagem da PT5 e os botões de inscrição foram enviados na thread ${thread}.`,
+  });
+}
+
+async function applyConsolidation(ev, guild) {
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  const numParties = fresh.num_parties || 4;
+  const signups = await db.getSignups(fresh.id);
+  const result = consolidate(signups, numParties);
+  for (const r of result) {
+    if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
+  }
+  refreshRoster(fresh);
   return result;
 }
 
@@ -743,7 +729,6 @@ async function slashConsolidar(interaction, ev) {
   await applyConsolidation(ev, interaction.guild);
   await interaction.editReply({ content: `🧲 Participantes amontoados nas PTs da frente (CTA ${ev.time_label}).` });
   await logStaff(interaction.guild, `🧲 ${interaction.user} disparou o amontoamento · CTA ${ev.time_label}`);
-  // trava a realocação a partir daqui (consolidou = formação fecha)
   ctaFrozen.add(String(ev.id));
 }
 
@@ -754,7 +739,6 @@ function isCaller(interaction) {
 function isGM(interaction) {
   return process.env.STAFF_ROLE_ID && interaction.member?.roles?.cache?.has(process.env.STAFF_ROLE_ID);
 }
-// pode gerenciar este roaming? (dono ou GM)
 function canManageRoaming(interaction, r) {
   return isGM(interaction) || (isCaller(interaction) && r.owner_id === interaction.user.id);
 }
@@ -765,7 +749,6 @@ async function onRoamingCommand(interaction) {
   if (name === "roaming_meu_saldo") return roamingMeuSaldo(interaction);
   if (name === "roaming_saldo") return roamingSaldo(interaction);
 
-  // demais: precisam do roaming + permissão de gestão
   const nome = interaction.options.getString("nome");
   const r = await db.getRoaming(interaction.guildId, nome);
   if (!r) return interaction.reply({ content: `Roaming "${nome}" não encontrado.`, flags: MessageFlags.Ephemeral });
@@ -789,7 +772,6 @@ async function roamingCreate(interaction) {
 
   const r = await db.createRoaming({ guildId: interaction.guildId, nome, ownerId: interaction.user.id, vagas });
 
-  // cria a sala de voz na categoria, com limite = vagas
   let voice = null;
   try {
     voice = await interaction.guild.channels.create({
@@ -799,13 +781,11 @@ async function roamingCreate(interaction) {
     await db.setRoamingField(r.id, "voice_id", voice.id);
   } catch (e) { console.error("criar sala roaming:", e); }
 
-  // posta a thread no ping-de-conteúdo
   let thread = null;
   if (CFG.contentPingChannelId) {
-    const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(()=>null);
+    const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
     if (ch) {
       const roleMention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-      // anexa a imagem do roaming (arquivo local na pasta assets), se existir
       const fs = require("fs"); const path = require("path");
       const imgPath = path.join(__dirname, "..", "assets", "roaming.png");
       const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "roaming.png" }] : [];
@@ -815,23 +795,23 @@ async function roamingCreate(interaction) {
         components: buildRoamingRolePicker(r.id),
         files,
         ...allow,
-      }).catch((e)=>{ console.error("post roaming:", e); return null; });
+      }).catch((e) => { console.error("post roaming:", e); return null; });
       if (msg) {
-        await db.setRoamingField(r.id, "roster_msg", msg.id);   // o POST principal carrega o placar
-        thread = await msg.startThread({ name: `Roaming ${nome}`, autoArchiveDuration: 1440 }).catch(()=>null);
+        await db.setRoamingField(r.id, "roster_msg", msg.id);
+        thread = await msg.startThread({ name: `Roaming ${nome}`, autoArchiveDuration: 1440 }).catch(() => null);
         if (thread) await db.setRoamingField(r.id, "thread_id", thread.id);
       }
     }
   }
-  await interaction.editReply({ content: `✅ Roaming **${nome}** criado (${vagas} vagas)${voice?`, sala <#${voice.id}> criada`:""}. Use **/roaming_start ${nome}** quando começar.` });
+  await interaction.editReply({ content: `✅ Roaming **${nome}** criado (${vagas} vagas)${voice ? `, sala <#${voice.id}> criada` : ""}. Use **/roaming_start ${nome}** quando começar.` });
 }
 
 function buildRoamingRolePicker(roamingId) {
-  const funcs = [["Tank","🛡️"],["Support","🎺"],["DPS","⚔️"],["Healer","💚"],["Caller","👑"]];
-  const btns = funcs.map(([f,e]) => new ButtonBuilder().setCustomId(`rmf|${roamingId}|${f}`).setLabel(f).setEmoji(e).setStyle(ButtonStyle.Secondary));
+  const funcs = [["Tank", "🛡️"], ["Support", "🎺"], ["DPS", "⚔️"], ["Healer", "💚"], ["Caller", "👑"]];
+  const btns = funcs.map(([f, e]) => new ButtonBuilder().setCustomId(`rmf|${roamingId}|${f}`).setLabel(f).setEmoji(e).setStyle(ButtonStyle.Secondary));
   const leave = new ButtonBuilder().setCustomId(`rmleave|${roamingId}`).setLabel("Sair").setEmoji("🚪").setStyle(ButtonStyle.Danger);
   const rows = [];
-  for (let i=0;i<btns.length;i+=5) rows.push(new ActionRowBuilder().addComponents(btns.slice(i,i+5)));
+  for (let i = 0; i < btns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(btns.slice(i, i + 5)));
   rows.push(new ActionRowBuilder().addComponents(leave));
   return rows;
 }
@@ -845,10 +825,9 @@ function roamingRosterText(r, signups) {
     const cheio = gente.length >= qtd ? " ✅" : "";
     t += `\n**${funcao}** (${gente.length}/${qtd})${cheio}: ${gente.join(", ") || "*vazio*"}`;
   }
-  return t.slice(0,1900);
+  return t.slice(0, 1900);
 }
 
-// texto do POST principal: menção + placar (o que falta aparece pra galera)
 function roamingPostText(r, signups, roleMention) {
   const men = roleMention || (CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal");
   const falta = funcoesFaltando(r, signups);
@@ -860,14 +839,13 @@ function roamingPostText(r, signups, roleMention) {
 async function refreshRoamingRoster(r) {
   const fresh = await db.getRoamingById(r.id);
   if (!fresh.roster_msg || !CFG.contentPingChannelId) return;
-  // o roster_msg agora é o POST principal (no canal ping-de-conteúdo)
-  const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(()=>null);
+  const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
   if (!ch) return;
-  const m = await ch.messages.fetch(fresh.roster_msg).catch(()=>null);
+  const m = await ch.messages.fetch(fresh.roster_msg).catch(() => null);
   if (!m) return;
   const signups = await db.getRoamingSignups(r.id);
   const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-  await m.edit({ content: roamingPostText(fresh, signups), ...allow }).catch(()=>{});
+  await m.edit({ content: roamingPostText(fresh, signups), ...allow }).catch(() => {});
 }
 
 async function onRoamingRolePick(interaction) {
@@ -877,12 +855,10 @@ async function onRoamingRolePick(interaction) {
     return interaction.reply({ content: "Esse roaming não está aberto.", flags: MessageFlags.Ephemeral });
   const username = interaction.member?.displayName || interaction.user.username;
 
-  // checa teto da função (respeita a comp: X tanks, Y dps, etc)
   const comp = roaming.ROAMING_COMPS[r.vagas];
   const teto = comp[funcao] || 0;
   const signups = await db.getRoamingSignups(roamingId);
-  const jaeu = signups.find(s => s.user_id === interaction.user.id);
-  const naFuncao = signups.filter(s => s.funcao === funcao && s.user_id !== interaction.user.id).length;
+  const naFuncao = signups.filter((s) => s.funcao === funcao && s.user_id !== interaction.user.id).length;
   if (naFuncao >= teto) {
     const faltam = funcoesFaltando(r, signups);
     return interaction.reply({ content: `⚠️ **${funcao}** já está cheio (${teto}/${teto}) no roaming ${r.nome}.${faltam ? ` Ainda falta: ${faltam}.` : ""}`, flags: MessageFlags.Ephemeral });
@@ -893,10 +869,9 @@ async function onRoamingRolePick(interaction) {
   await interaction.reply({ content: `🧭 Você pingou **${funcao}** no roaming ${r.nome}. Entra na sala de voz!`, flags: MessageFlags.Ephemeral });
 }
 
-// texto do que ainda falta preencher (pra avisar a galera)
 function funcoesFaltando(r, signups) {
   const comp = roaming.ROAMING_COMPS[r.vagas];
-  const cont = {}; for (const s of signups) cont[s.funcao] = (cont[s.funcao]||0)+1;
+  const cont = {}; for (const s of signups) cont[s.funcao] = (cont[s.funcao] || 0) + 1;
   const faltas = [];
   for (const [f, qtd] of Object.entries(comp)) {
     const tem = cont[f] || 0;
@@ -904,6 +879,7 @@ function funcoesFaltando(r, signups) {
   }
   return faltas.join(", ");
 }
+
 async function onRoamingLeave(interaction) {
   const [, roamingId] = interaction.customId.split("|");
   const r = await db.getRoamingById(roamingId);
@@ -915,29 +891,31 @@ async function onRoamingLeave(interaction) {
 async function roamingStart(interaction, r) {
   await db.setRoamingField(r.id, "status", "contando");
   await db.setRoamingField(r.id, "started_at", new Date());
-  // reconcilia: quem já está na sala começa a contar agora
   if (r.voice_id) {
-    const vc = await client.channels.fetch(r.voice_id).catch(()=>null);
+    const vc = await client.channels.fetch(r.voice_id).catch(() => null);
     if (vc && vc.members) for (const [, mb] of vc.members)
       await db.roamingVoiceJoin(r.id, mb.id, mb.displayName || mb.user.username);
   }
   await interaction.reply({ content: `▶️ Roaming **${r.nome}** — contagem de presença iniciada!` });
 }
+
 async function roamingValue(interaction, r) {
   const valor = interaction.options.getInteger("valor");
   await db.setRoamingField(r.id, "valor", valor);
   await interaction.reply({ content: `💰 Roaming **${r.nome}** — valor registrado: **${valor.toLocaleString("pt-BR")}** prata.` });
 }
+
 async function roamingFinish(interaction, r) {
   await interaction.deferReply();
   await db.setRoamingField(r.id, "status", "fechado");
-  if (r.voice_id) await db.roamingCloseAllOpen(r.id); // fecha presenças abertas
+  if (r.voice_id) await db.roamingCloseAllOpen(r.id);
   const linhas = await calcRoamingDivisao(r);
-  const elegiveis = linhas.filter(l=>l.elegivel);
-  const top = elegiveis.slice(0,15).map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
-  await interaction.editReply({ content: `🏁 **Roaming ${r.nome} encerrado.**\nValor: ${(r.valor||0).toLocaleString("pt-BR")} prata · ${elegiveis.length} elegíveis\n\n${top || "(ninguém elegível)"}\n\nUse **/roaming_saldo ${r.nome}** pra ver todos.` });
-  await deleteRoamingVoice(r); // tenta apagar a sala se já estiver vazia
+  const elegiveis = linhas.filter((l) => l.elegivel);
+  const top = elegiveis.slice(0, 15).map((l, i) => `\`${String(i + 1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
+  await interaction.editReply({ content: `🏁 **Roaming ${r.nome} encerrado.**\nValor: ${(r.valor || 0).toLocaleString("pt-BR")} prata · ${elegiveis.length} elegíveis\n\n${top || "(ninguém elegível)"}\n\nUse **/roaming_saldo ${r.nome}** pra ver todos.` });
+  await deleteRoamingVoice(r);
 }
+
 async function calcRoamingDivisao(r) {
   const fresh = await db.getRoamingById(r.id);
   const signups = await db.getRoamingSignups(r.id);
@@ -947,72 +925,73 @@ async function calcRoamingDivisao(r) {
   const presMin = roaming.presenceMinutes(presence, start, end);
   return roaming.dividir(fresh.valor || 0, signups, presMin, 10);
 }
+
 async function roamingSaldo(interaction) {
   const nome = interaction.options.getString("nome");
   const r = await db.getRoaming(interaction.guildId, nome);
   if (!r) return interaction.reply({ content: `Roaming "${nome}" não encontrado.`, flags: MessageFlags.Ephemeral });
   await interaction.deferReply();
   const linhas = await calcRoamingDivisao(r);
-  const eleg = linhas.filter(l=>l.elegivel);
-  const txt = eleg.map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
-  await interaction.editReply({ content: `💰 **Saldo do roaming ${r.nome}** (${(r.valor||0).toLocaleString("pt-BR")} prata)\n${txt || "(ninguém elegível ainda)"}` });
+  const eleg = linhas.filter((l) => l.elegivel);
+  const txt = eleg.map((l, i) => `\`${String(i + 1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
+  await interaction.editReply({ content: `💰 **Saldo do roaming ${r.nome}** (${(r.valor || 0).toLocaleString("pt-BR")} prata)\n${txt || "(ninguém elegível ainda)"}` });
 }
+
 async function roamingMeuSaldo(interaction) {
   const nome = interaction.options.getString("nome");
   const r = await db.getRoaming(interaction.guildId, nome);
   if (!r) return interaction.reply({ content: `Roaming "${nome}" não encontrado.`, flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const linhas = await calcRoamingDivisao(r);
-  const meu = linhas.find(l=>l.user_id === interaction.user.id);
+  const meu = linhas.find((l) => l.user_id === interaction.user.id);
   if (!meu) return interaction.editReply({ content: `Você não está no roaming ${r.nome}.` });
   if (!meu.elegivel) return interaction.editReply({ content: `Roaming ${r.nome}: você não está elegível (${meu.motivo}).` });
   await interaction.editReply({ content: `💰 **Teu saldo no roaming ${r.nome}:** ${meu.valor.toLocaleString("pt-BR")} prata (${meu.minutos}min de presença).` });
 }
+
 async function roamingRemove(interaction, r) {
   const user = interaction.options.getUser("usuario");
   await db.deleteRoamingSignup(r.id, user.id);
   await refreshRoamingRoster(r);
   await interaction.reply({ content: `🗑️ ${user} removido do roaming ${r.nome}.` });
 }
+
 async function roamingFill(interaction, r) {
   const user = interaction.options.getUser("usuario");
   const funcao = roaming.normFunc(interaction.options.getString("funcao")) || interaction.options.getString("funcao");
-  const member = await interaction.guild.members.fetch(user.id).catch(()=>null);
+  const member = await interaction.guild.members.fetch(user.id).catch(() => null);
   const username = member?.displayName || user.username;
   await db.upsertRoamingSignup(r.id, user.id, username, funcao);
   await refreshRoamingRoster(r);
   await interaction.reply({ content: `➕ ${user} adicionado como **${funcao}** no roaming ${r.nome}.` });
 }
+
 async function roamingPago(interaction, r) {
   await db.setRoamingField(r.id, "status", "pago");
   const del = await deleteRoamingVoice(r);
   await interaction.reply({ content: `✅ Roaming **${r.nome}** marcado como PAGO.${del}` });
 }
 
-// apaga a sala de voz do roaming. Só apaga se vazia; senão avisa.
 async function deleteRoamingVoice(r) {
   if (!r.voice_id) return "";
-  const vc = await client.channels.fetch(r.voice_id).catch(()=>null);
+  const vc = await client.channels.fetch(r.voice_id).catch(() => null);
   if (!vc) return "";
   if (vc.members && vc.members.size > 0) return ` (a sala ainda tem gente — apague manualmente ou espere esvaziar)`;
-  await vc.delete().catch((e)=>console.error("del sala roaming:", e));
+  await vc.delete().catch((e) => console.error("del sala roaming:", e));
   await db.setRoamingField(r.id, "voice_id", null);
   return ` Sala de voz apagada.`;
 }
 
-// muda o horário de um CTA já criado (rótulo, lembretes, janela seguem o novo)
 async function slashChangeTime(interaction, ev) {
   const novo = interaction.options.getString("novo").trim();
   if (!/^\d{1,2}:\d{2}$/.test(novo))
     return interaction.reply({ content: "Formato inválido. Use HH:MM, ex 23:00.", flags: MessageFlags.Ephemeral });
   const antigo = ev.time_label;
   await db.setTimeLabel(ev.id, novo);
-  // renomeia a thread se possível
   if (ev.thread_id) {
     const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
     if (thread) await thread.setName(`Planilha CTA ${novo}`).catch(() => {});
   }
-  // atualiza o BOMB também (mensagem do ping + thread de contagem)
   if (ev.bomb_ping_msg && CFG.bombPingChannelId) {
     const ch = await client.channels.fetch(CFG.bombPingChannelId).catch(() => null);
     if (ch) {
@@ -1031,7 +1010,6 @@ async function slashChangeTime(interaction, ev) {
   await logStaff(interaction.guild, `🕐 ${interaction.user} mudou horário do CTA **${antigo} → ${novo}**`);
 }
 
-// encerra um CTA — staff, qualquer caller (resolve o caso de outro caller ter aberto)
 async function slashFinish(interaction, ev) {
   if (ev.status !== "open")
     return interaction.reply({ content: `CTA ${ev.time_label} já está encerrado.`, flags: MessageFlags.Ephemeral });
@@ -1040,7 +1018,6 @@ async function slashFinish(interaction, ev) {
   await logStaff(interaction.guild, `🏁 ${interaction.user} encerrou o CTA **${ev.time_label} UTC** (via /cta_finish)`);
 }
 
-// gera o relatório de attendance e posta como HTML anexo
 async function slashAttendance(interaction, dias, rotulo) {
   await interaction.deferReply();
   const end = new Date();
@@ -1061,10 +1038,9 @@ async function slashAttendance(interaction, dias, rotulo) {
   });
 }
 
-// ==================  TEMPORADAS + RANK  ===================================
 async function slashStartSeason(interaction) {
   const numero = interaction.options.getInteger("numero");
-  const s = await db.startSeason(interaction.guildId, numero);
+  await db.startSeason(interaction.guildId, numero);
   await interaction.reply({ content: `🏁 **Temporada ${numero} iniciada!** A contagem de presença começa agora. Boa sorte, IMORTAIS! ⚔️` });
   await logStaff(interaction.guild, `🏁 ${interaction.user} iniciou a **Temporada ${numero}**`);
 }
@@ -1076,7 +1052,6 @@ async function slashFinishSeason(interaction) {
   await logStaff(interaction.guild, `🔒 ${interaction.user} encerrou a **Temporada ${s.number}**`);
 }
 
-// rank: pessoal (meu=true, efêmero) ou geral (meu=false, embed público)
 async function slashRank(interaction, meu) {
   await interaction.deferReply({ flags: meu ? MessageFlags.Ephemeral : undefined });
   const season = await db.getCurrentSeason(interaction.guildId);
@@ -1086,10 +1061,9 @@ async function slashRank(interaction, meu) {
   const start = new Date(season.started_at);
   const end = new Date();
   const report = await attendance.buildReport(interaction.guildId, start, end);
-  const rows = report.rows.filter((r) => r.integral + r.parcial + r.rapida > 0 || r.fantasma > 0); // só quem participou
+  const rows = report.rows.filter((r) => r.integral + r.parcial + r.rapida > 0 || r.fantasma > 0);
 
   if (meu) {
-    // rank pessoal
     const idx = rows.findIndex((r) => r.user_id === interaction.user.id);
     if (idx === -1)
       return interaction.editReply({ content: `📊 **Teu rank — Temporada ${season.number}**\n\nVocê ainda não tem presença registrada nesta temporada. Aparece nos CTAs! ⚔️` });
@@ -1110,10 +1084,8 @@ async function slashRank(interaction, meu) {
     return;
   }
 
-  // rank geral (embed, quebra em 2 se precisar)
   const linhas = rows.map((r, i) => `\`${String(i + 1).padStart(2)}\` **${r.username}** · ${r.score} pts · ${r.integral + r.parcial}/${report.ctaCount}`);
   const header = `🏆 **Placar — Temporada ${season.number}** (${report.ctaCount} CTAs)\n`;
-  // divide em blocos de ~25 linhas pra caber
   const chunks = [];
   for (let i = 0; i < linhas.length; i += 25) chunks.push(linhas.slice(i, i + 25).join("\n"));
   if (!chunks.length) return interaction.editReply({ content: header + "\n_(ninguém pontuou ainda nesta temporada)_" });
@@ -1121,13 +1093,11 @@ async function slashRank(interaction, meu) {
   for (let i = 1; i < chunks.length; i++) await interaction.followUp({ content: chunks[i] });
 }
 
-// gera o HTML do relatório
 function renderAttendanceHTML(report, rotulo, start, end) {
   const catColor = { "Pilar": "#c9a227", "Regular": "#3f7a4d", "Intermitente": "#6ba7c4", "Fantasma": "#7a2222", "Ausente": "#555" };
   const levelLabel = { INTEGRAL: "Integral", PARCIAL: "Parcial", RAPIDA: "Rápida", FANTASMA: "Fantasma" };
   const levelColor = { INTEGRAL: "#c9a227", PARCIAL: "#6ba7c4", RAPIDA: "#9aa0ab", FANTASMA: "#e0a0a0" };
 
-  // monta o detalhe (nível 1-3) embutido de cada pessoa
   const detailHtml = (r) => {
     const dates = Object.keys(r.detail || {}).sort();
     if (!dates.length) return `<div class="empty">Sem presença registrada no período.</div>`;
@@ -1210,7 +1180,7 @@ footer{text-align:center;margin-top:36px;color:var(--ink-dim);font-size:12px;fon
 <div class="eyebrow">Imortais · Call to Arms</div>
 <h1>Attendance</h1>
 <p class="sub">Presença medida pelo tempo na call (Preparação)</p>
-<p class="meta">${start.toISOString().slice(0,10)} — ${end.toISOString().slice(0,10)} · ${rotulo} · <b style="color:var(--gold)">${report.ctaCount} CTAs no período</b></p>
+<p class="meta">${start.toISOString().slice(0, 10)} — ${end.toISOString().slice(0, 10)} · ${rotulo} · <b style="color:var(--gold)">${report.ctaCount} CTAs no período</b></p>
 <p class="hint">👆 Clica num nome pra ver os dias · clica no dia pra ver os CTAs · clica no CTA pra ver horário e tempo</p>
 <table>
 <thead><tr>
@@ -1265,7 +1235,6 @@ async function onCleanConfirm(interaction) {
   await logStaff(interaction.guild, `🧹 ${interaction.user} limpou a PT${pt} (${n} pessoas) · CTA ${ev.time_label}`);
 }
 
-// move (add=false) ou adiciona (add=true) alguém numa vaga
 async function slashMoveOrAdd(interaction, ev, isAdd) {
   const user = interaction.options.getUser("usuario");
   const pt = interaction.options.getInteger("pt");
@@ -1286,12 +1255,10 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
   const target = cmds.resolveTargetSlot(pt - 1, vaga, arma, others);
   if (!target) return interaction.reply({ content: `Não há vaga livre de **${arma || (existing && existing.weapon) || "essa arma"}** na PT${pt}. Use o campo **vaga** pra forçar numa posição específica, ou tente outra PT.`, flags: MessageFlags.Ephemeral });
 
-  // vaga ocupada? pergunta interativa
   const occupant = await db.getSignupAtSlot(ev.id, target.partyIndex, target.slotIndex);
   const weaponToUse = arma || (existing ? existing.weapon : null);
 
   if (occupant && occupant.user_id !== user.id) {
-    // guarda a operação no customId pra resolver após a escolha
     const payload = `${ev.id}|${user.id}|${target.partyIndex}|${target.slotIndex}|${encodeURIComponent(weaponToUse || "")}|${isAdd ? 1 : 0}|${existing ? existing.party_index : ""}|${existing ? existing.slot_index : ""}`;
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`occ|reserva|${payload}`).setLabel(`${occupant.username} → reserva`).setStyle(ButtonStyle.Secondary),
@@ -1304,14 +1271,12 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
     });
   }
 
-  // vaga livre: executa direto
   await placeUser(ev.id, user.id, interaction, weaponToUse, target, isAdd);
   await interaction.reply({ content: `✅ ${user} → PT${target.partyIndex + 1} v${target.slotIndex + 1}${weaponToUse ? ` (${weaponToUse})` : ""}.` });
   refreshRoster(ev);
   await logStaff(interaction.guild, `🔧 ${interaction.user} ${isAdd ? "adicionou" : "moveu"} ${user} → PT${target.partyIndex + 1} v${target.slotIndex + 1} · CTA ${ev.time_label}`);
 }
 
-// coloca o usuário na vaga (add cria signup; move atualiza)
 async function placeUser(eventId, userId, interaction, weapon, target, isAdd) {
   const member = await interaction.guild.members.fetch(userId).catch(() => null);
   const username = member?.displayName || "jogador";
@@ -1321,7 +1286,6 @@ async function placeUser(eventId, userId, interaction, weapon, target, isAdd) {
   });
 }
 
-// resolve a pergunta interativa do ocupante
 async function onOccupantChoice(interaction) {
   const parts = interaction.customId.split("|");
   const choice = parts[1];
@@ -1335,22 +1299,18 @@ async function onOccupantChoice(interaction) {
   const occupant = await db.getSignupAtSlot(eventId, target.partyIndex, target.slotIndex);
 
   if (choice === "reserva" && occupant) {
-    // ocupante vai pra reserva (party/slot null)
     await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: null, slotIndex: null });
   }
   if (choice === "swap" && occupant) {
-    // ocupante vai pra vaga de onde o movido veio (se veio de alguma)
     const toP = oldP === "" ? null : parseInt(oldP, 10);
     const toS = oldS === "" ? null : parseInt(oldS, 10);
     await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: toP, slotIndex: toS });
   }
-  // coloca o movido/adicionado na vaga alvo
   await placeUser(eventId, userId, interaction, weapon, target, addFlag === "1");
   await interaction.update({ content: `✅ Feito. Vaga PT${target.partyIndex + 1} v${target.slotIndex + 1} atualizada.`, components: [] });
   refreshRoster(ev);
   await logStaff(interaction.guild, `🔧 ${interaction.user} resolveu troca (${choice}) · CTA ${ev.time_label}`);
 }
-
 
 // ==================  BOMB — FASE A (contagem)  ============================
 async function postBombPing(guild, ev, time) {
@@ -1366,16 +1326,14 @@ async function postBombPing(guild, ev, time) {
     content: `${roleMention} 💣 **BOMB** — Vai no CTA das **${time} UTC** hoje?`,
     components: [row],
   });
-  await db.setBombPingMsg(ev.id, msg.id); // guarda pra poder editar se o horário mudar
-  // thread de contagem pro líder do bomb
+  await db.setBombPingMsg(ev.id, msg.id);
   const thread = await msg.startThread({ name: `Bomb ${time} — contagem`, autoArchiveDuration: 1440 }).catch(() => null);
   if (thread) {
     await db.setBombThread(ev.id, thread.id);
     const leader = CFG.bombLeaderRoleId ? `<@&${CFG.bombLeaderRoleId}>` : "Líder do Bomb";
     await thread.send({ content: `${leader} contagem do bomb pro CTA ${time}:` });
     const c = await thread.send({ content: bombCountText([]) });
-    await db.setBombRoster(ev.id, c.id); // guarda id da msg de contagem no banco
-    // botões pro Líder do Bomb escolher a comp (Fase B)
+    await db.setBombRoster(ev.id, c.id);
     const compRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`bombcomp|${ev.id}|invi`).setLabel("Montar Invi").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`bombcomp|${ev.id}|melee`).setLabel("Montar Melee").setStyle(ButtonStyle.Primary),
@@ -1396,7 +1354,6 @@ function bombCountText(confirms) {
 
 async function onBombConfirm(interaction, coming) {
   const [, eventId] = interaction.customId.split("|");
-  // só cargo Bomb responde
   if (CFG.bombRoleId && !interaction.member?.roles?.cache?.has(CFG.bombRoleId))
     return interaction.reply({ content: "Só quem tem o cargo Bomb responde aqui.", flags: MessageFlags.Ephemeral });
   const ev = await db.getEvent(eventId);
@@ -1407,11 +1364,10 @@ async function onBombConfirm(interaction, coming) {
   await db.upsertBombConfirm(eventId, interaction.user.id, username, coming);
   await interaction.reply({ content: coming ? "💣 Confirmado! Você vai." : "Ok, anotado que não vai.", flags: MessageFlags.Ephemeral });
 
-  // atualiza a contagem na thread (id da msg vem do banco -> sobrevive a restart)
   const confirms = await db.getBombConfirms(eventId);
   const fresh = await db.getEvent(eventId);
   if (fresh.bomb_thread && fresh.bomb_roster) {
-    const countMsgId = String(fresh.bomb_roster).split(",")[0]; // 1º id = contagem
+    const countMsgId = String(fresh.bomb_roster).split(",")[0];
     const thread = await client.channels.fetch(fresh.bomb_thread).catch(() => null);
     if (thread) {
       const m = await thread.messages.fetch(countMsgId).catch(() => null);
@@ -1421,10 +1377,8 @@ async function onBombConfirm(interaction, coming) {
 }
 
 // ==================  BOMB — FASE B (montagem)  ============================
-// Líder do Bomb escolhe a comp. Kite só lista; Invi/Melee montam planilha.
 async function onBombCompChoice(interaction) {
   const [, eventId, comp] = interaction.customId.split("|");
-  // só o Líder do Bomb
   if (CFG.bombLeaderRoleId && !interaction.member?.roles?.cache?.has(CFG.bombLeaderRoleId))
     return interaction.reply({ content: "Só o Líder do Bomb escolhe a composição.", flags: MessageFlags.Ephemeral });
   const ev = await db.getEvent(eventId);
@@ -1440,7 +1394,6 @@ async function onBombCompChoice(interaction) {
     return interaction.reply({ content: `🪁 **KITE COMP** — ${confirms.length} confirmados. O caller organiza na mão:\n${nomes}`.slice(0, 1900) });
   }
 
-  // invi ou melee: monta a planilha do bomb
   await db.setBombComp(eventId, comp);
   await interaction.reply({ content: `💣 Montando **${BOMB_COMPS[comp].name}**...`, flags: MessageFlags.Ephemeral });
   const thread = await client.channels.fetch(ev.bomb_thread).catch(() => null);
@@ -1452,10 +1405,9 @@ async function onBombCompChoice(interaction) {
     components: buildBombRolePicker(eventId),
   });
   const msg = await thread.send({ content: bombRosterText(eventId, comp, []) });
-  await db.setBombRoster(eventId, `${ev.bomb_roster},${msg.id}`); // guarda: contagem,planilha
+  await db.setBombRoster(eventId, `${ev.bomb_roster},${msg.id}`);
 }
 
-// botões de papel pra inscrição no bomb (reusa os papéis)
 function buildBombRolePicker(eventId) {
   const roleBtns = Object.entries(ROLES).map(([name, meta]) =>
     new ButtonBuilder().setCustomId(`bombrole|${eventId}|${name}`).setLabel(name).setEmoji(meta.emoji).setStyle(ButtonStyle.Secondary));
@@ -1466,7 +1418,6 @@ function buildBombRolePicker(eventId) {
   return rows;
 }
 
-// renderiza a planilha do bomb
 function bombRosterText(eventId, comp, signups) {
   const slots = BOMB_COMPS[comp].slots;
   const bySlot = new Map();
@@ -1488,12 +1439,10 @@ function bombRosterText(eventId, comp, signups) {
   return t.slice(0, 1990);
 }
 
-// arma do bomb: papel -> menu de armas (só as que existem na comp escolhida)
 async function onBombRolePick(interaction) {
   const [, eventId, role] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
   if (!ev || !ev.bomb_comp) return interaction.reply({ content: "Bomb não está montado.", flags: MessageFlags.Ephemeral });
-  // armas daquele papel que aparecem na comp do bomb
   const slots = BOMB_COMPS[ev.bomb_comp].slots;
   const armas = [...new Set(slots.flatMap((s) => s.accepts).filter((a) => (WEAPON_CATALOG[role] || []).includes(a.weapon)).map((a) => a.weapon))];
   if (!armas.length) return interaction.reply({ content: "Nenhuma arma desse papel nessa comp.", flags: MessageFlags.Ephemeral });
@@ -1510,18 +1459,16 @@ async function onBombWeaponPick(interaction) {
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
 
-  // acha vaga livre pra essa arma na comp do bomb
   const signups = await db.getBombSignups(eventId);
   const others = signups.filter((s) => s.user_id !== interaction.user.id);
   const taken = new Set(others.filter((s) => s.slot_index != null).map((s) => s.slot_index));
   const slots = BOMB_COMPS[ev.bomb_comp].slots;
 
-  // Líder do Bomb assume a vaga 01 (caller/locked) se escolher a arma dela e ela estiver livre
   const isLeader = CFG.bombLeaderRoleId && interaction.member?.roles?.cache?.has(CFG.bombLeaderRoleId);
   let slotIndex = null;
   if (isLeader && slots[0].locked && !taken.has(0) &&
       slots[0].accepts.some((a) => a.weapon.toUpperCase() === weapon.toUpperCase())) {
-    slotIndex = 0; // caller do bomb
+    slotIndex = 0;
   } else {
     for (let i = 0; i < slots.length; i++) {
       if (taken.has(i) || slots[i].locked) continue;
@@ -1545,12 +1492,11 @@ async function onBombLeave(interaction) {
   await refreshBombRoster(ev);
 }
 
-// atualiza a planilha do bomb (a msg é a 2ª guardada em bomb_roster: "contagem,planilha")
 async function refreshBombRoster(ev) {
   const fresh = await db.getEvent(ev.id);
   if (!fresh.bomb_thread || !fresh.bomb_roster || !fresh.bomb_comp) return;
   const ids = String(fresh.bomb_roster).split(",");
-  const planilhaId = ids[1]; // segundo id = planilha de montagem
+  const planilhaId = ids[1];
   if (!planilhaId) return;
   const thread = await client.channels.fetch(fresh.bomb_thread).catch(() => null);
   if (!thread) return;
@@ -1561,34 +1507,26 @@ async function refreshBombRoster(ev) {
 }
 
 // ======================  HELPERS  ==========================================
-// 1 mensagem por PT (4 mensagens) pra nunca estourar 2000, mesmo com nomes longos.
-// A reserva (se houver) vai junto na ultima mensagem.
-function rosterChunks(signups) {
-  const blocks = renderRoster(signups); // [PT1, PT2, PT3, PT4, (Reserva?)]
-  const NUM_PT = 4;
+function rosterChunks(signups, numParties = 4) {
+  const blocks = renderRoster(signups, numParties);
   const chunks = [];
-  for (let i = 0; i < NUM_PT; i++) {
+  for (let i = 0; i < numParties; i++) {
     let txt = blocks[i] || "";
-    // reserva (bloco extra) gruda na ultima PT
-    if (i === NUM_PT - 1 && blocks.length > NUM_PT) {
-      txt += "\n\n" + blocks.slice(NUM_PT).join("\n\n");
+    if (i === numParties - 1 && blocks.length > numParties) {
+      txt += "\n\n" + blocks.slice(numParties).join("\n\n");
     }
     chunks.push(txt.slice(0, 1990));
   }
-  return chunks; // 4 strings
+  return chunks;
 }
 
-// ---- DEBOUNCE da planilha ao vivo ----
-// Em vez de editar a cada inscrição, agrupa as mudanças e edita no maximo
-// 1x a cada 3s por evento. Protege contra rate limit no pico de inscricoes.
 const REFRESH_DELAY = 3000;
-const refreshTimers = new Map();   // eventId -> timeout
-const refreshPending = new Map();  // eventId -> ev (mais recente)
+const refreshTimers = new Map();
+const refreshPending = new Map();
 
 function refreshRoster(ev) {
-  // guarda o ev mais recente e agenda (ou reusa o timer existente)
   refreshPending.set(String(ev.id), ev);
-  if (refreshTimers.has(String(ev.id))) return; // ja tem edicao agendada
+  if (refreshTimers.has(String(ev.id))) return;
   const t = setTimeout(async () => {
     refreshTimers.delete(String(ev.id));
     const target = refreshPending.get(String(ev.id));
@@ -1598,14 +1536,17 @@ function refreshRoster(ev) {
   refreshTimers.set(String(ev.id), t);
 }
 
-// edição real das mensagens (chamada pelo debounce)
 async function doRefreshRoster(ev) {
   if (!ev.thread_id || !ev.roster_msg) return;
-  const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
   if (!thread) return;
-  const ids = String(ev.roster_msg).split(",");
-  const signups = await db.getSignups(ev.id);
-  const chunks = rosterChunks(signups);
+
+  const ids = String(fresh.roster_msg).split(",").filter(Boolean);
+  const numParties = fresh.num_parties || ids.length || 4;
+  const signups = await db.getSignups(fresh.id);
+  const chunks = rosterChunks(signups, numParties);
+
   await Promise.all(ids.map(async (id, i) => {
     const m = await thread.messages.fetch(id).catch(() => null);
     if (m && chunks[i]) await m.edit({ content: chunks[i] }).catch(() => {});
@@ -1618,8 +1559,6 @@ async function logStaff(guild, text) {
   if (ch) await ch.send({ content: text }).catch(() => {});
 }
 
-// ======================  LEMBRETES (verificador a cada minuto)  =============
-// posta um aviso no canal principal do CTA (menção de cargo pinga de verdade lá)
 async function pingMainChannel(ev, text) {
   if (!ev.channel_id) return;
   const ch = await client.channels.fetch(ev.channel_id).catch(() => null);
@@ -1628,7 +1567,6 @@ async function pingMainChannel(ev, text) {
   await ch.send({ content: text, ...allow }).catch(() => {});
 }
 
-// posta no canal ping-de-conteúdo com LINK clicável pra thread da planilha
 async function pingContentChannel(ev, text) {
   if (!CFG.contentPingChannelId || !ev.thread_id || !ev.guild_id) return;
   const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
@@ -1648,14 +1586,13 @@ async function checkReminders() {
       const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
       const now = Date.now();
       if (!ev.sent_30 && ev.remind_30 && new Date(ev.remind_30).getTime() <= now) {
-        await thread.send({ content: `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 minutos!** Prepara o set e loga.`, ...allow }).catch(()=>{});
-        // reforço no canal principal (na thread, menção de cargo repetida não re-pinga)
+        await thread.send({ content: `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 minutos!** Prepara o set e loga.`, ...allow }).catch(() => {});
         await pingMainChannel(ev, `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 min!** Loga e entra na thread pra pingar tua função.`);
         await pingContentChannel(ev, `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 min!** Bora pro conteúdo.`);
         await db.markReminderSent(ev.id, 30);
       }
       if (!ev.sent_10 && ev.remind_10 && new Date(ev.remind_10).getTime() <= now) {
-        await thread.send({ content: `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 minutos!** Entra na call AGORA.`, ...allow }).catch(()=>{});
+        await thread.send({ content: `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 minutos!** Entra na call AGORA.`, ...allow }).catch(() => {});
         await pingMainChannel(ev, `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 min!** Entra na call AGORA.`);
         await pingContentChannel(ev, `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 min!** Entra na call AGORA.`);
         await db.markReminderSent(ev.id, 10);
@@ -1664,28 +1601,26 @@ async function checkReminders() {
   } catch (e) { console.error("reminders:", e); }
 }
 
-// ---- avisos de consolidação (25/20/15 min antes da saída) + amontoamento aos 10 ----
-// saída = horário cheio = ping (time_label) + 40 min. Marcos são antes da saída.
-const consolidWarned = new Map(); // eventId -> Set de marcos já avisados
+const consolidWarned = new Map();
 async function checkConsolidation() {
   try {
     const guilds = client.guilds.cache;
     for (const [gid] of guilds) {
       const abertos = await db.getOpenEvents(gid);
       for (const ev of abertos) {
-        const m = /^(\d{1,2}):(\d{2})$/.exec((ev.time_label||"").trim());
+        const m = /^(\d{1,2}):(\d{2})$/.exec((ev.time_label || "").trim());
         if (!m) continue;
         const base = new Date(ev.created_at);
         const ping = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), +m[1], +m[2], 0, 0));
-        const saida = new Date(ping.getTime() + 40*60000); // horário cheio
-        const minAteSaida = Math.round((saida.getTime() - Date.now())/60000);
+        const saida = new Date(ping.getTime() + 40 * 60000);
+        const minAteSaida = Math.round((saida.getTime() - Date.now()) / 60000);
         const done = consolidWarned.get(String(ev.id)) || new Set();
 
         const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
         const avisar = async (txt) => {
-          const th = ev.thread_id ? await client.channels.fetch(ev.thread_id).catch(()=>null) : null;
+          const th = ev.thread_id ? await client.channels.fetch(ev.thread_id).catch(() => null) : null;
           const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-          if (th) await th.send({ content: txt, ...allow }).catch(()=>{});
+          if (th) await th.send({ content: txt, ...allow }).catch(() => {});
           await pingMainChannel(ev, txt);
         };
 
@@ -1702,7 +1637,6 @@ async function checkConsolidation() {
           done.add(15);
         }
         if (minAteSaida <= 10 && minAteSaida > -5 && !done.has(10)) {
-          // amontoamento automático
           await applyConsolidation(ev, client.guilds.cache.get(gid));
           ctaFrozen.add(String(ev.id));
           await avisar(`${mention} 🔒 **CTA ${ev.time_label}** — formação consolidada e travada. Entrem nas suas vagas!`);
@@ -1717,23 +1651,20 @@ async function checkConsolidation() {
 // ======================  BOOT  =============================================
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Online como ${c.user.tag}`);
-  setInterval(checkReminders, 60 * 1000); // a cada minuto
-  setInterval(checkConsolidation, 60 * 1000); // avisos de consolidação + amontoamento
-  // registra slash commands em cada servidor onde o bot está
+  setInterval(checkReminders, 60 * 1000);
+  setInterval(checkConsolidation, 60 * 1000);
   for (const [gid] of c.guilds.cache) {
     try { await cmds.registerCommands(c.user.id, gid); }
     catch (e) { console.error("registerCommands:", e); }
   }
-  // reconcilia presença de voz: fecha registros órfãos e reabre pra quem já está na call
   await reconcileVoice(c);
 });
 
-// no boot: fecha sessões abertas (órfãs do restart) e reabre pra quem está nas calls agora
 async function reconcileVoice(client) {
   try {
     for (const chId of [CFG.prepVoiceId, CFG.bombVoiceId]) {
       if (!chId) continue;
-      await db.voiceCloseAllOpen(chId); // fecha órfãos
+      await db.voiceCloseAllOpen(chId);
       const ch = await client.channels.fetch(chId).catch(() => null);
       if (!ch || !ch.members) continue;
       const kind = voiceKind(chId);
