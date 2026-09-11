@@ -29,7 +29,7 @@ const CFG = {
   prepVoiceId: process.env.PREP_VOICE_ID || null,
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
   bombVoiceId: process.env.BOMB_VOICE_ID || null,
-  presetTimes: (process.env.PRESET_TIMES || "16:20,17:20,19:20,21:20,23:00,01:20").split(","),
+  presetTimes: (process.env.PRESET_TIMES || "15:20,17:20,19:20,21:20,23:00,01:20").split(","),
 };
 
 const client = new Client({
@@ -225,6 +225,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (bk === "bombleave") return onBombLeave(interaction);
       if (bk === "rmf") return onRoamingRolePick(interaction);
       if (bk === "rmleave") return onRoamingLeave(interaction);
+      if (bk === "cleave") return onCasteloLeave(interaction);
       if (bk === "cleanyes") return onCleanConfirm(interaction);
       if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
     }
@@ -1077,6 +1078,16 @@ async function onCasteloCommand(interaction) {
   if (name === "castelo_finish") return casteloFinish(interaction, c);
   if (name === "castelo_pago")   return casteloPago(interaction, c);
   if (name === "castelo_remove") return casteloRemove(interaction, c);
+  if (name === "castelo_cancel") return casteloCancel(interaction, c);
+}
+
+async function casteloCancel(interaction, c) {
+  await db.setCasteloField(c.id, "status", "pago"); // marca como encerrado (sai da lista de abertos)
+  // apaga a sala de voz
+  if (c.voice_id) { const vc = await client.channels.fetch(c.voice_id).catch(()=>null); if (vc) await vc.delete().catch(()=>{}); await db.setCasteloField(c.id,"voice_id",null); }
+  // arquiva a thread
+  if (c.thread_id) { const th = await client.channels.fetch(c.thread_id).catch(()=>null); if (th) await th.setArchived(true).catch(()=>{}); }
+  await interaction.reply({ content: `❌ **Castelo ${c.time_label} CANCELADO.** Sala apagada.` });
 }
 
 async function casteloCreate(interaction) {
@@ -1105,9 +1116,9 @@ async function casteloCreate(interaction) {
       const fs = require("fs"); const path = require("path");
       const imgPath = path.join(__dirname, "..", "assets", "castelo.png");
       const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "castelo.png" }] : [];
+      // POST: só imagem + aviso (SEM botões — eles vão na thread, igual o CTA)
       const msg = await ch.send({
-        content: `${roleMention} 🏰 **CASTELO ${horario} UTC** — conteúdo de guerra! Pinga tua função 👇`,
-        components: buildRolePicker(`c${c.id}`), // reusa o picker do CTA (prefixo c<id>)
+        content: `${roleMention} 🏰 **CASTELO ${horario} UTC** — conteúdo de guerra! Entra na thread pra pingar tua função 👇`,
         files,
         ...allow,
       }).catch(()=>null);
@@ -1115,6 +1126,11 @@ async function casteloCreate(interaction) {
         const thread = await msg.startThread({ name: `Castelo ${horario}`, autoArchiveDuration: 1440 }).catch(()=>null);
         if (thread) {
           await db.setCasteloField(c.id, "thread_id", thread.id);
+          // botões de função DENTRO da thread (igual o CTA)
+          await thread.send({
+            content: `🏰 **Castelo ${horario} UTC** — escolhe tua função abaixo 👇`,
+            components: buildCasteloRolePicker(c.id),
+          }).catch(()=>{});
           const blocks = renderRoster([], 3, castelo.CASTELO_PT_INDEX);
           const ids = [];
           for (const b of blocks) { const m = await thread.send({ content: b.slice(0,1990) }); ids.push(m.id); }
@@ -1124,6 +1140,18 @@ async function casteloCreate(interaction) {
     }
   }
   await interaction.editReply({ content: `✅ Castelo **${horario}** criado${voice?`, sala <#${voice.id}>`:""}. Use **/castelo_start ${horario}** quando começar.` });
+}
+
+// botões de função do castelo (funções + sair) — SEM fechar/cancelar do CTA.
+// gestão do castelo é via comandos (/castelo_finish, /castelo_pago).
+function buildCasteloRolePicker(casteloId) {
+  const roleBtns = Object.entries(ROLES).map(([name, meta]) =>
+    new ButtonBuilder().setCustomId(`role|c${casteloId}|${name}`).setLabel(name).setEmoji(meta.emoji).setStyle(ButtonStyle.Secondary));
+  const leave = new ButtonBuilder().setCustomId(`cleave|${casteloId}`).setLabel("Sair da função").setEmoji("🚪").setStyle(ButtonStyle.Danger);
+  const rows = [];
+  for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
+  rows.push(new ActionRowBuilder().addComponents(leave));
+  return rows;
 }
 
 async function refreshCasteloRoster(c) {
@@ -1235,6 +1263,13 @@ async function casteloMeuSaldo(interaction) {
 async function casteloPago(interaction, c) {
   await db.setCasteloField(c.id, "status", "pago");
   await interaction.reply({ content: `✅ Castelo **${c.time_label}** marcado como PAGO.` });
+}
+async function onCasteloLeave(interaction) {
+  const [, casteloId] = interaction.customId.split("|");
+  const c = await db.getCasteloById(casteloId);
+  await db.deleteCasteloSignup(casteloId, interaction.user.id);
+  if (c) await applyCasteloReallocation(c, null);
+  await interaction.reply({ content: "🚪 Saiu do castelo.", flags: MessageFlags.Ephemeral });
 }
 async function casteloRemove(interaction, c) {
   const user = interaction.options.getUser("usuario");

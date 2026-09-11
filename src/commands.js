@@ -89,6 +89,8 @@ function commandDefs() {
     new SlashCommandBuilder().setName("castelo_remove").setDescription("Remove alguém do castelo")
       .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true))
       .addUserOption((o) => o.setName("usuario").setDescription("Quem remover")),
+    new SlashCommandBuilder().setName("castelo_cancel").setDescription("Cancela o castelo (aborta, apaga a sala)")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
   ].map((c) => c.toJSON());
 }
 
