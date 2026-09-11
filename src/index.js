@@ -1102,9 +1102,13 @@ async function casteloCreate(interaction) {
     if (ch) {
       const roleMention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
       const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+      const fs = require("fs"); const path = require("path");
+      const imgPath = path.join(__dirname, "..", "assets", "castelo.png");
+      const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "castelo.png" }] : [];
       const msg = await ch.send({
         content: `${roleMention} 🏰 **CASTELO ${horario} UTC** — conteúdo de guerra! Pinga tua função 👇`,
         components: buildRolePicker(`c${c.id}`), // reusa o picker do CTA (prefixo c<id>)
+        files,
         ...allow,
       }).catch(()=>null);
       if (msg) {
