@@ -8,7 +8,7 @@ const U = (w) => (w || "").trim().toUpperCase();
 function capFor(weapon, numParties = 4) {
   const meta = WEAPONS[U(weapon)] || {};
   if (meta.unica) {
-    if (U(weapon) === "URSINAS" && numParties >= 5) return 2; // PT1 e PT5 têm Ursinas
+    if (U(weapon) === "URSINAS" && numParties >= 5) return 2; // PT1 e PT5
     return 1;
   }
   if (meta.tetoPorPt) return Math.max(1, numParties - 1);
@@ -32,7 +32,7 @@ function findBestSlot(weapon, signups, numParties = 4) {
     if (s.party_index != null) taken.add(`${s.party_index}:${s.slot_index}`);
   }
 
-  // ---- passo 1: tenta PT1 (prioridade absoluta) ----
+  // Passo 1: PT1 (prioridade absoluta)
   let best1 = null;
   for (let i = 0; i < PARTIES[0].slots.length; i++) {
     if (taken.has(`0:${i}`)) continue;
@@ -44,7 +44,7 @@ function findBestSlot(weapon, signups, numParties = 4) {
   }
   if (best1) return best1;
 
-  // ---- passo 2: PT2..ptN por peso global ----
+  // Passo 2: PT2..ptN
   let best = null;
   for (let p = 1; p < numParties; p++) {
     for (let i = 0; i < PARTIES[p].slots.length; i++) {
@@ -273,9 +273,11 @@ function shortLabel(slot) {
   const ws = slot.accepts.map((a) => a.weapon);
   if (slot.locked) return "👑 CALLER";
   if (ws.length === 1) return ws[0];
+  if (ws[0] === "EXALTADO" && (slot.accepts[1]?.weight || 1) > 1) return "EXALTADO";
   if (ws.includes("SHADOW CALLER") || ws.includes("DANAÇÃO") || ws.includes("PÚTRIDO")) return "DEBUFF";
   if (ws.includes("CAÇA ESPÍRITOS") || ws.includes("ENTALHADA")) return "DEBUFF MELEE";
-  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "NATURE";
+  if (ws.includes("RAMPANTE") || ws.includes("POSTULENTO")) return "HEALER NATURE";
+  if (ws.includes("QUEDA SANTA") || ws.includes("EXALTADO") || ws.includes("CORROMPIDO")) return "HEALER HOLY";
   if (slot.role === "Healer") return "HEALER";
   if (slot.role === "Tank") return "TANK";
   if (slot.role === "Support") return "SUPORTE";

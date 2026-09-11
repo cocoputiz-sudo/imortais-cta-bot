@@ -383,6 +383,44 @@ async function onIpModal(interaction) {
   await interaction.reply({ content: `**${weapon}** (IP ${ip}) selecionada. E aí:`, components: [row], flags: MessageFlags.Ephemeral });
 }
 
+// calcula o que falta nas PT1-4 (ignora PT5 press comp), por função,
+// listando as armas cabíveis (preferíveis primeiro = peso menor).
+// retorna { faltam: [{funcao, qtd, armas:[...]}], texto: "..." }
+function faltasCTA(signups) {
+  const { PARTIES } = require("./comps");
+  const N = 4; // só PT1-4
+  // conta vagas vazias por função nas 4 PTs
+  const taken = new Set(signups.filter(s => s.party_index != null && s.party_index < N).map(s => `${s.party_index}:${s.slot_index}`));
+  const porFuncao = {}; // funcao -> { qtd, armasSet(weight) }
+  for (let p = 0; p < N; p++) {
+    for (let i = 0; i < PARTIES[p].slots.length; i++) {
+      const slot = PARTIES[p].slots[i];
+      if (slot.locked) continue;
+      if (taken.has(`${p}:${i}`)) continue; // vaga ocupada
+      const role = slot.role;
+      if (!porFuncao[role]) porFuncao[role] = { qtd: 0, armas: {} };
+      porFuncao[role].qtd++;
+      for (const a of slot.accepts) {
+        // guarda o menor peso visto pra cada arma (preferível)
+        if (porFuncao[role].armas[a.weapon] == null || a.weight < porFuncao[role].armas[a.weapon])
+          porFuncao[role].armas[a.weapon] = a.weight;
+      }
+    }
+  }
+  const faltam = [];
+  for (const [funcao, info] of Object.entries(porFuncao)) {
+    if (info.qtd <= 0) continue;
+    // ordena armas por peso (preferíveis primeiro)
+    const armas = Object.entries(info.armas).sort((a,b)=>a[1]-b[1]).map(([w])=>w);
+    faltam.push({ funcao, qtd: info.qtd, armas });
+  }
+  return faltam;
+}
+function faltasTexto(faltam) {
+  if (!faltam.length) return "";
+  return faltam.map(f => `**${f.qtd} ${f.funcao}** (${f.armas.slice(0,6).join(", ")}${f.armas.length>6?"...":""})`).join(" · ");
+}
+
 async function onPresence(interaction) {
   const [, eventId, presence, weapon, ipStr, ownerId] = interaction.customId.split("|");
   const ip = ipStr && ipStr !== "0" ? parseInt(ipStr, 10) : null;
@@ -418,10 +456,40 @@ async function onPresence(interaction) {
   const pres = presence === "online" ? "🟢 já ON" : "🕐 entra no horário";
   await logStaff(interaction.guild, `➕ **${username}** entrou de **${weapon}** → ${dest} · ${pres} · CTA ${ev.time_label}`);
 
+  // calcula o que falta nas PT1-4 (pra DM e nudge)
+  const signupsNow = await db.getSignups(ev.id);
+  const faltam = faltasCTA(signupsNow);
+  const faltamTxt = faltasTexto(faltam);
+
+  // NUDGE: se a pessoa foi pra RESERVA (função cheia) e tem função faltando -> oferece trocar
+  if (!myLoc && faltam.length) {
+    const btns = faltam.slice(0, 5).map(f =>
+      new ButtonBuilder().setCustomId(`role|${eventId}|${f.funcao}`).setLabel(f.funcao).setStyle(ButtonStyle.Primary));
+    const row = new ActionRowBuilder().addComponents(btns);
+    return interaction.editReply({
+      content: `📝 As vagas de **${weapon}** estão cheias. Mas falta: ${faltamTxt}\nQuer ir de uma dessas pra garantir vaga?`,
+      components: [row],
+    });
+  }
+
   const msg = myLoc
     ? `✅ Fechado! **Party ${myLoc.partyIndex + 1}**, vaga ${myLoc.slotIndex + 1} (${weapon}).`
     : `📝 Anotado como **reserva** (${weapon}) — sem vaga nem por afinidade.`;
   await interaction.editReply({ content: msg, components: [] });
+
+  // DM informativa (Leitura C): confirma + avisa o que falta se pingou função abundante
+  try {
+    const minhaRole = (require("./comps").WEAPONS[weapon.toUpperCase()] || {}).role;
+    const faltaMinhaRole = faltam.some(f => f.funcao === minhaRole);
+    let dm = myLoc
+      ? `✅ Você entrou de **${weapon}** na **Party ${myLoc.partyIndex + 1}** do CTA ${ev.time_label} UTC. Tá tudo certo!`
+      : `📝 Você ficou na **reserva** do CTA ${ev.time_label} UTC (${weapon}).`;
+    // se a função da pessoa é abundante (ainda falta dela = não; se NÃO falta dela mas falta outra = abundante)
+    if (faltamTxt && !faltaMinhaRole) {
+      dm += `\n\n💡 Se quiser ajudar mais, ainda falta: ${faltamTxt}. É só pingar de novo a função na thread.`;
+    }
+    await interaction.user.send({ content: dm }).catch(()=>{}); // se DM bloqueada, ignora
+  } catch (e) { /* DM é best-effort */ }
 }
 
 async function onLooter(interaction) {
@@ -1207,11 +1275,29 @@ function escapeHtml(s) {
 
 async function slashRemove(interaction, ev) {
   const user = interaction.options.getUser("usuario");
-  const removed = await db.deleteSignup(ev.id, user.id);
-  if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
-  await interaction.reply({ content: `🗑️ ${user} removido do CTA ${ev.time_label}.` });
-  refreshRoster(ev);
-  await logStaff(interaction.guild, `🗑️ ${interaction.user} removeu ${user} · CTA ${ev.time_label}`);
+  const pt = interaction.options.getInteger("pt");
+  const vaga = interaction.options.getInteger("vaga");
+
+  // modo 1: por @ (pessoa ainda no servidor)
+  if (user) {
+    const removed = await db.deleteSignup(ev.id, user.id);
+    if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: `🗑️ ${user} removido do CTA ${ev.time_label}.` });
+    await applyReallocation(ev, interaction.guild, null);
+    await logStaff(interaction.guild, `🗑️ ${interaction.user} removeu ${user} · CTA ${ev.time_label}`);
+    return;
+  }
+  // modo 2: por PT+vaga (pessoa saiu do servidor e não aparece mais no @)
+  if (pt && vaga) {
+    const su = await db.getSignupAtSlot(ev.id, pt - 1, vaga - 1);
+    if (!su) return interaction.reply({ content: `Não há ninguém na PT${pt} vaga ${vaga}.`, flags: MessageFlags.Ephemeral });
+    await db.deleteSignup(ev.id, su.user_id);
+    await interaction.reply({ content: `🗑️ **${su.username}** removido da PT${pt} vaga ${vaga} (CTA ${ev.time_label}).` });
+    await applyReallocation(ev, interaction.guild, null);
+    await logStaff(interaction.guild, `🗑️ ${interaction.user} removeu ${su.username} (PT${pt} v${vaga}) · CTA ${ev.time_label}`);
+    return;
+  }
+  return interaction.reply({ content: "Informe **@usuário** (se está no servidor) ou **pt + vaga** (se a pessoa saiu do servidor).", flags: MessageFlags.Ephemeral });
 }
 
 async function slashClean(interaction, ev) {

@@ -22,8 +22,11 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_move").setDescription("Move um jogador já inscrito pra outra vaga")
       .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),
-    new SlashCommandBuilder().setName("cta_remove").setDescription("Remove o jogador do CTA (igual sair da função)")
-      .addUserOption(userOpt).addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("cta_remove").setDescription("Remove o jogador do CTA (por @ ou por PT+vaga se saiu do servidor)")
+      .addStringOption(ctaOpt)
+      .addUserOption(o=>o.setName("usuario").setDescription("Jogador (se ainda está no servidor)"))
+      .addIntegerOption(o=>o.setName("pt").setDescription("PT (1-5) — use se a pessoa saiu do servidor").setMinValue(1).setMaxValue(5))
+      .addIntegerOption(o=>o.setName("vaga").setDescription("Vaga (1-20) — use com PT se a pessoa saiu").setMinValue(1).setMaxValue(20)),
     new SlashCommandBuilder().setName("cta_add").setDescription("Adiciona um jogador numa vaga (mesmo sem ter pingado)")
       .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),

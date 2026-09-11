@@ -66,7 +66,7 @@ const WEAPONS = {
   "ARCO PLANGENTE":            { role: "Ranged" },
   "ARCO LONGO":                { role: "Ranged" },
 
-  // Healers
+  // Healers (apenas os 5 oficiais do bot)
   "QUEDA SANTA":               { role: "Healer" },
   "EXALTADO":                  { role: "Healer" },
   "CORROMPIDO":                { role: "Healer" },
@@ -78,8 +78,32 @@ const WEAPONS = {
 // FAMÍLIAS reutilizáveis
 // ---------------------------------------------------------------------------
 const F = {
-  HEALER_QS: [["QUEDA SANTA", 1], ["EXALTADO", 1], ["CORROMPIDO", 2]],
-  BRACELETE: [["RAMPANTE", 1], ["POSTULENTO", 1]],
+  // Todos os Healers Holy aceitos
+  HEALER_HOLY: [
+    ["QUEDA SANTA", 1],
+    ["EXALTADO", 1],
+    ["CORROMPIDO", 1],
+  ],
+
+  // Todos os Healers Nature aceitos
+  HEALER_NATURE: [
+    ["RAMPANTE", 1],
+    ["POSTULENTO", 1],
+  ],
+
+  // Healer Holy padrão PT1..PT4 (QS/Exaltado peso 1, Corrompido peso 2)
+  HEALER_QS: [
+    ["QUEDA SANTA", 1],
+    ["EXALTADO", 1],
+    ["CORROMPIDO", 2],
+  ],
+
+  // Bracelete padrão PT1..PT4
+  BRACELETE: [
+    ["RAMPANTE", 1],
+    ["POSTULENTO", 1],
+  ],
+
   TANK_MACA: [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]],
   DPS_LIVRE: [
     ["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
@@ -154,13 +178,12 @@ const PARTY2 = [
   slot("Healer",  F.BRACELETE),                                               // 20
 ];
 
-// PARTY 3 e PARTY 4 = espelhos da PARTY 2
 const mirror = () => PARTY2.map((s) => ({ role: s.role, accepts: s.accepts.map((a) => ({ ...a })) }));
 const PARTY3 = mirror();
 const PARTY4 = mirror();
 
 // ---------------------------------------------------------------------------
-// PARTY 5 (Composição personalizada)
+// PARTY 5 (Composição solicitada com suporte total a Holy e Nature)
 // ---------------------------------------------------------------------------
 const PARTY5 = [
   slot("Tank",    [["MONARCA", 1]]),                                                    // 01
@@ -179,10 +202,10 @@ const PARTY5 = [
   slot("Melee",   [["PRESA DEMONIACA", 1], ["DESSANGRADORA", 1]]),                      // 14
   slot("Support", [["ARVORE", 1]]),                                                     // 15
   slot("Ranged",  [["ASTRAL", 1]]),                                                     // 16
-  slot("Healer",  F.BRACELETE),                                                         // 17 Healer Nature
-  slot("Healer",  [["QUEDA SANTA", 1], ["EXALTADO", 1], ["CORROMPIDO", 1]]),           // 18 Healer Holy
-  slot("Healer",  [["QUEDA SANTA", 1], ["EXALTADO", 1], ["CORROMPIDO", 1]]),           // 19 Healer Holy
-  slot("Healer",  [["EXALTADO", 1]]),                                                   // 20 Exaltado
+  slot("Healer",  F.HEALER_NATURE),                                                     // 17 Healer Nature (Rampante / Postulento)
+  slot("Healer",  F.HEALER_HOLY),                                                       // 18 Healer Holy (QS / Exaltado / Corrompido)
+  slot("Healer",  F.HEALER_HOLY),                                                       // 19 Healer Holy (QS / Exaltado / Corrompido)
+  slot("Healer",  [["EXALTADO", 1], ["QUEDA SANTA", 2], ["CORROMPIDO", 2]]),           // 20 Exaltado (preferido) ou qualquer Holy
 ];
 
 const PARTIES = [
@@ -202,7 +225,7 @@ function buildWeaponCatalog() {
 }
 
 // ---------------------------------------------------------------------------
-// FAMÍLIAS FUNCIONAIS
+// FAMÍLIAS FUNCIONAIS (Healer Holy e Nature isolados)
 // ---------------------------------------------------------------------------
 const FAMILIES = {
   DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO", "EXECRADO"],
@@ -213,7 +236,8 @@ const FAMILIES = {
     "MAÇA PESADA W RUNA GUARDA", "MANGUAL", "CAMBRIANA", "SEGANÍMICA", "CAJADO PRIMORDIAL",
   ],
   SUPORTE:       ["G.A", "ARVORE", "SILENCE", "JURADOR", "LOCUS"],
-  HEALERS:       ["RAMPANTE", "POSTULENTO", "QUEDA SANTA", "CORROMPIDO", "EXALTADO"],
+  HEALER_HOLY:   ["QUEDA SANTA", "EXALTADO", "CORROMPIDO"],
+  HEALER_NATURE: ["RAMPANTE", "POSTULENTO"],
   MELEE: [
     "BRAÇADEIRAS", "QUEBRA REINOS", "PRESA DEMONIACA", "GALATINAS",
     "CRIA REIS", "LAMINA DA INFINIDADE", "FÚRIA CONTIDA", "CRAVADAS",
