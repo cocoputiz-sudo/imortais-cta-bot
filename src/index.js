@@ -82,23 +82,82 @@ async function onThreadText(msg) {
   if (words.length > 4) return;
 
   const ev = await db.getEventByThread(msg.channelId);
-  if (!ev || ev.status !== "open") return;
+  if (ev && ev.status === "open") {
+    const weapons = Object.keys(WEAPONS);
+    let matchedWeapon = null;
+    for (const w of weapons) {
+      if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
+    }
+    if (matchedWeapon) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, null, matchedWeapon); }
+    for (const word of words) {
+      if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, ROLE_WORDS[word], null); }
+    }
+    if (/^\d{1,2}$/.test(text)) {
+      const vaga = parseInt(text, 10);
+      if (vaga >= 1 && vaga <= 20) { await msg.delete().catch(() => {}); return startSignupFromSlotNumber(msg, ev, vaga); }
+    }
+    return;
+  }
 
+  // não é CTA — tenta CASTELO
+  const cast = await db.getCasteloByThread(msg.channelId);
+  if (cast && cast.status !== "pago" && cast.status !== "fechado") {
+    return onCasteloText(msg, cast, text, words);
+  }
+}
+
+// reconhecimento de texto no castelo: arma, papel, ou número de vaga
+async function onCasteloText(msg, cast, text, words) {
   const weapons = Object.keys(WEAPONS);
+  // 1) nome de arma
   let matchedWeapon = null;
   for (const w of weapons) {
     if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
   }
-  if (matchedWeapon) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, null, matchedWeapon); }
-
+  if (matchedWeapon) { await msg.delete().catch(() => {}); return casteloSignupWeapon(msg, cast, matchedWeapon); }
+  // 2) papel
   for (const word of words) {
-    if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, ROLE_WORDS[word], null); }
+    if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return casteloSignupRole(msg, cast, ROLE_WORDS[word]); }
   }
-
+  // 3) número de vaga (1-20): junta armas cabíveis naquela posição nas 3 PTs do castelo
   if (/^\d{1,2}$/.test(text)) {
     const vaga = parseInt(text, 10);
-    if (vaga >= 1 && vaga <= 20) { await msg.delete().catch(() => {}); return startSignupFromSlotNumber(msg, ev, vaga); }
+    if (vaga >= 1 && vaga <= 20) { await msg.delete().catch(() => {}); return casteloSignupSlotNumber(msg, cast, vaga); }
   }
+}
+
+// encaixa direto uma arma no castelo (via engine)
+async function casteloSignupWeapon(msg, cast, weapon) {
+  const username = msg.member?.displayName || msg.author.username;
+  await db.upsertCasteloSignup({ casteloId: cast.id, userId: msg.author.id, username, weapon, presence: "online", partyIndex: null, slotIndex: null });
+  const loc = await applyCasteloReallocation(cast, msg.author.id);
+  const txt = loc
+    ? `✅ ${msg.author}, você entrou de **${weapon}** no castelo (Party ${castelo.CASTELO_PT_INDEX.indexOf(loc.partyIndex)+1}, vaga ${loc.slotIndex+1}).`
+    : `📝 ${msg.author}, **${weapon}** anotado como reserva no castelo.`;
+  await msg.channel.send({ content: txt }).catch(() => {});
+}
+// abre menu de armas do papel no castelo
+async function casteloSignupRole(msg, cast, role) {
+  const armas = WEAPON_CATALOG[role] || [];
+  if (!armas.length) return;
+  const menu = new StringSelectMenuBuilder().setCustomId(`cweapon|${cast.id}|${msg.author.id}`)
+    .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
+  await msg.channel.send({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+}
+// número de vaga no castelo: lista armas cabíveis naquela posição nas 3 PTs
+async function casteloSignupSlotNumber(msg, cast, vaga) {
+  const idx = vaga - 1;
+  const armasSet = new Set();
+  for (const p of castelo.CASTELO_PT_INDEX) {
+    const slot = castelo.casteloSlot(castelo.CASTELO_PT_INDEX.indexOf(p), idx);
+    if (!slot || slot.locked) continue;
+    for (const a of slot.accepts) armasSet.add(a.weapon);
+  }
+  const armas = [...armasSet];
+  if (!armas.length) { await msg.channel.send({ content: `${msg.author}, a vaga ${vaga} não tem armas pra escolher.` }).catch(() => {}); return; }
+  const menu = new StringSelectMenuBuilder().setCustomId(`cweapon|${cast.id}|${msg.author.id}`)
+    .setPlaceholder(`Arma da vaga ${vaga}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
+  await msg.channel.send({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
 
 async function startSignupFromText(msg, ev, role, weapon) {
@@ -452,7 +511,7 @@ async function onPresence(interaction) {
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
 
-  const CALLER_WEAPONS = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO"];
+  const CALLER_WEAPONS = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA"];
   if (CALLER_WEAPONS.includes(weapon.toUpperCase()) && interaction.user.id === ev.caller_id) {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`calleryes|${eventId}|${encodeURIComponent(weapon)}`)

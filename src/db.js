@@ -423,6 +423,10 @@ async function getCasteloById(id) {
   const { rows } = await pool.query(`SELECT * FROM castelos WHERE id=$1`, [id]);
   return rows[0];
 }
+async function getCasteloByThread(threadId) {
+  const { rows } = await pool.query(`SELECT * FROM castelos WHERE thread_id=$1 AND status NOT IN ('pago','fechado') LIMIT 1`, [threadId]);
+  return rows[0];
+}
 async function getOpenCastelos(guildId) {
   const { rows } = await pool.query(`SELECT * FROM castelos WHERE guild_id=$1 AND status!='pago' ORDER BY created_at DESC`, [guildId]);
   return rows;
@@ -538,7 +542,7 @@ module.exports = {
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
   upsertRoamingSignup, getRoamingSignups, deleteRoamingSignup,
   roamingVoiceJoin, roamingVoiceLeave, roamingCloseAllOpen, getRoamingPresence,
-  createCastelo, getCastelo, getCasteloById, getOpenCastelos, setCasteloField,
+  createCastelo, getCastelo, getCasteloById, getCasteloByThread, getOpenCastelos, setCasteloField,
   upsertCasteloSignup, getCasteloSignups, deleteCasteloSignup, moveCasteloSignup,
   casteloVoiceJoin, casteloVoiceLeave, casteloCloseAllOpen, getCasteloPresence,
 };
