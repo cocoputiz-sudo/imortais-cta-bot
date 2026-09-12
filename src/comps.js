@@ -152,7 +152,7 @@ const PARTY2 = [
   slot("Tank",    [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]]), // 02
   slot("Tank",    [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]]), // 03
   { ...slot("Tank",    [["ARVORE", 1], ["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1],
-                   ["MAÇA DE UMA MÃO", 1], ["MONARCA", 1], ["SILENCE", 1], ["G.A", 1]]), gaDynamic: true }, // 04
+                   ["MAÇA DE UMA MÃO", 1], ["MONARCA", 1], ["SILENCE", 1]]), gaDynamic: true }, // 04
   slot("Support", [["JURADOR", 1], ["MAÇA PESADA W RUNA GUARDA", 2],
                    ["MARTELO DE BATALHA", 2], ["MAÇA DE UMA MÃO", 2], ["EXECRADO", 1]]),             // 05
   slot("Support", [["JURADOR", 1], ["LOCUS", 1], ["MAÇA PESADA W RUNA GUARDA", 2],

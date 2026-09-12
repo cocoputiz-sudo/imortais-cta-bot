@@ -29,7 +29,7 @@ const CFG = {
   prepVoiceId: process.env.PREP_VOICE_ID || null,
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
   bombVoiceId: process.env.BOMB_VOICE_ID || null,
-  presetTimes: (process.env.PRESET_TIMES || "15:20,17:20,19:20,21:20,23:00,01:20").split(","),
+  presetTimes: (process.env.PRESET_TIMES || "15:20,17:20,19:20,21:20,00:00,01:20").split(","),
 };
 
 const client = new Client({
