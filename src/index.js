@@ -210,9 +210,9 @@ async function startSignupFromSlotNumber(msg, ev, vaga) {
 
 async function applyReallocationMsg(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
-  const numParties = fresh.num_parties || 4;
+  const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = reallocate(signups, numParties);
+  const result = reallocate(signups, pl.length, pl);
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
@@ -372,7 +372,7 @@ async function onTimeConfirm(interaction) {
       content: `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`,
       components: buildRolePicker(ev.id),
     });
-    const chunks = rosterChunks([], 4);
+    const chunks = rosterChunks([], 1, [0]); // começa só com a PT1
     const ids = [];
     for (const c of chunks) { const m = await thread.send({ content: c }); ids.push(m.id); }
     await db.setRosterMsg(ev.id, ids.join(","));
@@ -589,7 +589,7 @@ const notifyPending = new Map();
 
 async function applyReallocation(ev, guild, focusUserId) {
   const fresh = (await db.getEvent(ev.id)) || ev;
-  const numParties = fresh.num_parties || 4;
+  const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
 
   if (ctaFrozen.has(String(fresh.id))) {
@@ -598,7 +598,7 @@ async function applyReallocation(ev, guild, focusUserId) {
     let myLoc = me && me.party_index != null ? { partyIndex: me.party_index, slotIndex: me.slot_index } : null;
     if (me && myLoc == null) {
       const { PARTIES } = require("./comps");
-      outer: for (let p = 0; p < numParties; p++) {
+      outer: for (const p of pl) {
         for (let i = 0; i < PARTIES[p].slots.length; i++) {
           if (taken.has(`${p}:${i}`) || PARTIES[p].slots[i].locked) continue;
           if (PARTIES[p].slots[i].accepts.some((a) => a.weapon.toUpperCase() === (me.weapon || "").toUpperCase())) {
@@ -613,7 +613,7 @@ async function applyReallocation(ev, guild, focusUserId) {
     return myLoc;
   }
 
-  const result = reallocate(signups, numParties);
+  const result = reallocate(signups, pl.length, pl);
 
   let focusLoc = null;
   for (const r of result) {
@@ -724,9 +724,9 @@ async function onMontar(interaction) {
   if (interaction.user.id !== ev.caller_id)
     return interaction.reply({ content: "Só o caller monta.", flags: MessageFlags.Ephemeral });
   const fresh = (await db.getEvent(eventId)) || ev;
-  const numParties = fresh.num_parties || 4;
+  const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(eventId);
-  const blocks = renderRoster(signups, numParties);
+  const blocks = renderRoster(signups, pl.length, pl);
   const half = Math.ceil(blocks.length / 2);
   const p1 = `📋 **PT — CTA ${fresh.time_label} UTC (1/2)**\n\n` + blocks.slice(0, half).join("\n\n");
   const p2 = `📋 **PT — CTA ${fresh.time_label} UTC (2/2)**\n\n` + blocks.slice(half).join("\n\n");
@@ -800,7 +800,7 @@ async function onSlash(interaction) {
   const ev = await db.getOpenEventByTime(interaction.guildId, timeLabel);
   if (!ev) return interaction.reply({ content: `Não achei um CTA aberto às ${timeLabel}.`, flags: MessageFlags.Ephemeral });
 
-  if (name === "cta_press_pt") return slashPressPt(interaction, ev);
+  if (name === "cta_show") return slashShow(interaction, ev, interaction.options.getString("tipo"));
   if (name === "cta_remove") return slashRemove(interaction, ev);
   if (name === "cta_clean")  return slashClean(interaction, ev);
   if (name === "cta_move")   return slashMoveOrAdd(interaction, ev, false);
@@ -810,56 +810,52 @@ async function onSlash(interaction) {
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
 }
 
-async function slashPressPt(interaction, ev) {
+async function slashShow(interaction, ev, tipo) {
+  // tipo: "flex" (índice 1) ou "press" (índice 4)
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const fresh = (await db.getEvent(ev.id)) || ev;
-  const currentNum = fresh.num_parties || 4;
-  if (currentNum >= 5) {
-    return interaction.editReply({ content: `⚠️ A **Party 5** já foi criada para o CTA ${fresh.time_label} UTC.` });
-  }
-  if (!fresh.thread_id) {
-    return interaction.editReply({ content: "⚠️ Thread deste CTA não encontrada." });
-  }
+  if (!fresh.thread_id) return interaction.editReply({ content: "⚠️ Thread deste CTA não encontrada." });
   const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
-  if (!thread) {
-    return interaction.editReply({ content: "⚠️ Não foi possível acessar a thread do CTA no Discord." });
-  }
+  if (!thread) return interaction.editReply({ content: "⚠️ Não foi possível acessar a thread do CTA." });
 
-  await db.setNumParties(fresh.id, 5);
-  fresh.num_parties = 5;
+  const pl = db.parsePartyList(fresh);
+  const idx = tipo === "press" ? 4 : 1; // flex=PT2(1), press=PT5(4)
+  if (pl.includes(idx)) return interaction.editReply({ content: `⚠️ Essa PT (${tipo}) já está aberta neste CTA.` });
+
+  pl.push(idx);
+  await db.setPartyList(fresh.id, pl);
+  fresh.party_list = pl.join(",");
 
   const signups = await db.getSignups(fresh.id);
-  const blocks = renderRoster(signups, 5);
-  const msg5 = await thread.send({
-    content: (blocks[4] || "__**Party 5** (0/20)__\n*vazio*").slice(0, 1990),
-  });
+  const blocks = renderRoster(signups, pl.length, pl);
+  const novoDisplayNum = pl.length; // a nova PT é a última da lista
+  const novoBloco = blocks[novoDisplayNum - 1] || `__**Party ${novoDisplayNum}**__\n*vazio*`;
 
-  const currentIds = fresh.roster_msg ? String(fresh.roster_msg).split(",").filter(Boolean) : [];
-  currentIds.push(msg5.id);
-  const newRosterMsg = currentIds.join(",");
-  await db.setRosterMsg(fresh.id, newRosterMsg);
-  fresh.roster_msg = newRosterMsg;
+  const msgNova = await thread.send({ content: novoBloco.slice(0, 1990) });
+  const ids = fresh.roster_msg ? String(fresh.roster_msg).split(",").filter(Boolean) : [];
+  ids.push(msgNova.id);
+  await db.setRosterMsg(fresh.id, ids.join(","));
+  fresh.roster_msg = ids.join(",");
 
   const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
   const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+  const nomeTipo = tipo === "press" ? "PRESS COMP" : "FLEX";
   await thread.send({
-    content: `${mention} 🛡️⚔️ **PARTY 5 LIBERADA!** (CTA ${fresh.time_label} UTC)\nMais 20 vagas abertas. Escolha sua função abaixo para entrar 👇`,
+    content: `${mention} 🛡️⚔️ **PARTY ${novoDisplayNum} LIBERADA (${nomeTipo})!** — mais 20 vagas. Escolhe tua função 👇`,
     components: buildRolePicker(fresh.id),
     ...allow,
   });
 
   await applyReallocation(fresh, interaction.guild, null);
-  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **Party 5** no CTA **${fresh.time_label} UTC**! (+20 vagas)`);
-  await interaction.editReply({
-    content: `✅ **Party 5 criada com sucesso** para o CTA **${fresh.time_label} UTC**!\nA mensagem da PT5 e os botões de inscrição foram enviados na thread ${thread}.`,
-  });
+  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **Party ${novoDisplayNum}** (${nomeTipo}) · CTA ${fresh.time_label}`);
+  await interaction.editReply({ content: `✅ **Party ${novoDisplayNum} (${nomeTipo})** aberta! Quem estava aguardando PT foi realocado.` });
 }
 
 async function applyConsolidation(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
-  const numParties = fresh.num_parties || 4;
+  const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = consolidate(signups, numParties);
+  const result = consolidate(signups, pl.length);
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
@@ -1891,13 +1887,14 @@ async function refreshBombRoster(ev) {
 }
 
 // ======================  HELPERS  ==========================================
-function rosterChunks(signups, numParties = 4) {
-  const blocks = renderRoster(signups, numParties);
+function rosterChunks(signups, numParties = 4, partyList = null) {
+  const n = partyList ? partyList.length : numParties;
+  const blocks = renderRoster(signups, numParties, partyList);
   const chunks = [];
-  for (let i = 0; i < numParties; i++) {
+  for (let i = 0; i < n; i++) {
     let txt = blocks[i] || "";
-    if (i === numParties - 1 && blocks.length > numParties) {
-      txt += "\n\n" + blocks.slice(numParties).join("\n\n");
+    if (i === n - 1 && blocks.length > n) {
+      txt += "\n\n" + blocks.slice(n).join("\n\n");
     }
     chunks.push(txt.slice(0, 1990));
   }
@@ -1927,9 +1924,9 @@ async function doRefreshRoster(ev) {
   if (!thread) return;
 
   const ids = String(fresh.roster_msg).split(",").filter(Boolean);
-  const numParties = fresh.num_parties || ids.length || 4;
+  const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const chunks = rosterChunks(signups, numParties);
+  const chunks = rosterChunks(signups, pl.length, pl);
 
   await Promise.all(ids.map(async (id, i) => {
     const m = await thread.messages.fetch(id).catch(() => null);

@@ -17,8 +17,9 @@ function commandDefs() {
   const armaOpt = (o) => o.setName("arma").setDescription("Arma").setAutocomplete(true);
 
   return [
-    new SlashCommandBuilder().setName("cta_press_pt").setDescription("Adiciona a Party 5 (PT5) ao CTA")
-      .addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("cta_show").setDescription("Abre mais uma PT no CTA (flex ou press)")
+      .addStringOption(ctaOpt)
+      .addStringOption((o) => o.setName("tipo").setDescription("Qual PT abrir").setRequired(true).addChoices({name:"flex (PT normal)",value:"flex"},{name:"press comp",value:"press"})),
     new SlashCommandBuilder().setName("cta_move").setDescription("Move um jogador já inscrito pra outra vaga")
       .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),

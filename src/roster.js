@@ -313,14 +313,17 @@ function renderRoster(signups, numParties = 4, partyList = null) {
             : "";
         lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${ipTag} ${flag}`);
       } else {
-        lines.push(`\`${n}\` ${shortLabel(slot)} — *vazio*`);
+        // vaga vazia: mostra as armas possíveis (preferíveis primeiro), Opção A
+        const armas = [...slot.accepts].sort((a,b)=>a.weight-b.weight).map(a=>a.weapon);
+        const lista = armas.length <= 3 ? armas.join(" / ") : armas.slice(0,3).join(" / ") + "…";
+        lines.push(`\`${n}\` ${slot.locked ? "👑 CALLER" : lista} — *vazio*`);
       }
     }
     blocks.push(`__**${label}** (${filled}/${party.slots.length})__\n${lines.join("\n")}`);
   }
   if (reserves.length) {
     blocks.push(
-      `__**Reserva / sem vaga**__\n` +
+      `__**⏳ Aguardando PT** (sem vaga nas PTs abertas)__\n` +
         reserves.map((r) => `• **${r.username}** — ${r.weapon}`).join("\n")
     );
   }

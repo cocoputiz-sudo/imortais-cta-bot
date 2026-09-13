@@ -159,6 +159,7 @@ async function init() {
   `);
 
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS party_list TEXT DEFAULT '0';`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
@@ -196,6 +197,14 @@ async function setRosterMsg(eventId, msgId) {
 
 async function setNumParties(eventId, numParties) {
   await pool.query(`UPDATE cta_events SET num_parties=$1 WHERE id=$2`, [numParties, eventId]);
+}
+// lista ordenada de índices de PT a exibir (ex "0,4,1"). Default "0" (só PT1).
+async function setPartyList(eventId, list) {
+  await pool.query(`UPDATE cta_events SET party_list=$1 WHERE id=$2`, [list.join(","), eventId]);
+}
+function parsePartyList(ev) {
+  const raw = (ev.party_list || "0").trim();
+  return raw.split(",").map(Number).filter((n) => !isNaN(n));
 }
 
 async function getEvent(eventId) {
@@ -531,7 +540,7 @@ async function getRoamingPresence(roamingId) {
 }
 
 module.exports = {
-  pool, init, createEvent, setThread, setRosterMsg, setNumParties, getEvent, getEventByThread,
+  pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,
