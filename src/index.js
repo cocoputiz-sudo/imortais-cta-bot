@@ -614,6 +614,7 @@ async function applyReallocation(ev, guild, focusUserId) {
   }
 
   const result = reallocate(signups, pl.length, pl);
+  console.log(`[realloc] evento=${fresh.id} party_list=${pl.join(",")} signups=${signups.length} alocados=${result.filter(r=>r.partyIndex!=null).length} aguardando=${result.filter(r=>r.partyIndex==null).length}`);
 
   let focusLoc = null;
   for (const r of result) {
@@ -825,6 +826,7 @@ async function slashShow(interaction, ev, tipo) {
   pl.push(idx);
   await db.setPartyList(fresh.id, pl);
   fresh.party_list = pl.join(",");
+  console.log(`[cta_show] evento=${fresh.id} nova party_list=${fresh.party_list} tipo=${tipo}`); // DIAGNÓSTICO
 
   const signups = await db.getSignups(fresh.id);
   const blocks = renderRoster(signups, pl.length, pl);
@@ -1137,12 +1139,11 @@ async function onCasteloCommand(interaction) {
 }
 
 async function casteloCancel(interaction, c) {
-  await db.setCasteloField(c.id, "status", "pago"); // marca como encerrado (sai da lista de abertos)
-  // apaga a sala de voz
+  await interaction.deferReply();
+  await db.setCasteloField(c.id, "status", "pago");
   if (c.voice_id) { const vc = await client.channels.fetch(c.voice_id).catch(()=>null); if (vc) await vc.delete().catch(()=>{}); await db.setCasteloField(c.id,"voice_id",null); }
-  // arquiva a thread
   if (c.thread_id) { const th = await client.channels.fetch(c.thread_id).catch(()=>null); if (th) await th.setArchived(true).catch(()=>{}); }
-  await interaction.reply({ content: `❌ **Castelo ${c.time_label} CANCELADO.** Sala apagada.` });
+  await interaction.editReply({ content: `❌ **Castelo ${c.time_label} CANCELADO.** Sala apagada.` });
 }
 
 async function casteloCreate(interaction) {
@@ -1264,13 +1265,14 @@ async function onCasteloWeaponPick(interaction) {
 }
 
 async function casteloStart(interaction, c) {
+  await interaction.deferReply();
   await db.setCasteloField(c.id, "status", "contando");
   await db.setCasteloField(c.id, "started_at", new Date());
   if (c.voice_id) {
     const vc = await client.channels.fetch(c.voice_id).catch(()=>null);
     if (vc && vc.members) for (const [, mb] of vc.members) await db.casteloVoiceJoin(c.id, mb.id, mb.displayName || mb.user.username);
   }
-  await interaction.reply({ content: `▶️ Castelo **${c.time_label}** — contagem de presença iniciada!` });
+  await interaction.editReply({ content: `▶️ Castelo **${c.time_label}** — contagem de presença iniciada!` });
 }
 async function casteloValue(interaction, c) {
   const valor = interaction.options.getInteger("valor");
@@ -1329,9 +1331,10 @@ async function onCasteloLeave(interaction) {
 async function casteloRemove(interaction, c) {
   const user = interaction.options.getUser("usuario");
   if (!user) return interaction.reply({ content: "Informe o @usuário.", flags: MessageFlags.Ephemeral });
+  await interaction.deferReply();
   await db.deleteCasteloSignup(c.id, user.id);
   await applyCasteloReallocation(c, null);
-  await interaction.reply({ content: `🗑️ ${user} removido do castelo ${c.time_label}.` });
+  await interaction.editReply({ content: `🗑️ ${user} removido do castelo ${c.time_label}.` });
 }
 
 async function deleteRoamingVoice(r) {
@@ -2057,5 +2060,10 @@ async function reconcileVoice(client) {
     }
   } catch (e) { console.error("reconcileVoice:", e); }
 }
+
+// handlers globais de erro — evitam que um erro derrube o bot inteiro
+client.on("error", (e) => console.error("client error:", e));
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
 (async () => { await db.init(); await client.login(CFG.token); })();
