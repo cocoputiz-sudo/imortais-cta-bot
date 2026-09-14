@@ -614,7 +614,6 @@ async function applyReallocation(ev, guild, focusUserId) {
   }
 
   const result = reallocate(signups, pl.length, pl);
-  console.log(`[realloc] evento=${fresh.id} party_list=${pl.join(",")} signups=${signups.length} alocados=${result.filter(r=>r.partyIndex!=null).length} aguardando=${result.filter(r=>r.partyIndex==null).length}`);
 
   let focusLoc = null;
   for (const r of result) {
@@ -826,7 +825,6 @@ async function slashShow(interaction, ev, tipo) {
   pl.push(idx);
   await db.setPartyList(fresh.id, pl);
   fresh.party_list = pl.join(",");
-  console.log(`[cta_show] evento=${fresh.id} nova party_list=${fresh.party_list} tipo=${tipo}`); // DIAGNÓSTICO
 
   const signups = await db.getSignups(fresh.id);
   const blocks = renderRoster(signups, pl.length, pl);
@@ -857,7 +855,7 @@ async function applyConsolidation(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = consolidate(signups, pl.length);
+  const result = consolidate(signups, pl.length, pl);
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
