@@ -580,20 +580,38 @@ async function applyReallocation(ev, guild, focusUserId) {
   const signups = await db.getSignups(fresh.id);
 
   if (ctaFrozen.has(String(fresh.id))) {
-    const taken = new Set(signups.filter((s) => s.party_index != null && s.user_id !== focusUserId).map((s) => `${s.party_index}:${s.slot_index}`));
-    const me = signups.find((s) => s.user_id === focusUserId);
-    let myLoc = me && me.party_index != null ? { partyIndex: me.party_index, slotIndex: me.slot_index } : null;
-    if (me && myLoc == null) {
-      const { PARTIES } = require("./comps");
-      outer: for (const p of pl) {
+    // CTA travado: ninguém que já tem vaga é movido. Só encaixamos quem está
+    // sem vaga (reservas / "Aguardando PT") nas vagas abertas das PTs abertas.
+    // Cobre tanto uma inscrição nova (focusUserId) quanto abrir PT nova via /cta_show.
+    const { PARTIES } = require("./comps");
+    const taken = new Set(
+      signups.filter((s) => s.party_index != null).map((s) => `${s.party_index}:${s.slot_index}`)
+    );
+    // reservas: focus primeiro (pra devolver o myLoc dele), depois maior IP no desempate
+    const reservas = signups
+      .filter((s) => s.party_index == null)
+      .sort((a, b) =>
+        a.user_id === focusUserId ? -1 : b.user_id === focusUserId ? 1 : (b.ip || 0) - (a.ip || 0)
+      );
+
+    let myLoc = null;
+    for (const su of reservas) {
+      const w = (su.weapon || "").toUpperCase();
+      let best = null;
+      for (const p of pl) {
         for (let i = 0; i < PARTIES[p].slots.length; i++) {
           if (taken.has(`${p}:${i}`) || PARTIES[p].slots[i].locked) continue;
-          if (PARTIES[p].slots[i].accepts.some((a) => a.weapon.toUpperCase() === (me.weapon || "").toUpperCase())) {
-            await db.moveSignupToSlot(fresh.id, focusUserId, p, i);
-            myLoc = { partyIndex: p, slotIndex: i };
-            break outer;
-          }
+          const hit = PARTIES[p].slots[i].accepts.find((a) => a.weapon.toUpperCase() === w);
+          if (!hit) continue;
+          if (!best || hit.weight < best.weight) best = { partyIndex: p, slotIndex: i, weight: hit.weight };
+          if (best.weight === 1) break;
         }
+        if (best && best.weight === 1) break;
+      }
+      if (best) {
+        await db.moveSignupToSlot(fresh.id, su.user_id, best.partyIndex, best.slotIndex);
+        taken.add(`${best.partyIndex}:${best.slotIndex}`);
+        if (su.user_id === focusUserId) myLoc = { partyIndex: best.partyIndex, slotIndex: best.slotIndex };
       }
     }
     refreshRoster(fresh);
