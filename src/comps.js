@@ -1,13 +1,11 @@
 /**
  * ============================================================================
- * IMORTAIS CTA BOT - comps.js
- * Configuração de Composições, Catálogo de Armas, Roles e Botões de Inscrição
+ * IMORTAIS CTA BOT - src/comps.js
+ * Composições, Catálogo de Armas, Roles e Estrutura de Botões
  * ============================================================================
  */
 
-// ============================================================================
-// 1. CATÁLOGO DE ARMAS POR ROLE (Utilizado para os botões de inscrição)
-// ============================================================================
+// 1. CATÁLOGO DE ARMAS POR ROLE (Ativado pelos Botões de Inscrição)
 const ROLE_WEAPONS = {
   TANK: [
     'Golem',
@@ -40,7 +38,6 @@ const ROLE_WEAPONS = {
     'Presa Demo'
   ],
   RANGED: [
-    // Armas RANGED adicionadas e verificadas para botões e catálogo
     'Arco Longo',     // [CONFIRMADO]: Adicionado para ativação por botão
     'Gelo Elevado',   // [CONFIRMADO]: Adicionado para ativação por botão
     'Prisma',
@@ -67,9 +64,7 @@ const ROLE_WEAPONS = {
   ]
 };
 
-// ============================================================================
 // 2. FAMÍLIAS DE ARMAS (Engine de Realocação e Afinidade)
-// ============================================================================
 const WEAPON_FAMILIES = {
   'Maças': ['Golem', 'Maça de Uma Mão', 'Maça Pétrea', 'Maça Pesada', 'Monarca'],
   'Martelos': ['Martelo de Batalha', 'Sincelo', 'Guarda do Bosque'],
@@ -84,9 +79,7 @@ const WEAPON_FAMILIES = {
   'Amaldiçoado': ['Bruxo de Uma Mão', 'Shadow Caller', 'Danação']
 };
 
-// ============================================================================
-// 3. COMPOSIÇÕES PADRÃO (PT1, PT2, PT3, PT4, PT5)
-// ============================================================================
+// 3. COMPOSIÇÃO PADRÃO PT1
 const PT1 = [
   { slot: 1,  role: 'TANK',    title: 'Caller (Golem)',      weapons: ['Golem', 'Maça de Uma Mão', 'Monarca'] },
   { slot: 2,  role: 'TANK',    title: 'Tank (G.A)',          weapons: ['G.A', 'Maça Pesada'] },
@@ -110,55 +103,7 @@ const PT1 = [
   { slot: 20, role: 'HEALER',  title: 'Rampante/Pustulento', weapons: ['Rampante', 'Pustulento'] }
 ];
 
-const PT2 = [
-  { slot: 1,  role: 'TANK',    title: 'Caller/Golem',        weapons: ['Golem', 'Maça Pesada'] },
-  { slot: 2,  role: 'TANK',    title: 'Maça Pesada',         weapons: ['Maça Pesada'] },
-  { slot: 3,  role: 'TANK',    title: 'Maça Pesada',         weapons: ['Maça Pesada'] },
-  { slot: 4,  role: 'TANK',    title: 'Maça Pesada',         weapons: ['Maça Pesada'] },
-  { slot: 5,  role: 'SUPPORT', title: 'G.A Support',         weapons: ['G.A'] },
-  { slot: 6,  role: 'SUPPORT', title: 'Entalhada',           weapons: ['Entalhada'] },
-  { slot: 7,  role: 'SUPPORT', title: 'Shadow Caller',       weapons: ['Shadow Caller'] },
-  { slot: 8,  role: 'SUPPORT', title: 'Carroça / Support',   weapons: ['Carroça', 'Danação'] },
-  { slot: 9,  role: 'SUPPORT', title: 'Entalhada',           weapons: ['Entalhada'] },
-  { slot: 10, role: 'SUPPORT', title: 'Silence',             weapons: ['Silence'] },
-  { slot: 11, role: 'RANGED',  title: 'Prisma',              weapons: ['Prisma', 'Gelo Elevado'] },
-  { slot: 12, role: 'MELEE',   title: 'Cravadas',            weapons: ['Cravada'] },
-  { slot: 13, role: 'RANGED',  title: 'Canção da Alvorada',  weapons: ['Canção da Alvorada', 'Arco Longo'] },
-  { slot: 14, role: 'MELEE',   title: 'Braçadeiras',         weapons: ['Braçadeiras'] },
-  { slot: 15, role: 'MELEE',   title: 'Braçadeiras',         weapons: ['Braçadeiras'] },
-  { slot: 16, role: 'MELEE',   title: 'Galatinas',           weapons: ['Galatinas'] },
-  { slot: 17, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 18, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 19, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 20, role: 'HEALER',  title: 'Rampante/Pustulento', weapons: ['Rampante', 'Pustulento'] }
-];
-
-// ============================================================================
-// 4. NOVA COMPOSIÇÃO PT6: pt6teste (EXATAMENTE OS 20 SLOTS REQUISITADOS)
-// ============================================================================
-/**
- * Composição da PT6 (pt6teste):
- * Slot 1: Caller [Tank] - Golem / Maça de uma mão / Monarca
- * Slot 2: Maça Pétrea [Tank]
- * Slot 3: Maça Pesada [Tank]
- * Slot 4: Monarca [Tank]
- * Slot 5: Bruxo de uma mão [Support/Cursed]
- * Slot 6: Locus [Support]
- * Slot 7: Jurador [Support]
- * Slot 8: Árvore [Support]
- * Slot 9: Shadow Caller [Support]
- * Slot 10: Quebra-reinos [Melee]
- * Slot 11: Gelo Elevado [Ranged]
- * Slot 12: Prisma [Ranged]
- * Slot 13: Cravada [Melee]
- * Slot 14: Ursinas [Melee]
- * Slot 15: Flex DPS / Braçadeiras (Vaga Reserva para totalizar 20 membros)
- * Slot 16: Arco Longo [Ranged]
- * Slot 17: Queda Santa [Healer]
- * Slot 18: Queda Santa [Healer]
- * Slot 19: Exaltado / Corrompido [Healer]
- * Slot 20: Pustulento / Rampante [Healer]
- */
+// 4. NOVA COMPOSIÇÃO PT6: pt6teste (20 SLOTS COMPLETOS)
 const pt6teste = [
   { slot: 1,  role: 'TANK',    title: 'Caller',              weapons: ['Golem', 'Maça de Uma Mão', 'Monarca'] },
   { slot: 2,  role: 'TANK',    title: 'Maça Pétrea',         weapons: ['Maça Pétrea'] },
@@ -182,19 +127,12 @@ const pt6teste = [
   { slot: 20, role: 'HEALER',  title: 'Pustulento / Ramp.',  weapons: ['Pustulento', 'Rampante'] }
 ];
 
-// ============================================================================
 // 5. DICIONÁRIO PRINCIPAL DE COMPOSIÇÕES
-// ============================================================================
 const COMPS = {
   pt1: {
     id: 'pt1',
     name: 'PT 1 - Principal',
     slots: PT1
-  },
-  pt2: {
-    id: 'pt2',
-    name: 'PT 2 - Secundária',
-    slots: PT2
   },
   pt6teste: {
     id: 'pt6teste',
@@ -204,11 +142,8 @@ const COMPS = {
   }
 };
 
-// ============================================================================
 // 6. ESTRUTURA DOS BOTÕES DO DISCORD
-// ============================================================================
 const BUTTON_CONFIG = {
-  // Roles principais ativadas no painel do CTA
   MAIN_ROLES: [
     { id: 'role_tank',    label: '🛡️ Tank',    style: 'Primary' },
     { id: 'role_support', label: '🔮 Suporte', style: 'Primary' },
@@ -216,7 +151,6 @@ const BUTTON_CONFIG = {
     { id: 'role_ranged',  label: '🏹 Ranged',  style: 'Primary' },
     { id: 'role_healer',  label: '💚 Healer',  style: 'Primary' }
   ],
-  // Botões de armas RANGED (garantindo Arco Longo e Gelo Elevado)
   RANGED_WEAPONS: [
     { id: 'weapon_arcolongo',   label: 'Arco Longo',          style: 'Secondary' },
     { id: 'weapon_geloelevado', label: 'Gelo Elevado',        style: 'Secondary' },
@@ -226,9 +160,6 @@ const BUTTON_CONFIG = {
   ]
 };
 
-// ============================================================================
-// 7. FUNÇÕES AUXILIARES
-// ============================================================================
 function getComp(compKey) {
   const normalizedKey = (compKey || '').toLowerCase().trim();
   return COMPS[normalizedKey] || null;
@@ -246,14 +177,10 @@ function getWeaponsForRole(role) {
   return ROLE_WEAPONS[normalizedRole] || [];
 }
 
-// ============================================================================
-// 8. EXPORTAÇÕES (Compatibilidade CommonJS e ES Modules)
-// ============================================================================
 module.exports = {
   ROLE_WEAPONS,
   WEAPON_FAMILIES,
   PT1,
-  PT2,
   pt6teste,
   COMPS,
   BUTTON_CONFIG,
