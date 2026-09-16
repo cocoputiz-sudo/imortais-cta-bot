@@ -1,67 +1,148 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { COMPS, getComp, BUTTON_CONFIG } = require('./comps');
+// ============================================================================
+// SLASH COMMANDS de gestão do CTA
+// ============================================================================
+const {
+  REST, Routes, SlashCommandBuilder,
+} = require("discord.js");
+const db = require("./db");
+const { PARTIES, WEAPONS } = require("./comps");
 
-// Definição do comando /cta_show com a opção pt6teste
-const ctaShowCommand = new SlashCommandBuilder()
-  .setName('cta_show')
-  .setDescription('Abre ou exibe uma composição específica no CTA ativo')
-  .addStringOption(option =>
-    option.setName('party')
-      .setDescription('Selecione a PT a exibir')
-      .setRequired(true)
-      .addChoices(
-        { name: 'PT 1', value: 'pt1' },
-        { name: 'pt6teste', value: 'pt6teste' }
-      )
-  );
+const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 
-// Manipulador do comando /cta_show
-async function handleCtaShow(interaction, activeRoster = {}) {
-  const partyChoice = interaction.options.getString('party');
-  const comp = getComp(partyChoice);
+function commandDefs() {
+  const ctaOpt = (o) => o.setName("cta").setDescription("Qual CTA (horário)").setRequired(true).setAutocomplete(true);
+  const userOpt = (o) => o.setName("usuario").setDescription("Jogador").setRequired(true);
+  const ptOpt = (o) => o.setName("pt").setDescription("Número da PT (1-5)").setRequired(true).setMinValue(1).setMaxValue(5);
+  const vagaOpt = (o) => o.setName("vaga").setDescription("Número da vaga (1-20)").setMinValue(1).setMaxValue(20);
+  const armaOpt = (o) => o.setName("arma").setDescription("Arma").setAutocomplete(true);
 
-  if (!comp) {
-    return interaction.reply({
-      content: `❌ Composição "${partyChoice}" não encontrada.`,
-      ephemeral: true
-    });
-  }
-
-  const embed = new EmbedBuilder()
-    .setTitle(`🛡️ CTA IMORTAIS - ${comp.name}`)
-    .setColor('#1E88E5')
-    .setDescription(`Composição oficial carregada com **${comp.slots.length} vagas**.`)
-    .setFooter({ text: 'IMORTAIS • Albion Online ZvZ CTA Bot' })
-    .setTimestamp();
-
-  let slotsText = '';
-  comp.slots.forEach(slot => {
-    const assignedPlayer = activeRoster[slot.slot] ? `<@${activeRoster[slot.slot].userId}>` : '*Vaga Vazia*';
-    const weaponsList = slot.weapons.join(' / ');
-    slotsText += `**${slot.slot}.** [${slot.role}] **${slot.title}** (${weaponsList}): ${assignedPlayer}\n`;
-  });
-
-  embed.addFields({ name: '📋 Relação de Vagas', value: slotsText });
-
-  return interaction.reply({ embeds: [embed] });
+  return [
+    new SlashCommandBuilder().setName("cta_show").setDescription("Abre mais uma PT no CTA (flex ou press)")
+      .addStringOption(ctaOpt)
+      .addStringOption((o) => o.setName("tipo").setDescription("Qual PT abrir").setRequired(true).addChoices({name:"flex (PT normal)",value:"flex"},{name:"press comp",value:"press"})),
+    new SlashCommandBuilder().setName("cta_move").setDescription("Move um jogador já inscrito pra outra vaga")
+      .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
+      .addIntegerOption(vagaOpt).addStringOption(armaOpt),
+    new SlashCommandBuilder().setName("cta_remove").setDescription("Remove o jogador do CTA (por @ ou por PT+vaga se saiu do servidor)")
+      .addStringOption(ctaOpt)
+      .addUserOption(o=>o.setName("usuario").setDescription("Jogador (se ainda está no servidor)"))
+      .addIntegerOption(o=>o.setName("pt").setDescription("PT (1-5) — use se a pessoa saiu do servidor").setMinValue(1).setMaxValue(5))
+      .addIntegerOption(o=>o.setName("vaga").setDescription("Vaga (1-20) — use com PT se a pessoa saiu").setMinValue(1).setMaxValue(20)),
+    new SlashCommandBuilder().setName("cta_add").setDescription("Adiciona um jogador numa vaga (mesmo sem ter pingado)")
+      .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
+      .addIntegerOption(vagaOpt).addStringOption(armaOpt),
+    new SlashCommandBuilder().setName("cta_clean").setDescription("Esvazia uma PT inteira")
+      .addStringOption(ctaOpt).addIntegerOption(ptOpt),
+    new SlashCommandBuilder().setName("cta_change_time").setDescription("Muda o horário de um CTA já criado")
+      .addStringOption(ctaOpt)
+      .addStringOption((o) => o.setName("novo").setDescription("Novo horário, ex 23:00").setRequired(true)),
+    new SlashCommandBuilder().setName("cta_finish").setDescription("Encerra um CTA (qualquer staff, qualquer caller)")
+      .addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
+      .addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
+    new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
+    new SlashCommandBuilder().setName("attendance_monthly").setDescription("Relatório de presença — últimos 30 dias"),
+    new SlashCommandBuilder().setName("cta_start_temporada").setDescription("Inicia uma temporada (Mestre de Guerra)")
+      .addIntegerOption((o) => o.setName("numero").setDescription("Número da temporada, ex: 34").setRequired(true).setMinValue(1).setMaxValue(999)),
+    new SlashCommandBuilder().setName("cta_finish_temporada").setDescription("Encerra a temporada atual (Mestre de Guerra)"),
+    new SlashCommandBuilder().setName("cta_rank").setDescription("Placar de presença da temporada atual"),
+    new SlashCommandBuilder().setName("cta_meurank").setDescription("Tua pontuação de presença na temporada atual"),
+    // ---- ROAMING ----
+    new SlashCommandBuilder().setName("roaming").setDescription("Cria um roaming (caller)")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming, ex: badmack").setRequired(true))
+      .addIntegerOption((o) => o.setName("vagas").setDescription("12, 16 ou 20").setRequired(true).addChoices({ name: "12", value: 12 }, { name: "16", value: 16 }, { name: "20", value: 20 })),
+    new SlashCommandBuilder().setName("roaming_start").setDescription("Começa a contar presença do roaming")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_value").setDescription("Informa a prata arrecadada")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addIntegerOption((o) => o.setName("valor").setDescription("Prata total, ex: 42000000").setRequired(true)),
+    new SlashCommandBuilder().setName("roaming_finish").setDescription("Encerra e calcula a divisão")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_saldo").setDescription("Mostra a divisão do roaming")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_meu_saldo").setDescription("Teu saldo no roaming")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("roaming_remove").setDescription("Remove alguém do roaming")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addUserOption((o) => o.setName("usuario").setDescription("Quem remover").setRequired(true)),
+    new SlashCommandBuilder().setName("roaming_fill").setDescription("Adiciona alguém no roaming")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true))
+      .addUserOption((o) => o.setName("usuario").setDescription("Quem adicionar").setRequired(true))
+      .addStringOption((o) => o.setName("funcao").setDescription("Função (tank/dps/healer/sup/caller)").setRequired(true)),
+    new SlashCommandBuilder().setName("roaming_pago").setDescription("Marca o roaming como pago")
+      .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo").setDescription("Cria um castelo (caller)")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário UTC, ex: 21:20").setRequired(true)),
+    new SlashCommandBuilder().setName("castelo_start").setDescription("Começa a contar presença do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário do castelo").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_value").setDescription("Informa a prata do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true))
+      .addIntegerOption((o) => o.setName("valor").setDescription("Prata total").setRequired(true)),
+    new SlashCommandBuilder().setName("castelo_finish").setDescription("Encerra e divide a prata do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_saldo").setDescription("Mostra a divisão do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_meu_saldo").setDescription("Teu saldo no castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_pago").setDescription("Marca o castelo como pago")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+    new SlashCommandBuilder().setName("castelo_remove").setDescription("Remove alguém do castelo")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true))
+      .addUserOption((o) => o.setName("usuario").setDescription("Quem remover")),
+    new SlashCommandBuilder().setName("castelo_cancel").setDescription("Cancela o castelo (aborta, apaga a sala)")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário").setRequired(true).setAutocomplete(true)),
+  ].map((c) => c.toJSON());
 }
 
-// Cria os botões da role RANGED garantindo Arco Longo e Gelo Elevado
-function createRangedButtonsRow() {
-  const row = new ActionRowBuilder();
-  BUTTON_CONFIG.RANGED_WEAPONS.forEach(w => {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`weapon_choice_${w.id}`)
-        .setLabel(w.label)
-        .setStyle(ButtonStyle[w.style] || ButtonStyle.Secondary)
-    );
-  });
-  return row;
+async function registerCommands(clientId, guildId) {
+  if (!process.env.DISCORD_TOKEN) return;
+  const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commandDefs() });
+  console.log("✅ Slash commands registrados no servidor", guildId);
+}
+
+function isStaff(interaction) {
+  if (!STAFF_ROLE_ID) return true;
+  return interaction.member?.roles?.cache?.has(STAFF_ROLE_ID);
+}
+
+async function handleAutocomplete(interaction) {
+  const focused = interaction.options.getFocused(true);
+  if (focused.name === "cta") {
+    const events = await db.getOpenEvents(interaction.guildId);
+    const choices = events.map((e) => ({ name: `CTA ${e.time_label}`, value: e.time_label }));
+    return interaction.respond(choices.slice(0, 25));
+  }
+  if (focused.name === "arma") {
+    const q = (focused.value || "").toUpperCase();
+    const all = Object.keys(WEAPONS).filter((w) => w.includes(q));
+    return interaction.respond(all.slice(0, 25).map((w) => ({ name: w, value: w })));
+  }
+  if (focused.name === "nome") {
+    const rs = await db.getOpenRoamings(interaction.guildId);
+    return interaction.respond(rs.slice(0, 25).map((r) => ({ name: `${r.nome} (${r.vagas}v)`, value: r.nome })));
+  }
+  if (focused.name === "horario") {
+    const cs = await db.getOpenCastelos(interaction.guildId).catch(()=>[]);
+    return interaction.respond(cs.slice(0, 25).map((c) => ({ name: `Castelo ${c.time_label}`, value: c.time_label })));
+  }
+  return interaction.respond([]);
+}
+
+function resolveTargetSlot(partyIndex, vaga, arma, signups) {
+  const taken = new Set(signups.filter((s) => s.party_index != null).map((s) => `${s.party_index}:${s.slot_index}`));
+  if (vaga != null) return { partyIndex, slotIndex: vaga - 1 };
+  const slots = PARTIES[partyIndex]?.slots || [];
+  for (let i = 0; i < slots.length; i++) {
+    if (taken.has(`${partyIndex}:${i}`)) continue;
+    if (slots[i].accepts.some((a) => a.weapon.toUpperCase() === (arma || "").toUpperCase())) {
+      return { partyIndex, slotIndex: i };
+    }
+  }
+  return null;
 }
 
 module.exports = {
-  ctaShowCommand,
-  handleCtaShow,
-  createRangedButtonsRow
+  registerCommands, isStaff, handleAutocomplete, resolveTargetSlot, commandDefs,
 };

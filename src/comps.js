@@ -1,190 +1,305 @@
-/**
- * ============================================================================
- * IMORTAIS CTA BOT - src/comps.js
- * Composições, Catálogo de Armas, Roles e Estrutura de Botões
- * ============================================================================
- */
-
-// 1. CATÁLOGO DE ARMAS POR ROLE (Ativado pelos Botões de Inscrição)
-const ROLE_WEAPONS = {
-  TANK: [
-    'Golem',
-    'Maça de Uma Mão',
-    'Maça Pétrea',
-    'Maça Pesada',
-    'Monarca',
-    'G.A',
-    'Martelo de Batalha',
-    'Sincelo'
-  ],
-  SUPPORT: [
-    'Locus',
-    'Jurador',
-    'Árvore',
-    'Shadow Caller',
-    'Bruxo de Uma Mão',
-    'Danação',
-    'Entalhada',
-    'Caça Espíritos',
-    'Silence'
-  ],
-  MELEE: [
-    'Quebra-reinos',
-    'Cravada',
-    'Ursinas',
-    'Galatinas',
-    'Braçadeiras',
-    'Astral',
-    'Presa Demo'
-  ],
-  RANGED: [
-    'Arco Longo',     // [CONFIRMADO]: Adicionado para ativação por botão
-    'Gelo Elevado',   // [CONFIRMADO]: Adicionado para ativação por botão
-    'Prisma',
-    'Canção da Alvorada',
-    'Feiticeiro',
-    'Bruxo de Uma Mão',
-    'Shadow Caller'
-  ],
-  HEALER: [
-    'Queda Santa',
-    'Exaltado',
-    'Corrompido',
-    'Pustulento',
-    'Rampante'
-  ],
-  BATTLEMOUNT: [
-    'Carroça',
-    'Balista',
-    'Behemoth',
-    'Águia',
-    'Besouro',
-    'Lagarto',
-    'Ent'
-  ]
+// ============================================================================
+// COMPS DA IMORTAIS — Fase 1 (famílias de armas + pesos)
+// ============================================================================
+const ROLES = {
+  Tank:    { emoji: "🛡️", color: 0x2b6cb0 },
+  Support: { emoji: "🎺", color: 0xb7791f },
+  Ranged:  { emoji: "🏹", color: 0x9b2c2c },
+  Melee:   { emoji: "⚔️", color: 0x9b2c2c },
+  Healer:  { emoji: "💚", color: 0x2f855a },
 };
 
-// 2. FAMÍLIAS DE ARMAS (Engine de Realocação e Afinidade)
-const WEAPON_FAMILIES = {
-  'Maças': ['Golem', 'Maça de Uma Mão', 'Maça Pétrea', 'Maça Pesada', 'Monarca'],
-  'Martelos': ['Martelo de Batalha', 'Sincelo', 'Guarda do Bosque'],
-  'Arcanos': ['Locus', '1H Arcane', 'Arcano de Uma Mão', 'Silence'],
-  'Sagrado': ['Queda Santa', 'Exaltado', 'Corrompido'],
-  'Natureza': ['Árvore', 'Pustulento', 'Rampante', 'Selvagem'],
-  'Machados': ['Quebra-reinos', 'Ursinas', 'Patas de Urso'],
-  'Luvas': ['Cravada', 'Braçadeiras', 'Punhos de Avalon'],
-  'Espadas': ['Galatinas', 'Astral', 'Espada Clarent'],
-  'Arcos': ['Arco Longo', 'Arco de Guerra', 'Badon'],
-  'Gelo': ['Gelo Elevado', 'Prisma', 'Gelo 1H'],
-  'Amaldiçoado': ['Bruxo de Uma Mão', 'Shadow Caller', 'Danação']
+// ---------------------------------------------------------------------------
+// CATÁLOGO DE ARMAS
+// ---------------------------------------------------------------------------
+const WEAPONS = {
+  // Tanks
+  "GOLEM":                     { role: "Tank" },
+  "MAÇA PESADA":               { role: "Tank" },
+  "MAÇA PÉTREA":               { role: "Tank" },
+  "MARTELO DE BATALHA":        { role: "Tank" },
+  "MAÇA DE UMA MÃO":           { role: "Tank" },
+  "MARTELO DE UMA MÃO":        { role: "Tank" },
+  "MAÇA PESADA W RUNA GUARDA": { role: "Tank" },
+  "BRUXO DE UMA MÃO":          { role: "Tank" },
+  "MONARCA":                   { role: "Tank" },
+  "MANGUAL":                   { role: "Tank" },
+  "CAMBRIANA":                 { role: "Tank" },
+  "SEGANÍMICA":                { role: "Tank" },
+  "CAJADO PRIMORDIAL":         { role: "Tank" },
+
+  // Supports
+  "ARVORE":                    { role: "Support" },
+  "JURADOR":                   { role: "Support" },
+  "G.A":                       { role: "Support" },
+  "LOCUS":                     { role: "Support" },
+  "SILENCE":                   { role: "Support" },
+  "CARROÇA":                   { role: "Support" },
+  "BEHEMOT":                   { role: "Support" },
+  "SHADOW CALLER":             { role: "Support" },
+  "DANAÇÃO":                   { role: "Support" },
+  "PÚTRIDO":                   { role: "Support" },
+  "CAÇA ESPÍRITOS":            { role: "Support", tetoPorPt: true },
+  "ENTALHADA":                 { role: "Support", tetoPorPt: true },
+  "EXECRADO":                  { role: "Support" },
+  "OCULTO":                    { role: "Support" },
+
+  // Melee / DPS
+  "QUEBRA REINOS":             { role: "Melee" },
+  "BRAÇADEIRAS":               { role: "Melee" },
+  "URSINAS":                   { role: "Melee", unica: true },
+  "CRAVADAS":                  { role: "Melee", unica: true },
+  "GALATINAS":                 { role: "Melee" },
+  "PRESA DEMONIACA":           { role: "Melee" },
+  "CRIA REIS":                 { role: "Melee" },
+  "LAMINA DA INFINIDADE":      { role: "Melee" },
+  "FÚRIA CONTIDA":             { role: "Melee" },
+  "SEGADEIRA":                 { role: "Melee" },
+  "PATAS DE URSO":             { role: "Melee" },
+  "DESSANGRADORA":             { role: "Melee" },
+
+  // Ranged
+  "PRISMA":                    { role: "Ranged" },
+  "CANÇÃO":                    { role: "Ranged" },
+  "ASTRAL":                    { role: "Ranged" },
+  "SINCELO":                   { role: "Ranged" },
+  "ARCO PLANGENTE":            { role: "Ranged" },
+  "ARCO LONGO":                { role: "Ranged" },
+
+  // Healers (apenas os 5 oficiais do bot)
+  "QUEDA SANTA":               { role: "Healer" },
+  "EXALTADO":                  { role: "Healer" },
+  "CORROMPIDO":                { role: "Healer" },
+  "RAMPANTE":                  { role: "Healer" },
+  "POSTULENTO":                { role: "Healer" },
 };
 
-// 3. COMPOSIÇÃO PADRÃO PT1
-const PT1 = [
-  { slot: 1,  role: 'TANK',    title: 'Caller (Golem)',      weapons: ['Golem', 'Maça de Uma Mão', 'Monarca'] },
-  { slot: 2,  role: 'TANK',    title: 'Tank (G.A)',          weapons: ['G.A', 'Maça Pesada'] },
-  { slot: 3,  role: 'TANK',    title: 'Maça Pesada',         weapons: ['Maça Pesada'] },
-  { slot: 4,  role: 'TANK',    title: 'Maça Pesada',         weapons: ['Maça Pesada'] },
-  { slot: 5,  role: 'SUPPORT', title: 'Jurador',             weapons: ['Jurador'] },
-  { slot: 6,  role: 'SUPPORT', title: 'Jurador',             weapons: ['Jurador'] },
-  { slot: 7,  role: 'SUPPORT', title: 'Shadow Caller',       weapons: ['Shadow Caller'] },
-  { slot: 8,  role: 'SUPPORT', title: 'Danação',             weapons: ['Danação'] },
-  { slot: 9,  role: 'SUPPORT', title: 'Caça Espíritos',      weapons: ['Caça Espíritos'] },
-  { slot: 10, role: 'SUPPORT', title: 'Árvore',              weapons: ['Árvore'] },
-  { slot: 11, role: 'RANGED',  title: 'Prisma',              weapons: ['Prisma', 'Gelo Elevado'] },
-  { slot: 12, role: 'MELEE',   title: 'Braçadeiras',         weapons: ['Braçadeiras', 'Cravada'] },
-  { slot: 13, role: 'MELEE',   title: 'Braçadeiras',         weapons: ['Braçadeiras', 'Cravada'] },
-  { slot: 14, role: 'MELEE',   title: 'Ursinas',             weapons: ['Ursinas'] },
-  { slot: 15, role: 'MELEE',   title: 'Quebra-reinos',       weapons: ['Quebra-reinos'] },
-  { slot: 16, role: 'MELEE',   title: 'Quebra-reinos',       weapons: ['Quebra-reinos'] },
-  { slot: 17, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 18, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 19, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 20, role: 'HEALER',  title: 'Rampante/Pustulento', weapons: ['Rampante', 'Pustulento'] }
+// ---------------------------------------------------------------------------
+// FAMÍLIAS reutilizáveis
+// ---------------------------------------------------------------------------
+const F = {
+  // Todos os Healers Holy aceitos
+  HEALER_HOLY: [
+    ["QUEDA SANTA", 1],
+    ["EXALTADO", 1],
+    ["CORROMPIDO", 1],
+  ],
+
+  // Todos os Healers Nature aceitos
+  HEALER_NATURE: [
+    ["RAMPANTE", 1],
+    ["POSTULENTO", 1],
+  ],
+
+  // Healer Holy padrão PT1..PT4 (QS/Exaltado peso 1, Corrompido peso 2)
+  HEALER_QS: [
+    ["QUEDA SANTA", 1],
+    ["EXALTADO", 1],
+    ["CORROMPIDO", 2],
+  ],
+
+  // Bracelete padrão PT1..PT4
+  BRACELETE: [
+    ["RAMPANTE", 1],
+    ["POSTULENTO", 1],
+  ],
+
+  TANK_MACA: [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]],
+  DPS_LIVRE: [
+    ["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
+    ["PRESA DEMONIACA", 2], ["GALATINAS", 2], ["ASTRAL", 2], ["PRISMA", 2],
+    ["SINCELO", 2], ["CRIA REIS", 2], ["LAMINA DA INFINIDADE", 2],
+  ],
+};
+
+const slot = (role, accepts) => ({
+  role,
+  accepts: accepts.map((a) => (Array.isArray(a) ? { weapon: a[0], weight: a[1] } : { weapon: a, weight: 1 })),
+});
+
+// ---------------------------------------------------------------------------
+// PARTY 1
+// ---------------------------------------------------------------------------
+const PARTY1 = [
+  { ...slot("Tank", [["GOLEM", 1], ["MAÇA DE UMA MÃO", 1], ["BRUXO DE UMA MÃO", 1]]), locked: true }, // 01 caller
+  slot("Tank",    [["MAÇA PESADA", 1]]),                                        // 02
+  slot("Tank",    [["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1]]), // 03
+  slot("Tank",    [["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1]]), // 04
+  slot("Support", [["G.A", 1], ["ARVORE", 1]]),                                   // 05
+  slot("Support", [["JURADOR", 1]]),                                            // 06
+  slot("Support", [["SHADOW CALLER", 1]]),                                      // 07
+  { ...slot("Support", [["SHADOW CALLER", 1], ["PÚTRIDO", 2], ["DANAÇÃO", 3], ["EXECRADO", 2]]), scDynamic: true }, // 08
+  slot("Support", [["CAÇA ESPÍRITOS", 1], ["ENTALHADA", 1], ["EXECRADO", 2]]),                     // 09
+  slot("Support", [["SILENCE", 1]]),                                            // 10
+  slot("Melee",   [["QUEBRA REINOS", 1]]),                                      // 11
+  slot("Melee",   [["PRISMA", 1]]),                                             // 12
+  slot("Melee",   [["CANÇÃO", 1]]),                                             // 13
+  slot("Melee",   [["BRAÇADEIRAS", 1], ["CANÇÃO", 1]]),                           // 14
+  slot("Melee",   [["URSINAS", 1]]),                                            // 15
+  slot("Melee",   [["CRAVADAS", 1]]),                                           // 16
+  slot("Healer",  [["QUEDA SANTA", 1]]),                                       // 17
+  slot("Healer",  F.HEALER_QS),                                               // 18
+  slot("Healer",  [["QUEDA SANTA", 1], ["CORROMPIDO", 1]]),                      // 19
+  slot("Healer",  F.BRACELETE),                                               // 20
 ];
 
-// 4. NOVA COMPOSIÇÃO PT6: pt6teste (20 SLOTS COMPLETOS)
-const pt6teste = [
-  { slot: 1,  role: 'TANK',    title: 'Caller',              weapons: ['Golem', 'Maça de Uma Mão', 'Monarca'] },
-  { slot: 2,  role: 'TANK',    title: 'Maça Pétrea',         weapons: ['Maça Pétrea'] },
-  { slot: 3,  role: 'TANK',    title: 'Maça Pesada',         weapons: ['Maça Pesada'] },
-  { slot: 4,  role: 'TANK',    title: 'Monarca',             weapons: ['Monarca'] },
-  { slot: 5,  role: 'SUPPORT', title: 'Bruxo de Uma Mão',    weapons: ['Bruxo de Uma Mão'] },
-  { slot: 6,  role: 'SUPPORT', title: 'Locus',               weapons: ['Locus'] },
-  { slot: 7,  role: 'SUPPORT', title: 'Jurador',             weapons: ['Jurador'] },
-  { slot: 8,  role: 'SUPPORT', title: 'Árvore',              weapons: ['Árvore'] },
-  { slot: 9,  role: 'SUPPORT', title: 'Shadow Caller',       weapons: ['Shadow Caller'] },
-  { slot: 10, role: 'MELEE',   title: 'Quebra-reinos',       weapons: ['Quebra-reinos'] },
-  { slot: 11, role: 'RANGED',  title: 'Gelo Elevado',        weapons: ['Gelo Elevado'] },
-  { slot: 12, role: 'RANGED',  title: 'Prisma',              weapons: ['Prisma'] },
-  { slot: 13, role: 'MELEE',   title: 'Cravada',             weapons: ['Cravada'] },
-  { slot: 14, role: 'MELEE',   title: 'Ursinas',             weapons: ['Ursinas'] },
-  { slot: 15, role: 'MELEE',   title: 'Flex DPS / Reserva',  weapons: ['Braçadeiras', 'Quebra-reinos', 'Arco Longo', 'Gelo Elevado'] },
-  { slot: 16, role: 'RANGED',  title: 'Arco Longo',          weapons: ['Arco Longo'] },
-  { slot: 17, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 18, role: 'HEALER',  title: 'Queda Santa',         weapons: ['Queda Santa'] },
-  { slot: 19, role: 'HEALER',  title: 'Exaltado / Corromp.', weapons: ['Exaltado', 'Corrompido'] },
-  { slot: 20, role: 'HEALER',  title: 'Pustulento / Ramp.',  weapons: ['Pustulento', 'Rampante'] }
+// ---------------------------------------------------------------------------
+// PARTY 2
+// ---------------------------------------------------------------------------
+const PARTY2 = [
+  slot("Tank",    [["MAÇA PESADA", 2], ["MARTELO DE BATALHA", 2], ["MAÇA DE UMA MÃO", 2],
+                   ["BRUXO DE UMA MÃO", 1], ["GOLEM", 1], ["MONARCA", 1]]),          // 01
+  slot("Tank",    [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]]), // 02
+  slot("Tank",    [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]]), // 03
+  { ...slot("Tank",    [["ARVORE", 1], ["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1],
+                   ["MAÇA DE UMA MÃO", 1], ["MONARCA", 1], ["SILENCE", 1]]), gaDynamic: true }, // 04
+  slot("Support", [["JURADOR", 1], ["MAÇA PESADA W RUNA GUARDA", 2],
+                   ["MARTELO DE BATALHA", 2], ["MAÇA DE UMA MÃO", 2], ["EXECRADO", 1]]),             // 05
+  slot("Support", [["JURADOR", 1], ["LOCUS", 1], ["MAÇA PESADA W RUNA GUARDA", 2],
+                   ["MARTELO DE BATALHA", 2], ["MAÇA DE UMA MÃO", 2], ["EXECRADO", 1]]),             // 06
+  slot("Support", [["G.A", 1]]),                                                 // 07
+  slot("Support", [["CAÇA ESPÍRITOS", 1], ["ENTALHADA", 1], ["SHADOW CALLER", 1],
+                   ["DANAÇÃO", 1], ["PÚTRIDO", 2], ["EXECRADO", 1]]),                               // 08
+  slot("Support", [["G.A", 1], ["SILENCE", 1], ["CARROÇA", 1], ["BEHEMOT", 1], ["EXECRADO", 1]]),       // 09
+  slot("Support", [["G.A", 1], ["SILENCE", 1], ["CARROÇA", 1], ["BEHEMOT", 1], ["EXECRADO", 1]]),       // 10
+  slot("Melee",   [["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
+                   ["PRESA DEMONIACA", 2], ["GALATINAS", 2], ["ASTRAL", 2], ["PRISMA", 2],
+                   ["SINCELO", 2], ["CRIA REIS", 2], ["LAMINA DA INFINIDADE", 2]]),
+  slot("Melee",   [["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
+                   ["PRESA DEMONIACA", 2], ["GALATINAS", 2], ["ASTRAL", 2], ["PRISMA", 2],
+                   ["SINCELO", 2], ["CRIA REIS", 2], ["LAMINA DA INFINIDADE", 2]]),
+  slot("Melee",   F.DPS_LIVRE),                                                // 13
+  slot("Melee",   F.DPS_LIVRE),                                                // 14
+  slot("Melee",   [["CANÇÃO", 1]]),                                             // 15
+  slot("Melee",   [["GALATINAS", 1]]),                                          // 16
+  slot("Healer",  F.HEALER_QS),                                               // 17
+  slot("Healer",  F.HEALER_QS),                                               // 18
+  slot("Healer",  F.HEALER_QS),                                               // 19
+  slot("Healer",  F.BRACELETE),                                               // 20
 ];
 
-// 5. DICIONÁRIO PRINCIPAL DE COMPOSIÇÕES
-const COMPS = {
-  pt1: {
-    id: 'pt1',
-    name: 'PT 1 - Principal',
-    slots: PT1
-  },
-  pt6teste: {
-    id: 'pt6teste',
-    name: 'pt6teste', // Nome exibido no /cta_show exatamente como solicitado
-    displayName: 'pt6teste',
-    slots: pt6teste
+const mirror = () => PARTY2.map((s) => ({ role: s.role, accepts: s.accepts.map((a) => ({ ...a })) }));
+const PARTY3 = mirror();
+const PARTY4 = mirror();
+
+// ---------------------------------------------------------------------------
+// PARTY 5 (Composição solicitada com suporte total a Holy e Nature)
+// ---------------------------------------------------------------------------
+const PARTY5 = [
+  slot("Tank",    [["MONARCA", 1]]),                                                    // 01
+  slot("Tank",    [["MARTELO DE BATALHA", 1]]),                                         // 02
+  slot("Tank",    [["CAJADO PRIMORDIAL", 1]]),                                          // 03
+  slot("Tank",    [["MARTELO DE UMA MÃO", 1]]),                                         // 04
+  slot("Melee",   [["QUEBRA REINOS", 1]]),                                              // 05
+  slot("Tank",    [["SEGANÍMICA", 1], ["CAMBRIANA", 1], ["MANGUAL", 1]]),               // 06
+  slot("Melee",   [["SEGADEIRA", 1], ["PATAS DE URSO", 1]]),                            // 07
+  slot("Melee",   [["URSINAS", 1]]),                                                    // 08
+  slot("Melee",   [["GALATINAS", 1], ["CRIA REIS", 1], ["PRESA DEMONIACA", 1], ["PATAS DE URSO", 1]]), // 09
+  slot("Melee",   [["GALATINAS", 1], ["CRIA REIS", 1], ["PATAS DE URSO", 1]]),          // 10
+  slot("Ranged",  [["ARCO LONGO", 1], ["CANÇÃO", 1], ["PRISMA", 1]]),                  // 11
+  slot("Ranged",  [["CANÇÃO", 1], ["PRISMA", 1]]),                                     // 12
+  slot("Ranged",  [["CANÇÃO", 1], ["PRISMA", 1]]),                                     // 13
+  slot("Melee",   [["PRESA DEMONIACA", 1], ["DESSANGRADORA", 1]]),                      // 14
+  slot("Support", [["ARVORE", 1]]),                                                     // 15
+  slot("Ranged",  [["ASTRAL", 1]]),                                                     // 16
+  slot("Healer",  F.HEALER_NATURE),                                                     // 17 Healer Nature (Rampante / Postulento)
+  slot("Healer",  F.HEALER_HOLY),                                                       // 18 Healer Holy (QS / Exaltado / Corrompido)
+  slot("Healer",  F.HEALER_HOLY),                                                       // 19 Healer Holy (QS / Exaltado / Corrompido)
+  slot("Healer",  [["EXALTADO", 1], ["QUEDA SANTA", 2], ["CORROMPIDO", 2]]),           // 20 Exaltado (preferido) ou qualquer Holy
+];
+
+const PARTIES = [
+  { name: "Party 1", slots: PARTY1 },
+  { name: "Party 2", slots: PARTY2 },
+  { name: "Party 3", slots: PARTY3 },
+  { name: "Party 4", slots: PARTY4 },
+  { name: "Party 5", slots: PARTY5 },
+];
+
+function buildWeaponCatalog() {
+  const byRole = {};
+  for (const [w, meta] of Object.entries(WEAPONS)) {
+    (byRole[meta.role] ||= []).push(w);
   }
-};
+  return byRole;
+}
 
-// 6. ESTRUTURA DOS BOTÕES DO DISCORD
-const BUTTON_CONFIG = {
-  MAIN_ROLES: [
-    { id: 'role_tank',    label: '🛡️ Tank',    style: 'Primary' },
-    { id: 'role_support', label: '🔮 Suporte', style: 'Primary' },
-    { id: 'role_melee',   label: '⚔️ Melee',   style: 'Primary' },
-    { id: 'role_ranged',  label: '🏹 Ranged',  style: 'Primary' },
-    { id: 'role_healer',  label: '💚 Healer',  style: 'Primary' }
+// ---------------------------------------------------------------------------
+// FAMÍLIAS FUNCIONAIS (Healer Holy e Nature isolados)
+// ---------------------------------------------------------------------------
+const FAMILIES = {
+  DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO", "EXECRADO"],
+  DEBUFF_MELEE:  ["ENTALHADA", "CAÇA ESPÍRITOS"],
+  TANKS_MACA: [
+    "MAÇA PESADA", "MAÇA PÉTREA", "MARTELO DE BATALHA", "MARTELO DE UMA MÃO",
+    "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "GOLEM", "MONARCA",
+    "MAÇA PESADA W RUNA GUARDA", "MANGUAL", "CAMBRIANA", "SEGANÍMICA", "CAJADO PRIMORDIAL",
   ],
-  RANGED_WEAPONS: [
-    { id: 'weapon_arcolongo',   label: 'Arco Longo',          style: 'Secondary' },
-    { id: 'weapon_geloelevado', label: 'Gelo Elevado',        style: 'Secondary' },
-    { id: 'weapon_prisma',      label: 'Prisma',              style: 'Secondary' },
-    { id: 'weapon_shadowcaller',label: 'Shadow Caller',       style: 'Secondary' },
-    { id: 'weapon_bruxo1h',     label: 'Bruxo 1H',            style: 'Secondary' }
-  ]
+  SUPORTE:       ["G.A", "ARVORE", "SILENCE", "JURADOR", "LOCUS"],
+  HEALER_HOLY:   ["QUEDA SANTA", "EXALTADO", "CORROMPIDO"],
+  HEALER_NATURE: ["RAMPANTE", "POSTULENTO"],
+  MELEE: [
+    "BRAÇADEIRAS", "QUEBRA REINOS", "PRESA DEMONIACA", "GALATINAS",
+    "CRIA REIS", "LAMINA DA INFINIDADE", "FÚRIA CONTIDA", "CRAVADAS",
+    "URSINAS", "SEGADEIRA", "PATAS DE URSO", "DESSANGRADORA",
+  ],
+  RANGED:        ["ASTRAL", "CANÇÃO", "PRISMA", "SINCELO", "ARCO LONGO"],
+  MONTARIAS:     ["CARROÇA", "BEHEMOT"],
 };
 
-function getComp(compKey) {
-  const normalizedKey = (compKey || '').toLowerCase().trim();
-  return COMPS[normalizedKey] || null;
+const WEAPON_FAMILY = {};
+for (const [fam, list] of Object.entries(FAMILIES)) {
+  for (const w of list) WEAPON_FAMILY[w] = fam;
 }
 
-function getAvailableComps() {
-  return Object.keys(COMPS).map(key => ({
-    name: COMPS[key].name || COMPS[key].displayName || key,
-    value: key
-  }));
-}
+// ---------------------------------------------------------------------------
+// COMPS DO BOMB (Fase B)
+// ---------------------------------------------------------------------------
+const HEALER_BOMB = [["QUEDA SANTA", 1], ["EXALTADO", 1], ["CORROMPIDO", 2]];
 
-function getWeaponsForRole(role) {
-  const normalizedRole = (role || '').toUpperCase().trim();
-  return ROLE_WEAPONS[normalizedRole] || [];
-}
+const BOMB_INVI = [
+  { ...slot("Tank", [["BRUXO DE UMA MÃO", 1]]), locked: true },
+  slot("Ranged", [["ARCO PLANGENTE", 1]]),
+  slot("Ranged", [["ARCO PLANGENTE", 1]]),
+  slot("Ranged", [["ARCO PLANGENTE", 1]]),
+  slot("Ranged", [["ARCO PLANGENTE", 1]]),
+  slot("Ranged", [["ARCO PLANGENTE", 1]]),
+  slot("Ranged", [["ARCO PLANGENTE", 1]]),
+  slot("Support", [["EXECRADO", 1]]),
+  slot("Ranged", [["PRISMA", 1]]),
+  slot("Ranged", [["CANÇÃO", 1]]),
+  slot("Melee", [["CRAVADAS", 1]]),
+  slot("Support", [["CAÇA ESPÍRITOS", 1]]),
+  slot("Support", [["PÚTRIDO", 1]]),
+  slot("Healer", HEALER_BOMB),
+  slot("Support", [["OCULTO", 1]]),
+  slot("Tank", [["MAÇA PESADA", 1]]),
+];
+
+const BOMB_MELEE = [
+  { ...slot("Tank", [["GOLEM", 1]]), locked: true },
+  slot("Melee", [["BRAÇADEIRAS", 1], ["FÚRIA CONTIDA", 1]]),
+  slot("Melee", [["BRAÇADEIRAS", 1], ["FÚRIA CONTIDA", 1]]),
+  slot("Melee", [["BRAÇADEIRAS", 1], ["FÚRIA CONTIDA", 1]]),
+  slot("Melee", [["BRAÇADEIRAS", 1], ["FÚRIA CONTIDA", 1]]),
+  slot("Melee", [["BRAÇADEIRAS", 1], ["FÚRIA CONTIDA", 1]]),
+  slot("Melee", [["BRAÇADEIRAS", 1], ["FÚRIA CONTIDA", 1]]),
+  slot("Melee", [["QUEBRA REINOS", 1]]),
+  slot("Ranged", [["CANÇÃO", 1]]),
+  slot("Support", [["SHADOW CALLER", 1]]),
+  slot("Healer", HEALER_BOMB),
+  slot("Support", [["OCULTO", 1]]),
+  slot("Support", [["CAÇA ESPÍRITOS", 1]]),
+  slot("Tank", [["MAÇA PESADA", 1], ["JURADOR", 1], ["MAÇA PÉTREA", 1]]),
+];
+
+const BOMB_COMPS = {
+  invi:  { name: "Bomb Invi",  slots: BOMB_INVI },
+  melee: { name: "Bomb Melee", slots: BOMB_MELEE },
+};
+const KITE_MIN = 13;
 
 module.exports = {
-  ROLE_WEAPONS,
-  WEAPON_FAMILIES,
-  PT1,
-  pt6teste,
-  COMPS,
-  BUTTON_CONFIG,
-  getComp,
-  getAvailableComps,
-  getWeaponsForRole
+  ROLES, WEAPONS, PARTIES, FAMILIES, WEAPON_FAMILY,
+  WEAPON_CATALOG: buildWeaponCatalog(), BOMB_COMPS, KITE_MIN,
 };
