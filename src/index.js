@@ -819,8 +819,15 @@ async function slashShow(interaction, ev, tipo) {
   if (!thread) return interaction.editReply({ content: "⚠️ Não foi possível acessar a thread do CTA." });
 
   const pl = db.parsePartyList(fresh);
-  const idx = tipo === "press" ? 4 : 1; // flex=PT2(1), press=PT5(4)
-  if (pl.includes(idx)) return interaction.editReply({ content: `⚠️ Essa PT (${tipo}) já está aberta neste CTA.` });
+  let idx;
+  if (tipo === "press") {
+    idx = 4;
+    if (pl.includes(4)) return interaction.editReply({ content: `⚠️ A **press comp** já está aberta neste CTA.` });
+  } else {
+    // flex: acha a próxima das PTs flex (1, 2, 3) que ainda não está aberta
+    idx = [1, 2, 3].find((i) => !pl.includes(i));
+    if (idx == null) return interaction.editReply({ content: `⚠️ Todas as PTs flex já estão abertas (máximo 3). Use a press se precisar de mais.` });
+  }
 
   pl.push(idx);
   await db.setPartyList(fresh.id, pl);
