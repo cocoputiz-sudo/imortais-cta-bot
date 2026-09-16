@@ -9,7 +9,7 @@ const {
 } = require("discord.js");
 
 const db = require("./db");
-const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN } = require("./comps");
+const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
@@ -109,24 +109,20 @@ async function onThreadText(msg) {
 // reconhecimento de texto no castelo: arma, papel, ou número de vaga
 async function onCasteloText(msg, cast, text, words) {
   const weapons = Object.keys(WEAPONS);
-  // 1) nome de arma
   let matchedWeapon = null;
   for (const w of weapons) {
     if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
   }
   if (matchedWeapon) { await msg.delete().catch(() => {}); return casteloSignupWeapon(msg, cast, matchedWeapon); }
-  // 2) papel
   for (const word of words) {
     if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return casteloSignupRole(msg, cast, ROLE_WORDS[word]); }
   }
-  // 3) número de vaga (1-20): junta armas cabíveis naquela posição nas 3 PTs do castelo
   if (/^\d{1,2}$/.test(text)) {
     const vaga = parseInt(text, 10);
     if (vaga >= 1 && vaga <= 20) { await msg.delete().catch(() => {}); return casteloSignupSlotNumber(msg, cast, vaga); }
   }
 }
 
-// encaixa direto uma arma no castelo (via engine)
 async function casteloSignupWeapon(msg, cast, weapon) {
   const username = msg.member?.displayName || msg.author.username;
   await db.upsertCasteloSignup({ casteloId: cast.id, userId: msg.author.id, username, weapon, presence: "online", partyIndex: null, slotIndex: null });
@@ -136,7 +132,7 @@ async function casteloSignupWeapon(msg, cast, weapon) {
     : `📝 ${msg.author}, **${weapon}** anotado como reserva no castelo.`;
   await msg.channel.send({ content: txt }).catch(() => {});
 }
-// abre menu de armas do papel no castelo
+
 async function casteloSignupRole(msg, cast, role) {
   const armas = WEAPON_CATALOG[role] || [];
   if (!armas.length) return;
@@ -144,7 +140,7 @@ async function casteloSignupRole(msg, cast, role) {
     .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
   await msg.channel.send({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
 }
-// número de vaga no castelo: lista armas cabíveis naquela posição nas 3 PTs
+
 async function casteloSignupSlotNumber(msg, cast, vaga) {
   const idx = vaga - 1;
   const armasSet = new Set();
@@ -456,25 +452,20 @@ async function onIpModal(interaction) {
   await interaction.reply({ content: `**${weapon}** (IP ${ip}) selecionada. E aí:`, components: [row], flags: MessageFlags.Ephemeral });
 }
 
-// calcula o que falta nas PT1-4 (ignora PT5 press comp), por função,
-// listando as armas cabíveis (preferíveis primeiro = peso menor).
-// retorna { faltam: [{funcao, qtd, armas:[...]}], texto: "..." }
 function faltasCTA(signups) {
   const { PARTIES } = require("./comps");
-  const N = 4; // só PT1-4
-  // conta vagas vazias por função nas 4 PTs
+  const N = 4;
   const taken = new Set(signups.filter(s => s.party_index != null && s.party_index < N).map(s => `${s.party_index}:${s.slot_index}`));
-  const porFuncao = {}; // funcao -> { qtd, armasSet(weight) }
+  const porFuncao = {};
   for (let p = 0; p < N; p++) {
     for (let i = 0; i < PARTIES[p].slots.length; i++) {
       const slot = PARTIES[p].slots[i];
       if (slot.locked) continue;
-      if (taken.has(`${p}:${i}`)) continue; // vaga ocupada
+      if (taken.has(`${p}:${i}`)) continue;
       const role = slot.role;
       if (!porFuncao[role]) porFuncao[role] = { qtd: 0, armas: {} };
       porFuncao[role].qtd++;
       for (const a of slot.accepts) {
-        // guarda o menor peso visto pra cada arma (preferível)
         if (porFuncao[role].armas[a.weapon] == null || a.weight < porFuncao[role].armas[a.weapon])
           porFuncao[role].armas[a.weapon] = a.weight;
       }
@@ -483,12 +474,12 @@ function faltasCTA(signups) {
   const faltam = [];
   for (const [funcao, info] of Object.entries(porFuncao)) {
     if (info.qtd <= 0) continue;
-    // ordena armas por peso (preferíveis primeiro)
     const armas = Object.entries(info.armas).sort((a,b)=>a[1]-b[1]).map(([w])=>w);
     faltam.push({ funcao, qtd: info.qtd, armas });
   }
   return faltam;
 }
+
 function faltasTexto(faltam) {
   if (!faltam.length) return "";
   return faltam.map(f => `**${f.qtd} ${f.funcao}** (${f.armas.slice(0,6).join(", ")}${f.armas.length>6?"...":""})`).join(" · ");
@@ -529,12 +520,10 @@ async function onPresence(interaction) {
   const pres = presence === "online" ? "🟢 já ON" : "🕐 entra no horário";
   await logStaff(interaction.guild, `➕ **${username}** entrou de **${weapon}** → ${dest} · ${pres} · CTA ${ev.time_label}`);
 
-  // calcula o que falta nas PT1-4 (pra DM e nudge)
   const signupsNow = await db.getSignups(ev.id);
   const faltam = faltasCTA(signupsNow);
   const faltamTxt = faltasTexto(faltam);
 
-  // NUDGE: se a pessoa foi pra RESERVA (função cheia) e tem função faltando -> oferece trocar
   if (!myLoc && faltam.length) {
     const btns = faltam.slice(0, 5).map(f =>
       new ButtonBuilder().setCustomId(`role|${eventId}|${f.funcao}`).setLabel(f.funcao).setStyle(ButtonStyle.Primary));
@@ -550,19 +539,17 @@ async function onPresence(interaction) {
     : `📝 Anotado como **reserva** (${weapon}) — sem vaga nem por afinidade.`;
   await interaction.editReply({ content: msg, components: [] });
 
-  // DM informativa (Leitura C): confirma + avisa o que falta se pingou função abundante
   try {
     const minhaRole = (require("./comps").WEAPONS[weapon.toUpperCase()] || {}).role;
     const faltaMinhaRole = faltam.some(f => f.funcao === minhaRole);
     let dm = myLoc
       ? `✅ Você entrou de **${weapon}** na **Party ${myLoc.partyIndex + 1}** do CTA ${ev.time_label} UTC. Tá tudo certo!`
       : `📝 Você ficou na **reserva** do CTA ${ev.time_label} UTC (${weapon}).`;
-    // se a função da pessoa é abundante (ainda falta dela = não; se NÃO falta dela mas falta outra = abundante)
     if (faltamTxt && !faltaMinhaRole) {
       dm += `\n\n💡 Se quiser ajudar mais, ainda falta: ${faltamTxt}. É só pingar de novo a função na thread.`;
     }
-    await interaction.user.send({ content: dm }).catch(()=>{}); // se DM bloqueada, ignora
-  } catch (e) { /* DM é best-effort */ }
+    await interaction.user.send({ content: dm }).catch(()=>{});
+  } catch (e) { }
 }
 
 async function onLooter(interaction) {
@@ -811,7 +798,7 @@ async function onSlash(interaction) {
 }
 
 async function slashShow(interaction, ev, tipo) {
-  // tipo: "flex" (índice 1) ou "press" (índice 4)
+  // tipo: "flex" (índice 1, 2, 3), "press" (índice 4) ou "pt6teste" (índice 5)
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const fresh = (await db.getEvent(ev.id)) || ev;
   if (!fresh.thread_id) return interaction.editReply({ content: "⚠️ Thread deste CTA não encontrada." });
@@ -823,10 +810,13 @@ async function slashShow(interaction, ev, tipo) {
   if (tipo === "press") {
     idx = 4;
     if (pl.includes(4)) return interaction.editReply({ content: `⚠️ A **press comp** já está aberta neste CTA.` });
+  } else if (tipo === "pt6teste") {
+    idx = 5;
+    if (pl.includes(5)) return interaction.editReply({ content: `⚠️ A **pt6teste** já está aberta neste CTA.` });
   } else {
     // flex: acha a próxima das PTs flex (1, 2, 3) que ainda não está aberta
     idx = [1, 2, 3].find((i) => !pl.includes(i));
-    if (idx == null) return interaction.editReply({ content: `⚠️ Todas as PTs flex já estão abertas (máximo 3). Use a press se precisar de mais.` });
+    if (idx == null) return interaction.editReply({ content: `⚠️ Todas as PTs flex já estão abertas (máximo 3). Use a press ou pt6teste se precisar de mais.` });
   }
 
   pl.push(idx);
@@ -835,8 +825,8 @@ async function slashShow(interaction, ev, tipo) {
 
   const signups = await db.getSignups(fresh.id);
   const blocks = renderRoster(signups, pl.length, pl);
-  const novoDisplayNum = pl.length; // a nova PT é a última da lista
-  const novoBloco = blocks[novoDisplayNum - 1] || `__**Party ${novoDisplayNum}**__\n*vazio*`;
+  const novoDisplayNum = pl.length;
+  const novoBloco = blocks[novoDisplayNum - 1] || `__**${PARTIES[idx]?.name || ("Party " + novoDisplayNum)}**__\n*vazio*`;
 
   const msgNova = await thread.send({ content: novoBloco.slice(0, 1990) });
   const ids = fresh.roster_msg ? String(fresh.roster_msg).split(",").filter(Boolean) : [];
@@ -846,16 +836,17 @@ async function slashShow(interaction, ev, tipo) {
 
   const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
   const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-  const nomeTipo = tipo === "press" ? "PRESS COMP" : "FLEX";
+  const nomeTipo = tipo === "press" ? "PRESS COMP" : tipo === "pt6teste" ? "pt6teste" : "FLEX";
+  const tituloAnuncio = tipo === "pt6teste" ? "pt6teste LIBERADA!" : `PARTY ${novoDisplayNum} LIBERADA (${nomeTipo})!`;
   await thread.send({
-    content: `${mention} 🛡️⚔️ **PARTY ${novoDisplayNum} LIBERADA (${nomeTipo})!** — mais 20 vagas. Escolhe tua função 👇`,
+    content: `${mention} 🛡️⚔️ **${tituloAnuncio}** — mais 20 vagas. Escolhe tua função 👇`,
     components: buildRolePicker(fresh.id),
     ...allow,
   });
 
   await applyReallocation(fresh, interaction.guild, null);
-  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **Party ${novoDisplayNum}** (${nomeTipo}) · CTA ${fresh.time_label}`);
-  await interaction.editReply({ content: `✅ **Party ${novoDisplayNum} (${nomeTipo})** aberta! Quem estava aguardando PT foi realocado.` });
+  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **${nomeTipo}** · CTA ${fresh.time_label}`);
+  await interaction.editReply({ content: `✅ **${nomeTipo}** aberta! Quem estava aguardando PT foi realocado.` });
 }
 
 async function applyConsolidation(ev, guild) {
@@ -1119,7 +1110,6 @@ async function roamingPago(interaction, r) {
 }
 
 // ==================  CASTELO  ============================================
-// 3 PTs (press comp + PT1 + PT2 do CTA), sala de voz, presença por tempo, divisão de prata.
 function canManageCastelo(interaction, c) {
   return isGM(interaction) || (isCaller(interaction) && c.owner_id === interaction.user.id);
 }
@@ -1158,7 +1148,6 @@ async function casteloCreate(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const c = await db.createCastelo({ guildId: interaction.guildId, timeLabel: horario, ownerId: interaction.user.id });
 
-  // sala de voz na categoria conteúdos e eventos
   let voice = null;
   try {
     voice = await interaction.guild.channels.create({
@@ -1168,7 +1157,6 @@ async function casteloCreate(interaction) {
     await db.setCasteloField(c.id, "voice_id", voice.id);
   } catch (e) { console.error("criar sala castelo:", e); }
 
-  // posta no ping-de-conteúdo
   if (CFG.contentPingChannelId) {
     const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(()=>null);
     if (ch) {
@@ -1177,7 +1165,6 @@ async function casteloCreate(interaction) {
       const fs = require("fs"); const path = require("path");
       const imgPath = path.join(__dirname, "..", "assets", "castelo.png");
       const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "castelo.png" }] : [];
-      // POST: só imagem + aviso (SEM botões — eles vão na thread, igual o CTA)
       const msg = await ch.send({
         content: `${roleMention} 🏰 **CASTELO ${horario} UTC** — conteúdo de guerra! Entra na thread pra pingar tua função 👇`,
         files,
@@ -1187,7 +1174,6 @@ async function casteloCreate(interaction) {
         const thread = await msg.startThread({ name: `Castelo ${horario}`, autoArchiveDuration: 1440 }).catch(()=>null);
         if (thread) {
           await db.setCasteloField(c.id, "thread_id", thread.id);
-          // botões de função DENTRO da thread (igual o CTA)
           await thread.send({
             content: `🏰 **Castelo ${horario} UTC** — escolhe tua função abaixo 👇`,
             components: buildCasteloRolePicker(c.id),
@@ -1203,8 +1189,6 @@ async function casteloCreate(interaction) {
   await interaction.editReply({ content: `✅ Castelo **${horario}** criado${voice?`, sala <#${voice.id}>`:""}. Use **/castelo_start ${horario}** quando começar.` });
 }
 
-// botões de função do castelo (funções + sair) — SEM fechar/cancelar do CTA.
-// gestão do castelo é via comandos (/castelo_finish, /castelo_pago).
 function buildCasteloRolePicker(casteloId) {
   const roleBtns = Object.entries(ROLES).map(([name, meta]) =>
     new ButtonBuilder().setCustomId(`role|c${casteloId}|${name}`).setLabel(name).setEmoji(meta.emoji).setStyle(ButtonStyle.Secondary));
@@ -1229,7 +1213,6 @@ async function refreshCasteloRoster(c) {
   }));
 }
 
-// realoca no castelo (usa a engine do CTA com a lista de PTs do castelo)
 async function applyCasteloReallocation(c, focusUserId) {
   const signups = await db.getCasteloSignups(c.id);
   const result = reallocate(signups, 3, castelo.CASTELO_PT_INDEX);
@@ -1242,19 +1225,18 @@ async function applyCasteloReallocation(c, focusUserId) {
   return focusLoc;
 }
 
-// pingar função no castelo (botões reusam o picker com prefixo c<id>)
 async function onCasteloRolePick(interaction) {
   const [, cid, role] = interaction.customId.split("|");
   const c = await db.getCasteloById(cid.replace(/^c/, ""));
   if (!c || c.status === "pago" || c.status === "fechado")
     return interaction.reply({ content: "Castelo não está aberto.", flags: MessageFlags.Ephemeral });
-  // menu de armas do papel (reusa WEAPON_CATALOG)
   const armas = WEAPON_CATALOG[role] || [];
   if (!armas.length) return interaction.reply({ content: "Sem armas nesse papel.", flags: MessageFlags.Ephemeral });
   const menu = new StringSelectMenuBuilder().setCustomId(`cweapon|${c.id}|${interaction.user.id}`)
     .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0,25).map(w=>({label:w,value:w})));
   await interaction.reply({ content: `Escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
 }
+
 async function onCasteloWeaponPick(interaction) {
   const [, cid, ownerId] = interaction.customId.split("|");
   if (ownerId && interaction.user.id !== ownerId)
@@ -1300,7 +1282,6 @@ async function casteloFinish(interaction, c) {
   const eleg = linhas.filter(l=>l.elegivel);
   const top = eleg.slice(0,15).map((l,i)=>`\`${String(i+1).padStart(2)}\` ${l.username} — ${l.valor.toLocaleString("pt-BR")} (${l.minutos}min)`).join("\n");
   await interaction.editReply({ content: `🏰 **Castelo ${c.time_label} encerrado.**\nValor: ${(c.valor||0).toLocaleString("pt-BR")} prata · ${eleg.length} elegíveis\n\n${top||"(ninguém elegível)"}\n\nUse **/castelo_saldo ${c.time_label}** pra ver todos.` });
-  // apaga sala se vazia
   if (c.voice_id) { const vc = await client.channels.fetch(c.voice_id).catch(()=>null); if (vc && vc.members && vc.members.size===0) { await vc.delete().catch(()=>{}); await db.setCasteloField(c.id,"voice_id",null); } }
 }
 async function casteloSaldo(interaction) {
@@ -1580,7 +1561,6 @@ async function slashRemove(interaction, ev) {
   const pt = interaction.options.getInteger("pt");
   const vaga = interaction.options.getInteger("vaga");
 
-  // modo 1: por @ (pessoa ainda no servidor)
   if (user) {
     const removed = await db.deleteSignup(ev.id, user.id);
     if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
@@ -1589,7 +1569,6 @@ async function slashRemove(interaction, ev) {
     await logStaff(interaction.guild, `🗑️ ${interaction.user} removeu ${user} · CTA ${ev.time_label}`);
     return;
   }
-  // modo 2: por PT+vaga (pessoa saiu do servidor e não aparece mais no @)
   if (pt && vaga) {
     const su = await db.getSignupAtSlot(ev.id, pt - 1, vaga - 1);
     if (!su) return interaction.reply({ content: `Não há ninguém na PT${pt} vaga ${vaga}.`, flags: MessageFlags.Ephemeral });
@@ -2066,7 +2045,6 @@ async function reconcileVoice(client) {
   } catch (e) { console.error("reconcileVoice:", e); }
 }
 
-// handlers globais de erro — evitam que um erro derrube o bot inteiro
 client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));

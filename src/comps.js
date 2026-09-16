@@ -58,13 +58,14 @@ const WEAPONS = {
   "PATAS DE URSO":             { role: "Melee" },
   "DESSANGRADORA":             { role: "Melee" },
 
-  // Ranged
+  // Ranged (Arco Longo já presente; Gelo Elevado inserido)
   "PRISMA":                    { role: "Ranged" },
   "CANÇÃO":                    { role: "Ranged" },
   "ASTRAL":                    { role: "Ranged" },
   "SINCELO":                   { role: "Ranged" },
   "ARCO PLANGENTE":            { role: "Ranged" },
   "ARCO LONGO":                { role: "Ranged" },
+  "GELO ELEVADO":              { role: "Ranged" },
 
   // Healers (apenas os 5 oficiais do bot)
   "QUEDA SANTA":               { role: "Healer" },
@@ -208,18 +209,49 @@ const PARTY5 = [
   slot("Healer",  [["EXALTADO", 1], ["QUEDA SANTA", 2], ["CORROMPIDO", 2]]),           // 20 Exaltado (preferido) ou qualquer Holy
 ];
 
+// ---------------------------------------------------------------------------
+// PARTY 6 (pt6teste — exatamente os 20 slots solicitados)
+// ---------------------------------------------------------------------------
+const PARTY6_TESTE = [
+  { ...slot("Tank", [["GOLEM", 1], ["MAÇA DE UMA MÃO", 1], ["MONARCA", 1]]), locked: true }, // 01 caller
+  slot("Tank",    [["MAÇA PÉTREA", 1]]),                                                    // 02
+  slot("Tank",    [["MAÇA PESADA", 1]]),                                                    // 03
+  slot("Tank",    [["MONARCA", 1]]),                                                        // 04
+  slot("Support", [["BRUXO DE UMA MÃO", 1]]),                                               // 05
+  slot("Support", [["LOCUS", 1]]),                                                          // 06
+  slot("Support", [["JURADOR", 1]]),                                                        // 07
+  slot("Support", [["ARVORE", 1]]),                                                         // 08
+  slot("Support", [["SHADOW CALLER", 1]]),                                                  // 09
+  slot("Melee",   [["QUEBRA REINOS", 1]]),                                                  // 10
+  slot("Ranged",  [["GELO ELEVADO", 1]]),                                                   // 11
+  slot("Ranged",  [["PRISMA", 1]]),                                                         // 12
+  slot("Melee",   [["CRAVADAS", 1]]),                                                       // 13
+  slot("Melee",   [["URSINAS", 1]]),                                                        // 14
+  slot("Melee",   F.DPS_LIVRE),                                                             // 15 Vaga flex para completar 20 vagas
+  slot("Ranged",  [["ARCO LONGO", 1]]),                                                     // 16
+  slot("Healer",  [["QUEDA SANTA", 1]]),                                                    // 17
+  slot("Healer",  [["QUEDA SANTA", 1]]),                                                    // 18
+  slot("Healer",  [["EXALTADO", 1], ["CORROMPIDO", 1]]),                                    // 19
+  slot("Healer",  F.BRACELETE),                                                             // 20
+];
+
 const PARTIES = [
   { name: "Party 1", slots: PARTY1 },
   { name: "Party 2", slots: PARTY2 },
   { name: "Party 3", slots: PARTY3 },
   { name: "Party 4", slots: PARTY4 },
   { name: "Party 5", slots: PARTY5 },
+  { name: "pt6teste", slots: PARTY6_TESTE }, // index 5 -> pt6teste
 ];
 
 function buildWeaponCatalog() {
   const byRole = {};
   for (const [w, meta] of Object.entries(WEAPONS)) {
     (byRole[meta.role] ||= []).push(w);
+  }
+  // Permite selecionar Bruxo de Uma Mão também via Support
+  if (!byRole["Support"].includes("BRUXO DE UMA MÃO")) {
+    byRole["Support"].push("BRUXO DE UMA MÃO");
   }
   return byRole;
 }
@@ -228,7 +260,7 @@ function buildWeaponCatalog() {
 // FAMÍLIAS FUNCIONAIS (Healer Holy e Nature isolados)
 // ---------------------------------------------------------------------------
 const FAMILIES = {
-  DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO", "EXECRADO"],
+  DEBUFF_RANGED: ["SHADOW CALLER", "PÚTRIDO", "DANAÇÃO", "EXECRADO", "BRUXO DE UMA MÃO"],
   DEBUFF_MELEE:  ["ENTALHADA", "CAÇA ESPÍRITOS"],
   TANKS_MACA: [
     "MAÇA PESADA", "MAÇA PÉTREA", "MARTELO DE BATALHA", "MARTELO DE UMA MÃO",
@@ -243,7 +275,7 @@ const FAMILIES = {
     "CRIA REIS", "LAMINA DA INFINIDADE", "FÚRIA CONTIDA", "CRAVADAS",
     "URSINAS", "SEGADEIRA", "PATAS DE URSO", "DESSANGRADORA",
   ],
-  RANGED:        ["ASTRAL", "CANÇÃO", "PRISMA", "SINCELO", "ARCO LONGO"],
+  RANGED:        ["ASTRAL", "CANÇÃO", "PRISMA", "SINCELO", "ARCO PLANGENTE", "ARCO LONGO", "GELO ELEVADO"],
   MONTARIAS:     ["CARROÇA", "BEHEMOT"],
 };
 

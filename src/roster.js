@@ -8,7 +8,15 @@ const U = (w) => (w || "").trim().toUpperCase();
 function capFor(weapon, numParties = 4) {
   const meta = WEAPONS[U(weapon)] || {};
   if (meta.unica) {
-    if (U(weapon) === "URSINAS" && numParties >= 5) return 2; // PT1 e PT5 têm Ursinas
+    if (U(weapon) === "URSINAS") {
+      if (numParties >= 6) return 3;
+      if (numParties >= 5) return 2;
+      return 1;
+    }
+    if (U(weapon) === "CRAVADAS") {
+      if (numParties >= 6) return 2;
+      return 1;
+    }
     return 1;
   }
   if (meta.tetoPorPt) return Math.max(1, numParties - 1);
@@ -300,7 +308,7 @@ function renderRoster(signups, numParties = 4, partyList = null) {
   for (const p of parties) {
     displayNum++;
     const party = PARTIES[p];
-    const label = partyList ? `Party ${displayNum}` : party.name; // castelo renomeia 1,2,3
+    const label = party.name === "pt6teste" ? "pt6teste" : (partyList ? `Party ${displayNum}` : party.name);
     const lines = [];
     let filled = 0;
     for (let i = 0; i < party.slots.length; i++) {
