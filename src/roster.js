@@ -183,40 +183,48 @@ function solve(signups, numParties = 4, partyList = null) {
     }
   }
 
-  for (const pass of ["exact", "affinity"]) {
-    for (const cell of cells) {
-      if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
-      const scInPt1 = countWeaponInParty(assignment, "SHADOW CALLER", 0);
-      const gaInParty = countWeaponInParty(assignment, "G.A", cell.p);
-      const ctx = { scInPt1, gaInParty };
-      let best = null;
-      for (const su of signups) {
-        if (usedUsers.has(su.user_id)) continue;
-        if (U(su.weapon) === "LOOTER") continue;
-        const sc = affinityScore(cell.slot, su.weapon, ctx);
-        if (!sc || sc.kind !== pass) continue;
-        const cap = capFor(su.weapon, numParties, parties);
-        if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
+  // Preenche PT por PT, na ordem da planilha (parties = pl). Cada PT reivindica
+  // seus encaixes (exato e depois por afinidade) ANTES de a próxima PT tentar.
+  // Assim uma PT aberta depois nunca "rouba" gente de uma PT anterior: a press,
+  // se está como 2ª PT, fecha os encaixes dela antes de a nova flex (3ª) montar.
+  // A prioridade passa a seguir a ordem visual em que as PTs foram abertas.
+  for (const p of parties) {
+    const ptCells = cells.filter((c) => c.p === p);
+    for (const pass of ["exact", "affinity"]) {
+      for (const cell of ptCells) {
+        if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
+        const scInPt1 = countWeaponInParty(assignment, "SHADOW CALLER", 0);
+        const gaInParty = countWeaponInParty(assignment, "G.A", cell.p);
+        const ctx = { scInPt1, gaInParty };
+        let best = null;
+        for (const su of signups) {
+          if (usedUsers.has(su.user_id)) continue;
+          if (U(su.weapon) === "LOOTER") continue;
+          const sc = affinityScore(cell.slot, su.weapon, ctx);
+          if (!sc || sc.kind !== pass) continue;
+          const cap = capFor(su.weapon, numParties, parties);
+          if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
 
-        if (
-          !best ||
-          sc.cost < best.cost ||
-          (sc.cost === best.cost && (su.ip || 0) > (best.su.ip || 0))
-        ) {
-          best = { su, cost: sc.cost, kind: sc.kind };
+          if (
+            !best ||
+            sc.cost < best.cost ||
+            (sc.cost === best.cost && (su.ip || 0) > (best.su.ip || 0))
+          ) {
+            best = { su, cost: sc.cost, kind: sc.kind };
+          }
         }
-      }
-      if (best) {
-        assignment.set(best.su.user_id, {
-          partyIndex: cell.p,
-          slotIndex: cell.i,
-          kind: best.kind,
-          _weapon: best.su.weapon,
-          _ip: best.su.ip,
-        });
-        usedUsers.add(best.su.user_id);
-        usedCells.add(`${cell.p}:${cell.i}`);
-        weaponCount[U(best.su.weapon)] = (weaponCount[U(best.su.weapon)] || 0) + 1;
+        if (best) {
+          assignment.set(best.su.user_id, {
+            partyIndex: cell.p,
+            slotIndex: cell.i,
+            kind: best.kind,
+            _weapon: best.su.weapon,
+            _ip: best.su.ip,
+          });
+          usedUsers.add(best.su.user_id);
+          usedCells.add(`${cell.p}:${cell.i}`);
+          weaponCount[U(best.su.weapon)] = (weaponCount[U(best.su.weapon)] || 0) + 1;
+        }
       }
     }
   }

@@ -452,12 +452,27 @@ async function onIpModal(interaction) {
   await interaction.reply({ content: `**${weapon}** (IP ${ip}) selecionada. E aí:`, components: [row], flags: MessageFlags.Ephemeral });
 }
 
-function faltasCTA(signups) {
+// ---- numeração: planilha (ordem visual) <-> índice fixo do catálogo ----
+// O party_index salvo é o índice fixo do PARTIES (0=P1 .. 5=pt6teste), imutável.
+// A planilha numera pela POSIÇÃO na lista de PTs abertas (pl). Estas duas
+// funções convertem entre os dois mundos. Regra (definida pelo caller): o número
+// que a staff digita e o que aparece na planilha é sempre a ordem visual.
+function visualPt(pl, rawIdx) {
+  const pos = Array.isArray(pl) ? pl.indexOf(rawIdx) : -1;
+  return pos >= 0 ? pos + 1 : rawIdx + 1; // fallback: PT não aberta, mostra o cru
+}
+function rawPtFromVisual(pl, visual) {
+  return Array.isArray(pl) && Number.isInteger(visual) && visual >= 1 && visual <= pl.length
+    ? pl[visual - 1]
+    : null;
+}
+
+function faltasCTA(signups, pl) {
   const { PARTIES } = require("./comps");
-  const N = 4;
-  const taken = new Set(signups.filter(s => s.party_index != null && s.party_index < N).map(s => `${s.party_index}:${s.slot_index}`));
+  const open = Array.isArray(pl) && pl.length ? pl : [0, 1, 2, 3];
+  const taken = new Set(signups.filter(s => s.party_index != null && open.includes(s.party_index)).map(s => `${s.party_index}:${s.slot_index}`));
   const porFuncao = {};
-  for (let p = 0; p < N; p++) {
+  for (const p of open) {
     for (let i = 0; i < PARTIES[p].slots.length; i++) {
       const slot = PARTIES[p].slots[i];
       if (slot.locked) continue;
@@ -495,6 +510,7 @@ async function onPresence(interaction) {
 
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
+  const pl = db.parsePartyList(ev);
 
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
@@ -516,12 +532,12 @@ async function onPresence(interaction) {
     });
   }
 
-  const dest = myLoc ? `Party ${myLoc.partyIndex + 1} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
+  const dest = myLoc ? `Party ${visualPt(pl, myLoc.partyIndex)} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
   const pres = presence === "online" ? "🟢 já ON" : "🕐 entra no horário";
   await logStaff(interaction.guild, `➕ **${username}** entrou de **${weapon}** → ${dest} · ${pres} · CTA ${ev.time_label}`);
 
   const signupsNow = await db.getSignups(ev.id);
-  const faltam = faltasCTA(signupsNow);
+  const faltam = faltasCTA(signupsNow, pl);
   const faltamTxt = faltasTexto(faltam);
 
   if (!myLoc && faltam.length) {
@@ -535,7 +551,7 @@ async function onPresence(interaction) {
   }
 
   const msg = myLoc
-    ? `✅ Fechado! **Party ${myLoc.partyIndex + 1}**, vaga ${myLoc.slotIndex + 1} (${weapon}).`
+    ? `✅ Fechado! **Party ${visualPt(pl, myLoc.partyIndex)}**, vaga ${myLoc.slotIndex + 1} (${weapon}).`
     : `📝 Anotado como **reserva** (${weapon}) — sem vaga nem por afinidade.`;
   await interaction.editReply({ content: msg, components: [] });
 
@@ -543,7 +559,7 @@ async function onPresence(interaction) {
     const minhaRole = (require("./comps").WEAPONS[weapon.toUpperCase()] || {}).role;
     const faltaMinhaRole = faltam.some(f => f.funcao === minhaRole);
     let dm = myLoc
-      ? `✅ Você entrou de **${weapon}** na **Party ${myLoc.partyIndex + 1}** do CTA ${ev.time_label} UTC. Tá tudo certo!`
+      ? `✅ Você entrou de **${weapon}** na **Party ${visualPt(pl, myLoc.partyIndex)}** do CTA ${ev.time_label} UTC. Tá tudo certo!`
       : `📝 Você ficou na **reserva** do CTA ${ev.time_label} UTC (${weapon}).`;
     if (faltamTxt && !faltaMinhaRole) {
       dm += `\n\n💡 Se quiser ajudar mais, ainda falta: ${faltamTxt}. É só pingar de novo a função na thread.`;
@@ -563,7 +579,8 @@ async function onLooter(interaction) {
     partyIndex: null, slotIndex: null, manual: false,
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
-  const dest = myLoc ? `Party ${myLoc.partyIndex + 1} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
+  const pl = db.parsePartyList(ev);
+  const dest = myLoc ? `Party ${visualPt(pl, myLoc.partyIndex)} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
   await logStaff(interaction.guild, `💰 **${username}** entrou como **Looter** → ${dest} · CTA ${ev.time_label}`);
   await interaction.editReply({
     content: myLoc ? `💰 Você entrou como **Looter** em ${dest}. Cede a vaga se uma arma titular pingar.` : `💰 Anotado como **Looter** na reserva (sem buraco livre agora).`,
@@ -639,7 +656,7 @@ async function applyReallocation(ev, guild, focusUserId) {
           }).catch(() => {});
         } else {
           const to = r.partyIndex != null
-            ? `**Party ${r.partyIndex + 1}**, vaga ${r.slotIndex + 1} (${r.weapon})`
+            ? `**Party ${visualPt(pl, r.partyIndex)}**, vaga ${r.slotIndex + 1} (${r.weapon})`
             : `**reserva**`;
           scheduleNotify(fresh, guild, r.user_id, `🔄 <@${r.user_id}> você foi remanejado para ${to}.`);
         }
@@ -1588,7 +1605,10 @@ async function slashRemove(interaction, ev) {
     return;
   }
   if (pt && vaga) {
-    const su = await db.getSignupAtSlot(ev.id, pt - 1, vaga - 1);
+    const pl = db.parsePartyList(ev);
+    const raw = rawPtFromVisual(pl, pt);
+    if (raw == null) return interaction.reply({ content: `A PT${pt} não está aberta nesse CTA.`, flags: MessageFlags.Ephemeral });
+    const su = await db.getSignupAtSlot(ev.id, raw, vaga - 1);
     if (!su) return interaction.reply({ content: `Não há ninguém na PT${pt} vaga ${vaga}.`, flags: MessageFlags.Ephemeral });
     await db.deleteSignup(ev.id, su.user_id);
     await interaction.reply({ content: `🗑️ **${su.username}** removido da PT${pt} vaga ${vaga} (CTA ${ev.time_label}).` });
@@ -1601,8 +1621,11 @@ async function slashRemove(interaction, ev) {
 
 async function slashClean(interaction, ev) {
   const pt = interaction.options.getInteger("pt");
+  const pl = db.parsePartyList(ev);
+  const raw = rawPtFromVisual(pl, pt);
+  if (raw == null) return interaction.reply({ content: `A PT${pt} não está aberta nesse CTA.`, flags: MessageFlags.Ephemeral });
   const signups = await db.getSignups(ev.id);
-  const naPt = signups.filter((s) => s.party_index === pt - 1).length;
+  const naPt = signups.filter((s) => s.party_index === raw).length;
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`cleanyes|${ev.id}|${pt}`).setLabel(`Sim, limpar PT${pt}`).setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`cleanno|${ev.id}`).setLabel("Não").setStyle(ButtonStyle.Secondary),
@@ -1614,7 +1637,10 @@ async function onCleanConfirm(interaction) {
   const [, eventId, pt] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
   if (!ev) return interaction.update({ content: "CTA não encontrado.", components: [] });
-  const n = await db.clearParty(eventId, parseInt(pt, 10) - 1);
+  const plClean = db.parsePartyList(ev);
+  const rawClean = rawPtFromVisual(plClean, parseInt(pt, 10));
+  if (rawClean == null) return interaction.update({ content: `A PT${pt} não está aberta.`, components: [] });
+  const n = await db.clearParty(eventId, rawClean);
   await interaction.update({ content: `🧹 PT${pt} limpa — ${n} pessoa(s) removida(s).`, components: [] });
   refreshRoster(ev);
   await logStaff(interaction.guild, `🧹 ${interaction.user} limpou a PT${pt} (${n} pessoas) · CTA ${ev.time_label}`);
@@ -1636,8 +1662,11 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
   if (isAdd && !arma)
     return interaction.reply({ content: "Pra adicionar, informe a **arma**.", flags: MessageFlags.Ephemeral });
 
+  const pl = db.parsePartyList(ev);
+  const raw = rawPtFromVisual(pl, pt);
+  if (raw == null) return interaction.reply({ content: `A PT${pt} não está aberta nesse CTA. Abra com /cta_show primeiro.`, flags: MessageFlags.Ephemeral });
   const others = signups.filter((s) => s.user_id !== user.id);
-  const target = cmds.resolveTargetSlot(pt - 1, vaga, arma, others);
+  const target = cmds.resolveTargetSlot(raw, vaga, arma, others);
   if (!target) return interaction.reply({ content: `Não há vaga livre de **${arma || (existing && existing.weapon) || "essa arma"}** na PT${pt}. Use o campo **vaga** pra forçar numa posição específica, ou tente outra PT.`, flags: MessageFlags.Ephemeral });
 
   const occupant = await db.getSignupAtSlot(ev.id, target.partyIndex, target.slotIndex);
@@ -1651,15 +1680,15 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
       new ButtonBuilder().setCustomId(`occ|cancel|${payload}`).setLabel("Cancelar").setStyle(ButtonStyle.Danger),
     );
     return interaction.reply({
-      content: `⚠️ PT${target.partyIndex + 1} v${target.slotIndex + 1} está com **${occupant.username}**. O que fazer com ${occupant.username}?`,
+      content: `⚠️ PT${visualPt(pl, target.partyIndex)} v${target.slotIndex + 1} está com **${occupant.username}**. O que fazer com ${occupant.username}?`,
       components: [row], flags: MessageFlags.Ephemeral,
     });
   }
 
   await placeUser(ev.id, user.id, interaction, weaponToUse, target, isAdd);
-  await interaction.reply({ content: `✅ ${user} → PT${target.partyIndex + 1} v${target.slotIndex + 1}${weaponToUse ? ` (${weaponToUse})` : ""}.` });
+  await interaction.reply({ content: `✅ ${user} → PT${visualPt(pl, target.partyIndex)} v${target.slotIndex + 1}${weaponToUse ? ` (${weaponToUse})` : ""}.` });
   refreshRoster(ev);
-  await logStaff(interaction.guild, `🔧 ${interaction.user} ${isAdd ? "adicionou" : "moveu"} ${user} → PT${target.partyIndex + 1} v${target.slotIndex + 1} · CTA ${ev.time_label}`);
+  await logStaff(interaction.guild, `🔧 ${interaction.user} ${isAdd ? "adicionou" : "moveu"} ${user} → PT${visualPt(pl, target.partyIndex)} v${target.slotIndex + 1} · CTA ${ev.time_label}`);
 }
 
 async function placeUser(eventId, userId, interaction, weapon, target, isAdd) {
@@ -1678,6 +1707,7 @@ async function onOccupantChoice(interaction) {
   const [eventId, userId, tp, ts, wEnc, addFlag, oldP, oldS] = parts.slice(2);
   const ev = await db.getEvent(eventId);
   if (!ev) return interaction.update({ content: "CTA não encontrado.", components: [] });
+  const pl = db.parsePartyList(ev);
   if (choice === "cancel") return interaction.update({ content: "Operação cancelada.", components: [] });
 
   const target = { partyIndex: parseInt(tp, 10), slotIndex: parseInt(ts, 10) };
@@ -1693,7 +1723,7 @@ async function onOccupantChoice(interaction) {
     await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: toP, slotIndex: toS, manual: true });
   }
   await placeUser(eventId, userId, interaction, weapon, target, addFlag === "1");
-  await interaction.update({ content: `✅ Feito. Vaga PT${target.partyIndex + 1} v${target.slotIndex + 1} atualizada.`, components: [] });
+  await interaction.update({ content: `✅ Feito. Vaga PT${visualPt(pl, target.partyIndex)} v${target.slotIndex + 1} atualizada.`, components: [] });
   refreshRoster(ev);
   await logStaff(interaction.guild, `🔧 ${interaction.user} resolveu troca (${choice}) · CTA ${ev.time_label}`);
 }
