@@ -5,21 +5,23 @@ const { PARTIES, WEAPONS, WEAPON_FAMILY } = require("./comps");
 
 const U = (w) => (w || "").trim().toUpperCase();
 
-function capFor(weapon, numParties = 4) {
+function capFor(weapon, numParties = 4, partyList = null) {
+  const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
   const meta = WEAPONS[U(weapon)] || {};
   if (meta.unica) {
-    if (U(weapon) === "URSINAS") {
-      if (numParties >= 6) return 3;
-      if (numParties >= 5) return 2;
-      return 1;
+    // Conta quantas vagas dessa arma existem nas PTs atualmente abertas no CTA
+    let countInOpenParties = 0;
+    for (const p of parties) {
+      if (!PARTIES[p]) continue;
+      for (const s of PARTIES[p].slots) {
+        if (s.accepts.some((a) => U(a.weapon) === U(weapon))) {
+          countInOpenParties++;
+        }
+      }
     }
-    if (U(weapon) === "CRAVADAS") {
-      if (numParties >= 6) return 2;
-      return 1;
-    }
-    return 1;
+    return Math.max(1, countInOpenParties);
   }
-  if (meta.tetoPorPt) return Math.max(1, numParties - 1);
+  if (meta.tetoPorPt) return Math.max(1, parties.length - 1);
   return Infinity;
 }
 
@@ -32,8 +34,8 @@ function slotWeight(slot, weapon) {
   return hit ? hit.weight : null;
 }
 
-function findBestSlot(weapon, signups, numParties = 4) {
-  if (countWeapon(weapon, signups) >= capFor(weapon, numParties)) return null;
+function findBestSlot(weapon, signups, numParties = 4, partyList = null) {
+  if (countWeapon(weapon, signups) >= capFor(weapon, numParties, partyList)) return null;
 
   const taken = new Set();
   for (const s of signups) {
@@ -66,7 +68,7 @@ function findBestSlot(weapon, signups, numParties = 4) {
   return best;
 }
 
-function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = 4) {
+function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = 4, partyList = null) {
   if (!myAssignment) return null;
   const fam = WEAPON_FAMILY[U(chosenWeapon)];
   if (!fam) return null;
@@ -86,7 +88,7 @@ function suggestUpgrade(chosenWeapon, myAssignment, signups, numParties = 4) {
         if (a.weight !== 1) continue;
         if (U(a.weapon) === U(chosenWeapon)) continue;
         if (WEAPON_FAMILY[U(a.weapon)] !== fam) continue;
-        if (countWeapon(a.weapon, signups) >= capFor(a.weapon, numParties)) continue;
+        if (countWeapon(a.weapon, signups) >= capFor(a.weapon, numParties, partyList)) continue;
         const betterWeight = a.weight < myAssignment.weight;
         const intoPt1 = p === 0 && myAssignment.partyIndex !== 0;
         if (betterWeight || intoPt1) {
@@ -193,7 +195,7 @@ function solve(signups, numParties = 4, partyList = null) {
         if (U(su.weapon) === "LOOTER") continue;
         const sc = affinityScore(cell.slot, su.weapon, ctx);
         if (!sc || sc.kind !== pass) continue;
-        const cap = capFor(su.weapon, numParties);
+        const cap = capFor(su.weapon, numParties, parties);
         if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
 
         if (
