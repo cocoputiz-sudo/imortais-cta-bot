@@ -161,6 +161,26 @@ function solve(signups, numParties = 4, partyList = null) {
     }
   }
 
+  // ---- TRAVA AUTOMÁTICA (/cta_add e /cta_move) ----
+  // Jogadores colocados manualmente pela staff ficam fixos na vaga e nunca são remanejados!
+  for (const su of signups) {
+    if (usedUsers.has(su.user_id)) continue;
+    if (su.manual && su.party_index != null && su.slot_index != null) {
+      if (parties.includes(su.party_index)) {
+        assignment.set(su.user_id, {
+          partyIndex: su.party_index,
+          slotIndex: su.slot_index,
+          kind: "manual",
+          _weapon: su.weapon,
+          _ip: su.ip,
+        });
+        usedUsers.add(su.user_id);
+        usedCells.add(`${su.party_index}:${su.slot_index}`);
+        weaponCount[U(su.weapon)] = (weaponCount[U(su.weapon)] || 0) + 1;
+      }
+    }
+  }
+
   for (const pass of ["exact", "affinity"]) {
     for (const cell of cells) {
       if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
@@ -322,7 +342,7 @@ function renderRoster(signups, numParties = 4, partyList = null) {
           su.ip && ["URSINAS", "CRAVADAS"].includes((su.weapon || "").toUpperCase())
             ? ` \`IP ${su.ip}\``
             : "";
-        lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${ipTag} ${flag}`);
+        lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${ipTag} ${flag}${su.manual ? " 🔒" : ""}`);
       } else {
         // vaga vazia: mostra as armas possíveis (preferíveis primeiro), Opção A
         const armas = [...slot.accepts].sort((a,b)=>a.weight-b.weight).map(a=>a.weapon);

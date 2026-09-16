@@ -153,6 +153,7 @@ async function init() {
       party_index INT,
       slot_index  INT,
       ip          INT,
+      manual      BOOLEAN NOT NULL DEFAULT false,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (event_id, user_id)
     );
@@ -160,6 +161,7 @@ async function init() {
 
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS party_list TEXT DEFAULT '0';`);
+  await pool.query(`ALTER TABLE cta_signups ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false;`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
@@ -236,15 +238,16 @@ async function getSignup(eventId, userId) {
 async function upsertSignup(row) {
   const { rows } = await pool.query(
     `INSERT INTO cta_signups
-       (event_id, user_id, username, weapon, presence, party_index, slot_index, ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       (event_id, user_id, username, weapon, presence, party_index, slot_index, ip, manual)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, false))
      ON CONFLICT (event_id, user_id) DO UPDATE SET
        weapon=EXCLUDED.weapon, presence=EXCLUDED.presence,
        party_index=EXCLUDED.party_index, slot_index=EXCLUDED.slot_index,
        ip=COALESCE(EXCLUDED.ip, cta_signups.ip),
+       manual=COALESCE($9, cta_signups.manual, false),
        created_at=now()
      RETURNING *`,
-    [row.eventId, row.userId, row.username, row.weapon, row.presence, row.partyIndex, row.slotIndex, row.ip ?? null]
+    [row.eventId, row.userId, row.username, row.weapon, row.presence, row.partyIndex, row.slotIndex, row.ip ?? null, row.manual ?? null]
   );
   return rows[0];
 }

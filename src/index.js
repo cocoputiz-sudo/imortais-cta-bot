@@ -498,7 +498,7 @@ async function onPresence(interaction) {
 
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
-    partyIndex: null, slotIndex: null, ip,
+    partyIndex: null, slotIndex: null, ip, manual: false,
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
 
@@ -560,7 +560,7 @@ async function onLooter(interaction) {
   const username = interaction.member?.displayName || interaction.user.username;
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon: "LOOTER", presence: "online",
-    partyIndex: null, slotIndex: null,
+    partyIndex: null, slotIndex: null, manual: false,
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
   const dest = myLoc ? `Party ${myLoc.partyIndex + 1} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
@@ -1650,6 +1650,7 @@ async function placeUser(eventId, userId, interaction, weapon, target, isAdd) {
   await db.upsertSignup({
     eventId, userId, username, weapon: weapon || "?", presence: "online",
     partyIndex: target.partyIndex, slotIndex: target.slotIndex,
+    manual: true, // Trava instantânea para qualquer inserção/movimentação manual da staff
   });
 }
 
@@ -1666,12 +1667,12 @@ async function onOccupantChoice(interaction) {
   const occupant = await db.getSignupAtSlot(eventId, target.partyIndex, target.slotIndex);
 
   if (choice === "reserva" && occupant) {
-    await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: null, slotIndex: null });
+    await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: null, slotIndex: null, manual: false });
   }
   if (choice === "swap" && occupant) {
     const toP = oldP === "" ? null : parseInt(oldP, 10);
     const toS = oldS === "" ? null : parseInt(oldS, 10);
-    await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: toP, slotIndex: toS });
+    await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: toP, slotIndex: toS, manual: true });
   }
   await placeUser(eventId, userId, interaction, weapon, target, addFlag === "1");
   await interaction.update({ content: `✅ Feito. Vaga PT${target.partyIndex + 1} v${target.slotIndex + 1} atualizada.`, components: [] });
