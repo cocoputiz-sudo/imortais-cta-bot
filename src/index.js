@@ -28,6 +28,7 @@ const CFG = {
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
   prepVoiceId: process.env.PREP_VOICE_ID || null,
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
+  rankingChannelId: process.env.RANKING_CHANNEL_ID || "1550615824232882247",
   bombVoiceId: process.env.BOMB_VOICE_ID || null,
   presetTimes: (process.env.PRESET_TIMES || "15:20,17:20,19:20,21:20,00:00,01:20").split(","),
 };
@@ -1402,6 +1403,7 @@ async function slashFinish(interaction, ev) {
   await db.setStatus(ev.id, "closed");
   await interaction.reply({ content: `🏁 **CTA ${ev.time_label} ENCERRADO** por staff — inscrições travadas.` });
   await logStaff(interaction.guild, `🏁 ${interaction.user} encerrou o CTA **${ev.time_label} UTC** (via /cta_finish)`);
+  refreshRankingBoard(ev.guild_id).catch(() => {});
 }
 
 async function slashAttendance(interaction, dias, rotulo) {
@@ -1429,6 +1431,7 @@ async function slashStartSeason(interaction) {
   await db.startSeason(interaction.guildId, numero);
   await interaction.reply({ content: `🏁 **Temporada ${numero} iniciada!** A contagem de presença começa agora. Boa sorte, IMORTAIS! ⚔️` });
   await logStaff(interaction.guild, `🏁 ${interaction.user} iniciou a **Temporada ${numero}**`);
+  refreshRankingBoard(interaction.guildId).catch(() => {});
 }
 
 async function slashFinishSeason(interaction) {
@@ -1436,10 +1439,68 @@ async function slashFinishSeason(interaction) {
   if (!s) return interaction.reply({ content: "Não há temporada aberta pra encerrar.", flags: MessageFlags.Ephemeral });
   await interaction.reply({ content: `🔒 **Temporada ${s.number} encerrada.** O placar final está congelado — rode /cta_rank pra ver o resultado.` });
   await logStaff(interaction.guild, `🔒 ${interaction.user} encerrou a **Temporada ${s.number}**`);
+  refreshRankingBoard(interaction.guildId, s).catch(() => {});
+}
+
+// ---- Placar fixo no canal ┇📊ranking ----
+// Mantém o placar completo (todos os pontuantes) no canal, sem .txt. A cada
+// atualização apaga as mensagens anteriores do próprio bot ali e reposta, então
+// o canal sempre mostra o placar atual e nunca acumula (zero spam no canal).
+let _boardBusy = false;
+
+function rankBoardBlocks(rows, report, season) {
+  const linhas = rows.map((r, i) =>
+    `\`${String(i + 1).padStart(3)}\` **${r.username}** · ${r.score} pts · ${r.integral + r.parcial}/${report.ctaCount} · ${r.cat}`
+  );
+  const header = `🏆 **PLACAR — TEMPORADA ${season.number}**\n${report.ctaCount} CTAs · ${rows.length} jogadores pontuando · atualizado <t:${Math.floor(Date.now() / 1000)}:R>\n`;
+  const blocks = [];
+  let cur = header;
+  for (const l of linhas) {
+    if ((cur + "\n" + l).length > 1900) { blocks.push(cur); cur = ""; }
+    cur += (cur ? "\n" : "") + l;
+  }
+  if (cur.trim()) blocks.push(cur);
+  return blocks.length ? blocks : [header + "\n_(ninguém pontuou ainda nesta temporada)_"];
+}
+
+async function refreshRankingBoard(guildId, seasonOverride) {
+  if (!CFG.rankingChannelId) return;
+  if (_boardBusy) return;               // evita corrida em cliques concorrentes
+  _boardBusy = true;
+  try {
+    const ch = await client.channels.fetch(CFG.rankingChannelId).catch(() => null);
+    if (!ch) return;
+    const season = seasonOverride || (await db.getCurrentSeason(guildId));
+
+    let blocks;
+    if (!season) {
+      blocks = ["🏆 **PLACAR**\n\n_Nenhuma temporada ativa. Um Mestre de Guerra inicia com **/cta_start_temporada**._"];
+    } else {
+      const end = season.ended_at ? new Date(season.ended_at) : new Date();
+      const report = await attendance.buildReport(guildId, new Date(season.started_at), end);
+      const rows = report.rows.filter((r) => r.integral + r.parcial + r.rapida > 0 || r.fantasma > 0);
+      blocks = rankBoardBlocks(rows, report, season);
+    }
+
+    // apaga o placar anterior (só mensagens do próprio bot neste canal)
+    const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null);
+    if (recent) {
+      for (const m of recent.values()) {
+        if (m.author.id === client.user.id) await m.delete().catch(() => {});
+      }
+    }
+    for (const b of blocks) await ch.send({ content: b, allowedMentions: { parse: [] } });
+  } catch (e) {
+    console.error("refreshRankingBoard:", e?.message || e);
+  } finally {
+    _boardBusy = false;
+  }
 }
 
 async function slashRank(interaction, meu) {
-  await interaction.deferReply({ flags: meu ? MessageFlags.Ephemeral : undefined });
+  // Ephemeral SEMPRE: tanto /cta_meurank quanto /cta_rank. O placar é consulta,
+  // não anúncio — assim, por mais gente que rode, nada é postado no canal (zero spam).
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const season = await db.getCurrentSeason(interaction.guildId);
   if (!season)
     return interaction.editReply({ content: "Nenhuma temporada ativa ainda. Peça a um Mestre de Guerra pra iniciar com **/cta_start_temporada**." });
@@ -1470,13 +1531,11 @@ async function slashRank(interaction, meu) {
     return;
   }
 
-  const linhas = rows.map((r, i) => `\`${String(i + 1).padStart(2)}\` **${r.username}** · ${r.score} pts · ${r.integral + r.parcial}/${report.ctaCount}`);
-  const header = `🏆 **Placar — Temporada ${season.number}** (${report.ctaCount} CTAs)\n`;
-  const chunks = [];
-  for (let i = 0; i < linhas.length; i += 25) chunks.push(linhas.slice(i, i + 25).join("\n"));
-  if (!chunks.length) return interaction.editReply({ content: header + "\n_(ninguém pontuou ainda nesta temporada)_" });
-  await interaction.editReply({ content: header + "\n" + chunks[0] });
-  for (let i = 1; i < chunks.length; i++) await interaction.followUp({ content: chunks[i] });
+  // /cta_rank atualiza o placar público no ┇📊ranking (todos os pontuantes, sem .txt)
+  // e confirma em privado. Nada é postado no canal de onde o comando foi chamado.
+  await refreshRankingBoard(interaction.guildId, season);
+  const link = CFG.rankingChannelId ? `<#${CFG.rankingChannelId}>` : "o canal de ranking";
+  return interaction.editReply({ content: `✅ Placar da **Temporada ${season.number}** atualizado em ${link}.` });
 }
 
 function renderAttendanceHTML(report, rotulo, start, end) {
