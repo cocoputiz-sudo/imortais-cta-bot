@@ -17,6 +17,16 @@ const PROFILE_CHANNEL_ID = process.env.PROFILE_CHANNEL_ID || "155071694571897246
 const STAFF_LOG_CHANNEL_ID = process.env.STAFF_LOG_CHANNEL_ID || null;
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 
+// função do perfil -> id do cargo no Discord (override por env se mudar)
+const ROLE_TO_CARGO = {
+  Tank:         process.env.ROLE_TANK_ID          || "1306706210061553664",
+  Support:      process.env.ROLE_SUPPORT_ID       || "1314345337766281216",
+  Melee:        process.env.ROLE_MELEE_ID         || "1314348560006774874",
+  Ranged:       process.env.ROLE_RANGED_ID        || "1550719720246747136",
+  HealerHoly:   process.env.ROLE_HEALER_HOLY_ID   || "1282398769316630568",
+  HealerNature: process.env.ROLE_HEALER_NATURE_ID || "1550716206347067464",
+};
+
 // ---- funções do perfil (batem com as famílias do motor) ----
 const ROLE_DEFS = {
   Tank:         { label: "Tank (Def)",   emoji: "🛡️" },
@@ -282,6 +292,11 @@ async function onCore(interaction, claimed) {
   });
   drafts.delete(dkey(interaction));
 
+  const cargo = await applyRoleCargo(interaction, d.mainRole);
+  const cargoLine = cargo.ok
+    ? `\n🏷️ Cargo **${ROLE_DEFS[d.mainRole].label}** aplicado.`
+    : `\n⚠️ Não consegui aplicar o cargo. Confere se o bot tem **Gerenciar Cargos** e se o cargo dele está **acima** dos cargos de função.`;
+
   let extra = "";
   if (claimed) {
     const ok = await notifyStaffCore(interaction, username);
@@ -290,9 +305,27 @@ async function onCore(interaction, claimed) {
       : "\n\n🕐 Você se declarou **core** — a staff vai confirmar (não achei o canal de staff, avisa um Mestre de Guerra).";
   }
   return interaction.update({
-    content: `✅ **Perfil salvo!**\n\n${summary(d)}${extra}`,
+    content: `✅ **Perfil salvo!**\n\n${summary(d)}${cargoLine}${extra}`,
     components: [],
   });
+}
+
+// Dá o cargo da função principal e tira os outros cargos de função (troca).
+// Só mexe nos 6 cargos do mapa; não encosta em nenhum outro cargo da pessoa.
+async function applyRoleCargo(interaction, mainRole) {
+  const target = ROLE_TO_CARGO[mainRole];
+  if (!target) return { ok: false, err: "sem cargo pra essa função" };
+  try {
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    const managed = Object.values(ROLE_TO_CARGO);
+    const toRemove = managed.filter((id) => id !== target && member.roles.cache.has(id));
+    if (toRemove.length) await member.roles.remove(toRemove, "Perfil IMORTAL: troca de função");
+    if (!member.roles.cache.has(target)) await member.roles.add(target, "Perfil IMORTAL: função principal");
+    return { ok: true };
+  } catch (e) {
+    console.error("applyRoleCargo:", e?.message || e);
+    return { ok: false, err: e?.message || String(e) };
+  }
 }
 
 async function notifyStaffCore(interaction, username) {
