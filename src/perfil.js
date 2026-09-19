@@ -1,10 +1,13 @@
 // ============================================================================
 // PERFIL DO JOGADOR — Fase 1 (coleta e mostra; NÃO altera a montagem do CTA)
-// Wizard guiado (menus + modal, tudo efêmero) que registra, por pessoa:
-//   role principal, 1ª arma, 2ª arma, fill, IP de URSINAS/CRAVADAS, e o par
-//   core (a pessoa se declara -> a staff confirma).
-// As "roles" do perfil batem com as famílias do comps.js. Nada aqui dá cargo
-// no Discord nem muda o encaixe — isso fica pras próximas fases.
+// Wizard guiado (menus + modal, tudo efêmero). Três blocos de função, cada um
+// com role + até 2 armas:
+//   • Principal  (obrigatório)
+//   • 2ª função  (opcional)
+//   • Fill       (opcional)
+// Mais: horários (diurno/noturno), IP de URSINAS/CRAVADAS e o par core
+// (a pessoa se declara -> a staff confirma). As "roles" batem com as famílias
+// do comps.js. Nada aqui dá cargo por família nem muda o encaixe do CTA.
 // ============================================================================
 const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
@@ -29,33 +32,35 @@ const ROLE_TO_CARGO = {
 
 // ---- funções do perfil (batem com as famílias do motor) ----
 const ROLE_DEFS = {
-  Tank:         { label: "Tank (Def)",   emoji: "🛡️" },
-  Support:      { label: "Suporte",      emoji: "🎯" },
-  Melee:        { label: "DPS Melee",    emoji: "⚔️" },
-  Ranged:       { label: "DPS Ranged",   emoji: "🏹" },
-  HealerHoly:   { label: "Healer Holy",  emoji: "💚" },
+  Tank:         { label: "Tank (Def)",    emoji: "🛡️" },
+  Support:      { label: "Suporte",       emoji: "🎯" },
+  Melee:        { label: "DPS Melee",     emoji: "⚔️" },
+  Ranged:       { label: "DPS Ranged",    emoji: "🏹" },
+  HealerHoly:   { label: "Healer Holy",   emoji: "💚" },
   HealerNature: { label: "Healer Nature", emoji: "🌿" },
 };
 const ROLE_ORDER = ["Tank", "Support", "Melee", "Ranged", "HealerHoly", "HealerNature"];
 
 // turnos de jogo (batem com os prime times dos pings)
 const TURNO_DEFS = {
-  Diurno:  { label: "Diurno (15:20\u201319:20 UTC)",  emoji: "\u2600\ufe0f" },
-  Noturno: { label: "Noturno (21:20\u201301:20 UTC)", emoji: "\ud83c\udf19" },
+  Diurno:  { label: "Diurno (15:20–19:20 UTC)",  emoji: "☀️" },
+  Noturno: { label: "Noturno (21:20–01:20 UTC)", emoji: "🌙" },
 };
 const TURNO_ORDER = ["Diurno", "Noturno"];
+
+// os três blocos de função
+const SLOTS = ["main", "second", "fill"];
+const SLOT_LABEL = { main: "Principal", second: "2ª função", fill: "Fill" };
 
 const U = (w) => (w || "").trim().toUpperCase();
 const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
 
-// armas que aparecem no menu de cada função
 function weaponsForRole(role) {
   const all = Object.keys(WEAPONS);
   if (role === "HealerHoly")   return all.filter((w) => WEAPON_FAMILY[w] === "HEALER_HOLY");
   if (role === "HealerNature") return all.filter((w) => WEAPON_FAMILY[w] === "HEALER_NATURE");
   const map = { Tank: "Tank", Support: "Support", Melee: "Melee", Ranged: "Ranged" };
-  const r = map[role];
-  return all.filter((w) => (WEAPONS[w] || {}).role === r);
+  return all.filter((w) => (WEAPONS[w] || {}).role === map[role]);
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +89,13 @@ async function initSchema(pool) {
       PRIMARY KEY (guild_id, user_id)
     );
   `);
-  await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS turnos TEXT;`);
+  // migrações (a tabela pode já existir de deploys anteriores)
+  for (const col of [
+    "turnos TEXT", "role2 TEXT", "r2w1 TEXT", "r2w2 TEXT",
+    "fill_role TEXT", "fw1 TEXT", "fw2 TEXT",
+  ]) {
+    await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${col};`);
+  }
   console.log("✅ Tabela players pronta");
 }
 
@@ -96,22 +107,28 @@ async function getPlayer(guildId, userId) {
 }
 
 async function upsertPlayer(p) {
+  const roles = [p.mainRole, p.role2, p.fillRole].filter((v, i, a) => v && a.indexOf(v) === i);
   const { rows } = await _pool.query(
     `INSERT INTO players
-       (guild_id, user_id, username, main_role, roles, w1, w2, fill, turnos, ip_ursinas, ip_cravadas, core_claimed, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+       (guild_id, user_id, username, main_role, roles, w1, w2,
+        role2, r2w1, r2w2, fill_role, fw1, fw2, turnos,
+        ip_ursinas, ip_cravadas, core_claimed, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
      ON CONFLICT (guild_id, user_id) DO UPDATE SET
        username=EXCLUDED.username, main_role=EXCLUDED.main_role, roles=EXCLUDED.roles,
-       w1=EXCLUDED.w1, w2=EXCLUDED.w2, fill=EXCLUDED.fill, turnos=EXCLUDED.turnos,
+       w1=EXCLUDED.w1, w2=EXCLUDED.w2,
+       role2=EXCLUDED.role2, r2w1=EXCLUDED.r2w1, r2w2=EXCLUDED.r2w2,
+       fill_role=EXCLUDED.fill_role, fw1=EXCLUDED.fw1, fw2=EXCLUDED.fw2,
+       turnos=EXCLUDED.turnos,
        ip_ursinas=COALESCE(EXCLUDED.ip_ursinas, players.ip_ursinas),
        ip_cravadas=COALESCE(EXCLUDED.ip_cravadas, players.ip_cravadas),
        core_claimed=EXCLUDED.core_claimed,
        core_verified = CASE WHEN EXCLUDED.core_claimed THEN players.core_verified ELSE false END,
        updated_at=now()
      RETURNING *`,
-    [p.guildId, p.userId, p.username, p.mainRole, (p.roles || []).join(","),
-     p.w1 || null, p.w2 || null, (p.fill || []).join(","), (p.turnos || []).join(","),
-     p.ipUrsinas ?? null, p.ipCravadas ?? null, !!p.coreClaimed]
+    [p.guildId, p.userId, p.username, p.mainRole, roles.join(","), p.w1 || null, p.w2 || null,
+     p.role2 || null, p.r2w1 || null, p.r2w2 || null, p.fillRole || null, p.fw1 || null, p.fw2 || null,
+     (p.turnos || []).join(","), p.ipUrsinas ?? null, p.ipCravadas ?? null, !!p.coreClaimed]
   );
   return rows[0];
 }
@@ -129,38 +146,63 @@ async function setVerified(guildId, userId, verified, byId) {
 // ---------------------------------------------------------------------------
 const drafts = new Map();
 const dkey = (i) => `${i.guildId}:${i.user.id}`;
+function freshDraft() {
+  return { slots: { main: {}, second: {}, fill: {} }, turnos: [] };
+}
 function draft(i) {
   const k = dkey(i);
-  if (!drafts.has(k)) drafts.set(k, { fill: [], turnos: [] });
+  if (!drafts.has(k)) drafts.set(k, freshDraft());
   return drafts.get(k);
 }
 
 // ---------------------------------------------------------------------------
-// COMPONENTES DE CADA PASSO
+// HELPERS DE ESTADO
 // ---------------------------------------------------------------------------
-function roleRow() {
-  const menu = new StringSelectMenuBuilder().setCustomId("perfil|role").setPlaceholder("Qual tua função principal?");
-  for (const r of ROLE_ORDER)
+function allWeapons(d) {
+  const out = [];
+  for (const s of SLOTS) { const sl = d.slots[s]; if (sl.w1) out.push(sl.w1); if (sl.w2) out.push(sl.w2); }
+  return out;
+}
+function needsIP(d) { return allWeapons(d).some((w) => IP_WEAPONS.includes(U(w))); }
+function rolesChosen(d) { return SLOTS.map((s) => d.slots[s].role).filter(Boolean); }
+
+function summary(d) {
+  const line = (s) => {
+    const sl = d.slots[s];
+    if (!sl.role) return null;
+    const ws = [sl.w1, sl.w2].filter(Boolean).join(" / ") || "—";
+    return `**${SLOT_LABEL[s]}:** ${ROLE_DEFS[sl.role].label} — ${ws}`;
+  };
+  const ip = [];
+  if (d.ipUrsinas) ip.push(`URSINAS ${d.ipUrsinas}`);
+  if (d.ipCravadas) ip.push(`CRAVADAS ${d.ipCravadas}`);
+  return SLOTS.map(line).filter(Boolean)
+    .concat((d.turnos || []).length ? [`**Horários:** ${d.turnos.map((t) => TURNO_DEFS[t]?.label || t).join(", ")}`] : [])
+    .concat(ip.length ? [`**IP:** ${ip.join(" · ")}`] : [])
+    .join("\n") || "_(nada preenchido ainda)_";
+}
+
+// ---------------------------------------------------------------------------
+// COMPONENTES
+// ---------------------------------------------------------------------------
+function roleRow(slot, exclude = [], skipLabel = null) {
+  const ph = slot === "main" ? "Tua função principal"
+    : slot === "second" ? "Tua 2ª função" : "Função de fill";
+  const menu = new StringSelectMenuBuilder().setCustomId(`perfil|role|${slot}`).setPlaceholder(ph);
+  for (const r of ROLE_ORDER) {
+    if (exclude.includes(r)) continue;
     menu.addOptions({ label: ROLE_DEFS[r].label, value: r, emoji: ROLE_DEFS[r].emoji });
+  }
+  if (skipLabel) menu.addOptions({ label: skipLabel, value: "__skip__", emoji: "🚫" });
   return new ActionRowBuilder().addComponents(menu);
 }
 
-function weaponRow(role, step, withNone) {
-  const menu = new StringSelectMenuBuilder().setCustomId(`perfil|${step}`)
-    .setPlaceholder(step === "w1" ? "Tua 1ª arma (main)" : "Tua 2ª arma");
+function weaponRow(role, slot, which, withNone) {
+  const menu = new StringSelectMenuBuilder().setCustomId(`perfil|${which}|${slot}`)
+    .setPlaceholder(which === "w1" ? "1ª arma" : "2ª arma (opcional)");
   const ws = weaponsForRole(role).slice(0, withNone ? 24 : 25);
   for (const w of ws) menu.addOptions({ label: w.slice(0, 100), value: w });
-  if (withNone) menu.addOptions({ label: "— nenhuma (só a 1ª) —", value: "__none__" });
-  return new ActionRowBuilder().addComponents(menu);
-}
-
-function fillRow() {
-  const menu = new StringSelectMenuBuilder().setCustomId("perfil|fill")
-    .setPlaceholder("O que você topa flexar? (pode marcar vários)")
-    .setMinValues(1).setMaxValues(ROLE_ORDER.length + 1);
-  for (const r of ROLE_ORDER)
-    menu.addOptions({ label: ROLE_DEFS[r].label, value: r, emoji: ROLE_DEFS[r].emoji });
-  menu.addOptions({ label: "Não faço fill", value: "__none__", emoji: "🚫" });
+  if (withNone) menu.addOptions({ label: "— nenhuma —", value: "__none__" });
   return new ActionRowBuilder().addComponents(menu);
 }
 
@@ -168,8 +210,7 @@ function turnoRow() {
   const menu = new StringSelectMenuBuilder().setCustomId("perfil|turnos")
     .setPlaceholder("Em quais horários você costuma jogar?")
     .setMinValues(1).setMaxValues(TURNO_ORDER.length);
-  for (const t of TURNO_ORDER)
-    menu.addOptions({ label: TURNO_DEFS[t].label, value: t, emoji: TURNO_DEFS[t].emoji });
+  for (const t of TURNO_ORDER) menu.addOptions({ label: TURNO_DEFS[t].label, value: t, emoji: TURNO_DEFS[t].emoji });
   return new ActionRowBuilder().addComponents(menu);
 }
 
@@ -186,76 +227,72 @@ function coreRow() {
   );
 }
 
-function needsIP(d) {
-  return IP_WEAPONS.includes(U(d.w1)) || IP_WEAPONS.includes(U(d.w2));
-}
-
-function summary(d) {
-  const arma2 = d.w2 && d.w2 !== "__none__" ? d.w2 : "—";
-  const fill = (d.fill || []).length ? d.fill.map((r) => ROLE_DEFS[r]?.label || r).join(", ") : "—";
-  const ip = [];
-  if (d.ipUrsinas) ip.push(`URSINAS ${d.ipUrsinas}`);
-  if (d.ipCravadas) ip.push(`CRAVADAS ${d.ipCravadas}`);
-  return [
-    `**Função:** ${ROLE_DEFS[d.mainRole]?.label || d.mainRole}`,
-    `**1ª arma:** ${d.w1} · **2ª:** ${arma2}`,
-    `**Fill:** ${fill}`,
-    (d.turnos || []).length ? `**Horários:** ${d.turnos.map((t) => TURNO_DEFS[t]?.label || t).join(", ")}` : null,
-    ip.length ? `**IP:** ${ip.join(" · ")}` : null,
-  ].filter(Boolean).join("\n");
-}
-
 // ---------------------------------------------------------------------------
 // FLUXO
 // ---------------------------------------------------------------------------
 async function openWizard(interaction) {
-  const d = draft(interaction);
-  d.fill = [];
+  drafts.set(dkey(interaction), freshDraft());
   const atual = await getPlayer(interaction.guildId, interaction.user.id);
   const nota = atual
-    ? `Você já tem perfil (${ROLE_DEFS[atual.main_role]?.label || atual.main_role || "?"}). Refazer sobrescreve o anterior.\n\n`
+    ? `Você já tem perfil. Refazer sobrescreve o anterior.\n\n`
     : "";
   return interaction.reply({
-    content: `📋 **Montar meu perfil**\n${nota}Escolhe tua função principal 👇`,
-    components: [roleRow()],
+    content: `📋 **Montar meu perfil**\n${nota}Escolhe tua **função principal** 👇`,
+    components: [roleRow("main")],
     flags: MessageFlags.Ephemeral,
   });
 }
 
-async function onRole(interaction) {
+async function askSecond(interaction) {
   const d = draft(interaction);
-  d.mainRole = interaction.values[0];
   return interaction.update({
-    content: `Função: **${ROLE_DEFS[d.mainRole].label}**.\nAgora tua **1ª arma** (a que você mais joga) 👇`,
-    components: [weaponRow(d.mainRole, "w1", false)],
+    content: `${summary(d)}\n\nVocê joga uma **2ª função**? 👇`,
+    components: [roleRow("second", rolesChosen(d), "Não tenho 2ª função")],
   });
 }
-
-async function onW1(interaction) {
+async function askFill(interaction) {
   const d = draft(interaction);
-  d.w1 = interaction.values[0];
   return interaction.update({
-    content: `1ª arma: **${d.w1}**.\nTua **2ª opção** (ou "nenhuma") 👇`,
-    components: [weaponRow(d.mainRole, "w2", true)],
+    content: `${summary(d)}\n\nTem uma **função de fill** (que você pega pra tapar buraco)? 👇`,
+    components: [roleRow("fill", rolesChosen(d), "Não tenho fill")],
   });
 }
-
-async function onW2(interaction) {
+async function askTurnos(interaction) {
   const d = draft(interaction);
-  d.w2 = interaction.values[0];
-  return interaction.update({
-    content: `Beleza. Agora o **fill**: o que você topa flexar quando a comp pedir? 👇`,
-    components: [fillRow()],
-  });
-}
-
-async function onFill(interaction) {
-  const d = draft(interaction);
-  d.fill = interaction.values.filter((v) => v !== "__none__");
   return interaction.update({
     content: `${summary(d)}\n\nEm quais **horários** você costuma jogar? 👇`,
     components: [turnoRow()],
   });
+}
+async function advanceAfterSlot(interaction, slot) {
+  if (slot === "main") return askSecond(interaction);
+  if (slot === "second") return askFill(interaction);
+  return askTurnos(interaction); // fill
+}
+
+async function onRolePick(interaction, slot) {
+  const d = draft(interaction);
+  const v = interaction.values[0];
+  if (v === "__skip__") return advanceAfterSlot(interaction, slot);
+  d.slots[slot] = { role: v };
+  return interaction.update({
+    content: `${SLOT_LABEL[slot]}: **${ROLE_DEFS[v].label}**.\nTua **1ª arma** nessa função 👇`,
+    components: [weaponRow(v, slot, "w1", false)],
+  });
+}
+async function onW1(interaction, slot) {
+  const d = draft(interaction);
+  d.slots[slot].w1 = interaction.values[0];
+  return interaction.update({
+    content: `1ª arma: **${d.slots[slot].w1}**.\n**2ª arma** nessa função (ou nenhuma) 👇`,
+    components: [weaponRow(d.slots[slot].role, slot, "w2", true)],
+  });
+}
+async function onW2(interaction, slot) {
+  const d = draft(interaction);
+  const v = interaction.values[0];
+  d.slots[slot].w2 = v === "__none__" ? null : v;
+  return advanceAfterSlot(interaction, slot);
 }
 
 async function onTurnos(interaction) {
@@ -275,17 +312,16 @@ async function onTurnos(interaction) {
 
 async function onIpOpen(interaction) {
   const d = draft(interaction);
+  const ws = allWeapons(d).map(U);
   const modal = new ModalBuilder().setCustomId("perfil|ipmodal").setTitle("IP das tuas armas");
-  if (IP_WEAPONS.includes(U(d.w1)) || IP_WEAPONS.includes(U(d.w2))) {
-    if (U(d.w1) === "URSINAS" || U(d.w2) === "URSINAS")
-      modal.addComponents(new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("ip_ursinas").setLabel("IP URSINAS (ex: 1450)")
-          .setStyle(TextInputStyle.Short).setRequired(false)));
-    if (U(d.w1) === "CRAVADAS" || U(d.w2) === "CRAVADAS")
-      modal.addComponents(new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("ip_cravadas").setLabel("IP CRAVADAS (ex: 1450)")
-          .setStyle(TextInputStyle.Short).setRequired(false)));
-  }
+  if (ws.includes("URSINAS"))
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId("ip_ursinas").setLabel("IP URSINAS (ex: 1450)")
+        .setStyle(TextInputStyle.Short).setRequired(false)));
+  if (ws.includes("CRAVADAS"))
+    modal.addComponents(new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId("ip_cravadas").setLabel("IP CRAVADAS (ex: 1450)")
+        .setStyle(TextInputStyle.Short).setRequired(false)));
   return interaction.showModal(modal);
 }
 
@@ -309,19 +345,19 @@ async function onIpModal(interaction) {
 
 async function onCore(interaction, claimed) {
   const d = draft(interaction);
-  d.coreClaimed = claimed;
   const username = interaction.member?.displayName || interaction.user.username;
   await upsertPlayer({
     guildId: interaction.guildId, userId: interaction.user.id, username,
-    mainRole: d.mainRole, roles: [d.mainRole, ...(d.fill || [])].filter((v, i, a) => v && a.indexOf(v) === i),
-    w1: d.w1, w2: d.w2 && d.w2 !== "__none__" ? d.w2 : null, fill: d.fill, turnos: d.turnos,
-    ipUrsinas: d.ipUrsinas, ipCravadas: d.ipCravadas, coreClaimed: claimed,
+    mainRole: d.slots.main.role, w1: d.slots.main.w1, w2: d.slots.main.w2,
+    role2: d.slots.second.role, r2w1: d.slots.second.w1, r2w2: d.slots.second.w2,
+    fillRole: d.slots.fill.role, fw1: d.slots.fill.w1, fw2: d.slots.fill.w2,
+    turnos: d.turnos, ipUrsinas: d.ipUrsinas, ipCravadas: d.ipCravadas, coreClaimed: claimed,
   });
   drafts.delete(dkey(interaction));
 
-  const cargo = await applyRoleCargo(interaction, d.mainRole);
+  const cargo = await applyRoleCargo(interaction, d.slots.main.role);
   const cargoLine = cargo.ok
-    ? `\n🏷️ Cargo **${ROLE_DEFS[d.mainRole].label}** aplicado.`
+    ? `\n🏷️ Cargo **${ROLE_DEFS[d.slots.main.role].label}** aplicado.`
     : `\n⚠️ Não consegui aplicar o cargo. Confere se o bot tem **Gerenciar Cargos** e se o cargo dele está **acima** dos cargos de função.`;
 
   let extra = "";
@@ -331,10 +367,7 @@ async function onCore(interaction, claimed) {
       ? "\n\n🕐 Você se declarou **core** — mandei pra staff confirmar."
       : "\n\n🕐 Você se declarou **core** — a staff vai confirmar (não achei o canal de staff, avisa um Mestre de Guerra).";
   }
-  return interaction.update({
-    content: `✅ **Perfil salvo!**\n\n${summary(d)}${cargoLine}${extra}`,
-    components: [],
-  });
+  return interaction.update({ content: `✅ **Perfil salvo!**\n\n${summary(d)}${cargoLine}${extra}`, components: [] });
 }
 
 // Dá o cargo da função principal e tira os outros cargos de função (troca).
@@ -395,7 +428,7 @@ async function postPanelCmd(interaction) {
     new ButtonBuilder().setCustomId("perfil|start").setLabel("Montar meu perfil").setEmoji("📋").setStyle(ButtonStyle.Primary)
   );
   await ch.send({
-    content: "📋 **Perfil IMORTAL**\nMonta teu perfil pra guerra: função, armas, fill e IP. É rapidinho e tudo privado (só você vê as perguntas). Clica no botão 👇",
+    content: "📋 **Perfil IMORTAL**\nMonta teu perfil pra guerra: função principal, 2ª função, fill, horários e IP. É rapidinho e privado (só você vê as perguntas). Clica no botão 👇",
     components: [row],
   });
   return interaction.reply({ content: `✅ Painel postado em <#${PROFILE_CHANNEL_ID}>.`, flags: MessageFlags.Ephemeral });
@@ -414,10 +447,9 @@ async function handleComponent(interaction) {
     if (step === "verify") return onVerify(interaction, parts[2], parts[3]);
   }
   if (interaction.isStringSelectMenu()) {
-    if (step === "role") return onRole(interaction);
-    if (step === "w1")   return onW1(interaction);
-    if (step === "w2")   return onW2(interaction);
-    if (step === "fill") return onFill(interaction);
+    if (step === "role")   return onRolePick(interaction, parts[2]);
+    if (step === "w1")     return onW1(interaction, parts[2]);
+    if (step === "w2")     return onW2(interaction, parts[2]);
     if (step === "turnos") return onTurnos(interaction);
   }
   if (interaction.isModalSubmit() && step === "ipmodal") return onIpModal(interaction);
