@@ -52,6 +52,9 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_finish_temporada").setDescription("Encerra a temporada atual (Mestre de Guerra)"),
     new SlashCommandBuilder().setName("cta_rank").setDescription("Placar de presença da temporada atual"),
     new SlashCommandBuilder().setName("cta_meurank").setDescription("Tua pontuação de presença na temporada atual"),
+    // ---- PERFIL ----
+    new SlashCommandBuilder().setName("perfil").setDescription("Monta ou atualiza teu perfil de jogador (função, armas, fill, IP)"),
+    new SlashCommandBuilder().setName("perfil_painel").setDescription("(staff) Posta o painel de perfil no canal de perfil"),
     // ---- ROAMING ----
     new SlashCommandBuilder().setName("roaming").setDescription("Cria um roaming (caller)")
       .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming, ex: badmack").setRequired(true))

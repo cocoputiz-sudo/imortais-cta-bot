@@ -13,6 +13,7 @@ const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = requir
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
+const perfil = require("./perfil");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
@@ -271,6 +272,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isAutocomplete()) return cmds.handleAutocomplete(interaction);
     if (interaction.isChatInputCommand()) return onSlash(interaction);
+    if ((interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit())
+        && interaction.customId?.startsWith("perfil"))
+      return perfil.handleComponent(interaction);
     if (interaction.isButton()) {
       const [bk] = interaction.customId.split("|");
       if (bk === "occ") return onOccupantChoice(interaction);
@@ -805,12 +809,16 @@ async function onSlash(interaction) {
   if (name === "cta_rank")    return slashRank(interaction, false);
   if (name === "cta_meurank") return slashRank(interaction, true);
 
+  if (name === "perfil") return perfil.openWizard(interaction);
+
   if (name.startsWith("roaming")) return onRoamingCommand(interaction);
 
   if (name.startsWith("castelo")) return onCasteloCommand(interaction);
 
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
+
+  if (name === "perfil_painel") return perfil.postPanelCmd(interaction);
 
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
@@ -2157,4 +2165,4 @@ client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
-(async () => { await db.init(); await client.login(CFG.token); })();
+(async () => { await db.init(); await perfil.initSchema(db.pool); await client.login(CFG.token); })();
