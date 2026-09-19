@@ -18,6 +18,7 @@ const { WEAPONS, WEAPON_FAMILY } = require("./comps");
 
 const PROFILE_CHANNEL_ID = process.env.PROFILE_CHANNEL_ID || "1550716945718972467";
 const STAFF_LOG_CHANNEL_ID = process.env.STAFF_LOG_CHANNEL_ID || null;
+const CORE_CHANNEL_ID = process.env.CORE_CHANNEL_ID || "1498805797411622973";
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 
 // função do perfil -> id do cargo no Discord (override por env se mudar)
@@ -389,8 +390,8 @@ async function applyRoleCargo(interaction, mainRole) {
 }
 
 async function notifyStaffCore(interaction, username) {
-  if (!STAFF_LOG_CHANNEL_ID) return false;
-  const ch = await interaction.client.channels.fetch(STAFF_LOG_CHANNEL_ID).catch(() => null);
+  if (!CORE_CHANNEL_ID) return false;
+  const ch = await interaction.client.channels.fetch(CORE_CHANNEL_ID).catch(() => null);
   if (!ch) return false;
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`perfil|verify|${interaction.user.id}|ok`).setLabel("Confirmar core").setStyle(ButtonStyle.Success),
