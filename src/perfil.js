@@ -38,6 +38,13 @@ const ROLE_DEFS = {
 };
 const ROLE_ORDER = ["Tank", "Support", "Melee", "Ranged", "HealerHoly", "HealerNature"];
 
+// turnos de jogo (batem com os prime times dos pings)
+const TURNO_DEFS = {
+  Diurno:  { label: "Diurno (15:20\u201319:20 UTC)",  emoji: "\u2600\ufe0f" },
+  Noturno: { label: "Noturno (21:20\u201301:20 UTC)", emoji: "\ud83c\udf19" },
+};
+const TURNO_ORDER = ["Diurno", "Noturno"];
+
 const U = (w) => (w || "").trim().toUpperCase();
 const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
 
@@ -77,6 +84,7 @@ async function initSchema(pool) {
       PRIMARY KEY (guild_id, user_id)
     );
   `);
+  await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS turnos TEXT;`);
   console.log("✅ Tabela players pronta");
 }
 
@@ -90,11 +98,11 @@ async function getPlayer(guildId, userId) {
 async function upsertPlayer(p) {
   const { rows } = await _pool.query(
     `INSERT INTO players
-       (guild_id, user_id, username, main_role, roles, w1, w2, fill, ip_ursinas, ip_cravadas, core_claimed, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+       (guild_id, user_id, username, main_role, roles, w1, w2, fill, turnos, ip_ursinas, ip_cravadas, core_claimed, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
      ON CONFLICT (guild_id, user_id) DO UPDATE SET
        username=EXCLUDED.username, main_role=EXCLUDED.main_role, roles=EXCLUDED.roles,
-       w1=EXCLUDED.w1, w2=EXCLUDED.w2, fill=EXCLUDED.fill,
+       w1=EXCLUDED.w1, w2=EXCLUDED.w2, fill=EXCLUDED.fill, turnos=EXCLUDED.turnos,
        ip_ursinas=COALESCE(EXCLUDED.ip_ursinas, players.ip_ursinas),
        ip_cravadas=COALESCE(EXCLUDED.ip_cravadas, players.ip_cravadas),
        core_claimed=EXCLUDED.core_claimed,
@@ -102,7 +110,7 @@ async function upsertPlayer(p) {
        updated_at=now()
      RETURNING *`,
     [p.guildId, p.userId, p.username, p.mainRole, (p.roles || []).join(","),
-     p.w1 || null, p.w2 || null, (p.fill || []).join(","),
+     p.w1 || null, p.w2 || null, (p.fill || []).join(","), (p.turnos || []).join(","),
      p.ipUrsinas ?? null, p.ipCravadas ?? null, !!p.coreClaimed]
   );
   return rows[0];
@@ -123,7 +131,7 @@ const drafts = new Map();
 const dkey = (i) => `${i.guildId}:${i.user.id}`;
 function draft(i) {
   const k = dkey(i);
-  if (!drafts.has(k)) drafts.set(k, { fill: [] });
+  if (!drafts.has(k)) drafts.set(k, { fill: [], turnos: [] });
   return drafts.get(k);
 }
 
@@ -156,6 +164,15 @@ function fillRow() {
   return new ActionRowBuilder().addComponents(menu);
 }
 
+function turnoRow() {
+  const menu = new StringSelectMenuBuilder().setCustomId("perfil|turnos")
+    .setPlaceholder("Em quais horários você costuma jogar?")
+    .setMinValues(1).setMaxValues(TURNO_ORDER.length);
+  for (const t of TURNO_ORDER)
+    menu.addOptions({ label: TURNO_DEFS[t].label, value: t, emoji: TURNO_DEFS[t].emoji });
+  return new ActionRowBuilder().addComponents(menu);
+}
+
 function ipButtonRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("perfil|ipopen").setLabel("Informar IP").setEmoji("🔢").setStyle(ButtonStyle.Primary)
@@ -183,6 +200,7 @@ function summary(d) {
     `**Função:** ${ROLE_DEFS[d.mainRole]?.label || d.mainRole}`,
     `**1ª arma:** ${d.w1} · **2ª:** ${arma2}`,
     `**Fill:** ${fill}`,
+    (d.turnos || []).length ? `**Horários:** ${d.turnos.map((t) => TURNO_DEFS[t]?.label || t).join(", ")}` : null,
     ip.length ? `**IP:** ${ip.join(" · ")}` : null,
   ].filter(Boolean).join("\n");
 }
@@ -234,6 +252,15 @@ async function onW2(interaction) {
 async function onFill(interaction) {
   const d = draft(interaction);
   d.fill = interaction.values.filter((v) => v !== "__none__");
+  return interaction.update({
+    content: `${summary(d)}\n\nEm quais **horários** você costuma jogar? 👇`,
+    components: [turnoRow()],
+  });
+}
+
+async function onTurnos(interaction) {
+  const d = draft(interaction);
+  d.turnos = interaction.values.slice();
   if (needsIP(d)) {
     return interaction.update({
       content: `${summary(d)}\n\nVocê marcou uma arma de IP (URSINAS/CRAVADAS). Clica pra informar o IP 👇`,
@@ -287,7 +314,7 @@ async function onCore(interaction, claimed) {
   await upsertPlayer({
     guildId: interaction.guildId, userId: interaction.user.id, username,
     mainRole: d.mainRole, roles: [d.mainRole, ...(d.fill || [])].filter((v, i, a) => v && a.indexOf(v) === i),
-    w1: d.w1, w2: d.w2 && d.w2 !== "__none__" ? d.w2 : null, fill: d.fill,
+    w1: d.w1, w2: d.w2 && d.w2 !== "__none__" ? d.w2 : null, fill: d.fill, turnos: d.turnos,
     ipUrsinas: d.ipUrsinas, ipCravadas: d.ipCravadas, coreClaimed: claimed,
   });
   drafts.delete(dkey(interaction));
@@ -391,6 +418,7 @@ async function handleComponent(interaction) {
     if (step === "w1")   return onW1(interaction);
     if (step === "w2")   return onW2(interaction);
     if (step === "fill") return onFill(interaction);
+    if (step === "turnos") return onTurnos(interaction);
   }
   if (interaction.isModalSubmit() && step === "ipmodal") return onIpModal(interaction);
 }
