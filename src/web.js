@@ -122,13 +122,17 @@ const PAGE = `<!doctype html>
   .cta-btn.on { border-color:var(--acc); color:#fff; background:#241417; }
   .none { color:var(--dim); }
   #board { display:flex; gap:14px; overflow-x:auto; padding:6px 18px 18px; align-items:flex-start; }
-  .pt { min-width:300px; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; flex:0 0 auto; }
+  .pt { min-width:560px; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; flex:0 0 auto; }
+  .pt-body { display:flex; }
+  .pt-col { flex:1 1 0; min-width:0; }
+  .pt-col + .pt-col { border-left:1px solid var(--line); }
   .pt-h { font-weight:700; padding:10px 12px; border-bottom:1px solid var(--line); background:#12151b; }
   .slot { display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid #1f232b; }
   .slot:last-child { border-bottom:0; }
   .slot .n { color:var(--dim); font-variant-numeric:tabular-nums; width:22px; }
   .slot.filled { background:#141b16; }
   .slot .w { color:#c7cdd6; }
+  .slot .sep { flex:0 0 auto; align-self:stretch; width:1px; background:var(--line); margin:0 8px; }
   .slot .u { font-weight:600; margin-left:2px; }
   .slot .opts { color:var(--dim); }
   .slot .vazio { color:#5a6270; font-style:italic; margin-left:auto; }
@@ -157,18 +161,24 @@ const PAGE = `<!doctype html>
     (data.parties||[]).forEach(function(pt){
       var col=document.createElement('div'); col.className='pt';
       var h=document.createElement('div'); h.className='pt-h'; h.textContent=pt.name+' ('+pt.filled+'/'+pt.total+')'; col.appendChild(h);
-      pt.slots.forEach(function(s){
+      var body=document.createElement('div'); body.className='pt-body';
+      var left=document.createElement('div'); left.className='pt-col';
+      var right=document.createElement('div'); right.className='pt-col';
+      var half=Math.ceil(pt.slots.length/2);
+      pt.slots.forEach(function(s, idx){
         var row=document.createElement('div'); row.className='slot'+(s.filled?' filled':'');
         var n=('0'+s.n).slice(-2);
         if(s.filled){
           var dot=s.presence==='online'?'🟢':'🕐';
-          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="u">'+esc(s.username)+'</span>'+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="dot">'+dot+'</span>';
+          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="sep"></span><span class="u">'+esc(s.username)+'</span>'+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="dot">'+dot+'</span>';
         } else {
           var opts=s.locked?'👑 CALLER':((s.options||[]).slice(0,3).join(' / ')+(((s.options||[]).length>3)?'…':''));
           row.innerHTML='<span class="n">'+n+'</span><span class="opts">'+esc(opts)+'</span><span class="vazio">vazio</span>';
         }
-        col.appendChild(row);
+        (idx<half?left:right).appendChild(row);
       });
+      body.appendChild(left); body.appendChild(right);
+      col.appendChild(body);
       board.appendChild(col);
     });
     var rz=document.getElementById('reserves'); rz.innerHTML='';
