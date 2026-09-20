@@ -163,3 +163,38 @@ async function buildReport(guildId, startUTC, endUTC) {
 }
 
 module.exports = { windowFor, presenceInWindow, classify, processEvent, buildReport };
+
+// ============================================================================
+// AUDITORIA — lista os CTAs contados no período, com contagem de presentes e
+// flags (presença baixa, virada de dia, eventos mesclados por duplicidade).
+// ============================================================================
+async function auditEvents(guildId, startUTC, endUTC) {
+  const allEvents = await db.getEventsInRange(guildId, startUTC, endUTC);
+  const byKey = new Map();
+  for (const ev of allEvents) {
+    const key = new Date(ev.created_at).toISOString().slice(0, 10) + " " + ev.time_label;
+    const prev = byKey.get(key);
+    if (!prev || new Date(ev.created_at) > new Date(prev.created_at)) byKey.set(key, ev);
+  }
+  const events = [...byKey.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const counted = [];
+  for (const ev of events) {
+    const res = await processEvent(ev);
+    let present = 0, pinged = 0, fantasma = 0, integral = 0;
+    for (const [, r] of res) {
+      if (r.pingou) pinged++;
+      if (r.level === "FANTASMA") fantasma++;
+      else if (r.level) { present++; if (r.level === "INTEGRAL") integral++; }
+    }
+    counted.push({
+      id: ev.id, time: ev.time_label,
+      date: new Date(ev.created_at).toISOString().slice(0, 10),
+      present, pinged, fantasma, integral,
+      lowPresence: present < 5,
+      midnight: /^(00:|01:)/.test((ev.time_label || "").trim()),
+    });
+  }
+  return { counted, rawCount: allEvents.length, mergedCount: allEvents.length - events.length };
+}
+
+module.exports.auditEvents = auditEvents;

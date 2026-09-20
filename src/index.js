@@ -861,6 +861,7 @@ async function onSlash(interaction) {
   if (name === "perfis")        return perfil.listCmd(interaction);
   if (name === "perfil_de")     return perfil.viewOf(interaction);
   if (name === "core_pendentes") return perfil.corePending(interaction);
+  if (name === "attendance_audit") return slashAudit(interaction);
 
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
@@ -1547,6 +1548,40 @@ async function refreshRankingBoard(guildId, seasonOverride) {
   } finally {
     _boardBusy = false;
   }
+}
+
+async function slashAudit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const dias = interaction.options.getInteger("dias") || 7;
+  const user = interaction.options.getUser("usuario");
+  const end = new Date();
+  const start = new Date(end.getTime() - dias * 86400000);
+
+  if (user) {
+    const report = await attendance.buildReport(interaction.guildId, start, end);
+    const row = report.rows.find((r) => r.user_id === user.id);
+    if (!row) return interaction.editReply({ content: `Sem registro de **${user.username}** nos últimos ${dias} dias.` });
+    const linhas = [];
+    for (const d of Object.keys(row.detail || {}).sort())
+      for (const c of row.detail[d])
+        linhas.push(`${d} ${String(c.cta).padStart(5)} · ${String(c.level).padEnd(8)}${c.pingou ? " · pingou" : ""} · ${c.prepMin || 0}min · ${c.prepIn || "?"}→${c.prepOut || "?"}`);
+    const head = `🔎 Auditoria — ${user.username} (últimos ${dias} dias)\nScore ${row.score} · INTEGRAL ${row.integral} · PARCIAL ${row.parcial} · RÁPIDA ${row.rapida} · FANTASMA ${row.fantasma} · presença ${row.integral + row.parcial}/${report.ctaCount} · ${row.cat}`;
+    const buf = Buffer.from(head + "\n\n" + (linhas.join("\n") || "(sem detalhe)") + "\n", "utf-8");
+    return interaction.editReply({ content: head + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${user.username}.txt` }] });
+  }
+
+  const a = await attendance.auditEvents(interaction.guildId, start, end);
+  const alerts = [];
+  const low = a.counted.filter((c) => c.lowPresence);
+  if (low.length) alerts.push(`⚠️ ${low.length} CTA(s) com presença baixa (<5) — pode ser bot fora do ar ou canal errado: ${low.map((c) => c.date + " " + c.time).join(", ")}`);
+  const mid = a.counted.filter((c) => c.midnight);
+  if (mid.length) alerts.push(`🕛 ${mid.length} CTA(s) em virada de dia (00:/01:) — confira a janela: ${mid.map((c) => c.date + " " + c.time).join(", ")}`);
+  if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesmo dia+horário).`);
+  const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas`);
+  const head = `🔎 Auditoria de attendance — últimos ${dias} dias\nCTAs contados: ${a.counted.length} (de ${a.rawCount} eventos brutos)`;
+  const body = head + "\n\n" + (alerts.length ? alerts.join("\n") + "\n\n" : "") + lines.join("\n") + "\n";
+  const buf = Buffer.from(body, "utf-8");
+  return interaction.editReply({ content: head + (alerts.length ? "\n\n" + alerts.join("\n") : "") + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${dias}d.txt` }] });
 }
 
 async function slashRank(interaction, meu) {
