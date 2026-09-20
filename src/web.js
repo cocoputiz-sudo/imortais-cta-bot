@@ -28,6 +28,12 @@ function parseCookies(req) {
   return o;
 }
 function sessionOf(req) { const sid = parseCookies(req).sid; return sid ? sessions.get(sid) : null; }
+function requireMember(req, res) {
+  const sess = sessionOf(req);
+  if (!sess) { res.status(401).json({ error: "login" }); return null; }
+  if (!sess.isMember) { res.status(403).json({ error: "not_member" }); return null; }
+  return sess;
+}
 function canEditRoles(roles, userId) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
@@ -57,7 +63,7 @@ async function buildRosterData(ev) {
       const su = bySlot.get(`${p}:${i}`);
       if (su) {
         filled++;
-        slots.push({ n: i + 1, filled: true, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual });
+        slots.push({ n: i + 1, filled: true, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id });
       } else {
         const options = [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon);
         slots.push({ n: i + 1, filled: false, locked: !!slot.locked, options });
@@ -68,7 +74,7 @@ async function buildRosterData(ev) {
   return {
     event: { id: ev.id, time: ev.time_label, status: ev.status },
     parties,
-    reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon })),
+    reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon, userId: r.user_id })),
   };
 }
 
@@ -91,21 +97,29 @@ async function notifyRosterChange(eventId) {
   for (const res of set) { try { res.write(payload); } catch { /* ignore */ } }
 }
 
-function startWebServer(client) {
+let _applyEdit = null;
+function startWebServer(client, opts) {
   _client = client;
+  _applyEdit = (opts && opts.applyEdit) || null;
   const app = express();
+  app.use(express.json());
 
-  app.get("/api/events", async (_req, res) => {
+  app.get("/api/events", async (req, res) => {
+    if (!requireMember(req, res)) return;
     res.json(await openEventsAll().catch(() => []));
   });
 
   app.get("/api/roster", async (req, res) => {
+    if (!requireMember(req, res)) return;
     const ev = await db.getEvent(req.query.event).catch(() => null);
     if (!ev) return res.status(404).json({ error: "not found" });
     res.json(await buildRosterData(ev));
   });
 
   app.get("/api/stream", async (req, res) => {
+    const sess = sessionOf(req);
+    if (!sess) return res.status(401).end();
+    if (!sess.isMember) return res.status(403).end();
     const id = String(req.query.event || "");
     if (!id) return res.status(400).end();
     res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
@@ -146,7 +160,7 @@ function startWebServer(client) {
       const roles = (member && member.roles) || [];
       const name = me.global_name || me.username || "?";
       const sid = crypto.randomUUID();
-      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), roles });
+      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), isMember: !!member, roles });
       res.setHeader("Set-Cookie", `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`);
       res.redirect("/");
     } catch (e) { console.error("oauth:", e); res.status(500).send("Erro no login. <a href='/'>Voltar</a>"); }
@@ -154,13 +168,47 @@ function startWebServer(client) {
 
   app.get("/auth/me", (req, res) => {
     const s = sessionOf(req);
-    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit } : { logged: false });
+    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit, member: !!s.isMember } : { logged: false });
   });
 
   app.get("/auth/logout", (req, res) => {
     const sid = parseCookies(req).sid; if (sid) sessions.delete(sid);
     res.setHeader("Set-Cookie", "sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0");
     res.redirect("/");
+  });
+
+  app.post("/api/move", async (req, res) => {
+    const sess = sessionOf(req);
+    if (!sess) return res.status(401).json({ error: "login" });
+    if (!sess.isMember) return res.status(403).json({ error: "not_member" });
+    if (!sess.canEdit) return res.status(403).json({ error: "no_edit" });
+    try {
+      const { event, userId, party, slot } = req.body || {};
+      const ev = await db.getEvent(event).catch(() => null);
+      if (!ev) return res.status(404).json({ error: "event" });
+      const pl = plOf(ev);
+      const rawTo = pl[Number(party) - 1];
+      const slotIndex = Number(slot) - 1;
+      if (rawTo == null || !PARTIES[rawTo]) return res.status(400).json({ error: "party" });
+      const targetSlot = PARTIES[rawTo].slots[slotIndex];
+      if (!targetSlot || targetSlot.locked) return res.status(400).json({ error: "slot" });
+      const signups = await db.getSignups(ev.id);
+      const A = signups.find((x) => String(x.user_id) === String(userId));
+      if (!A) return res.status(404).json({ error: "user" });
+      const B = signups.find((x) => x.party_index === rawTo && x.slot_index === slotIndex && String(x.user_id) !== String(userId));
+      if (B) {
+        if (A.party_index != null) {
+          // troca: B vai pra vaga antiga do A
+          await db.pool.query("UPDATE cta_signups SET party_index=$3, slot_index=$4, manual=true WHERE event_id=$1 AND user_id=$2", [ev.id, B.user_id, A.party_index, A.slot_index]);
+        } else {
+          // A vinha da reserva: B volta pra reserva (o motor reencaixa)
+          await db.pool.query("UPDATE cta_signups SET party_index=NULL, slot_index=NULL, manual=false WHERE event_id=$1 AND user_id=$2", [ev.id, B.user_id]);
+        }
+      }
+      await db.pool.query("UPDATE cta_signups SET party_index=$3, slot_index=$4, manual=true WHERE event_id=$1 AND user_id=$2", [ev.id, A.user_id, rawTo, slotIndex]);
+      if (_applyEdit) await _applyEdit(ev.id);
+      res.json({ ok: true });
+    } catch (e) { console.error("/api/move:", e); res.status(500).json({ error: "server" }); }
   });
 
   app.get("/", (_req, res) => res.type("html").send(PAGE));
@@ -205,6 +253,9 @@ const PAGE = `<!doctype html>
   .slot.filled { background:#141b16; }
   .slot .w { color:#c7cdd6; }
   .slot .sep { flex:0 0 auto; align-self:stretch; width:1px; background:var(--line); margin:0 8px; }
+  .slot.drag, .rz-i.drag { cursor:grab; }
+  .slot.drag:active, .rz-i.drag:active { cursor:grabbing; }
+  .slot.over { outline:2px solid var(--acc); outline-offset:-2px; background:#241417; }
   .slot .u { font-weight:600; margin-left:2px; }
   .slot .opts { color:var(--dim); }
   .slot .vazio { color:#5a6270; font-style:italic; margin-left:auto; }
@@ -214,6 +265,9 @@ const PAGE = `<!doctype html>
   .rz-h { color:var(--dim); font-weight:700; margin:10px 0 6px; }
   .rz-i { color:#c7cdd6; padding:3px 0; }
   footer { color:#5a6270; text-align:center; padding:20px; font-size:12px; }
+  .gate { padding:60px 18px; color:var(--dim); text-align:center; font-size:15px; line-height:1.7; }
+  .gate-btn { display:inline-block; margin-top:8px; background:var(--card); border:1px solid var(--line); color:#8ab4ff; padding:9px 18px; border-radius:8px; text-decoration:none; }
+  .gate-btn:hover { border-color:var(--acc); }
 </style>
 </head>
 <body>
@@ -229,6 +283,13 @@ const PAGE = `<!doctype html>
 <script>
   var current=null, es=null;
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function doMove(uid, party, slot){
+    if(!current) return;
+    fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,userId:uid,party:party,slot:slot})})
+      .then(function(r){ if(!r.ok){ document.getElementById('live').textContent='● não foi possível mover'; document.getElementById('live').style.color='var(--acc)'; } })
+      .catch(function(){});
+    // a planilha se atualiza sozinha pelo SSE quando o bot reencaixa
+  }
   function render(data){
     var board=document.getElementById('board'); board.innerHTML='';
     (data.parties||[]).forEach(function(pt){
@@ -249,6 +310,17 @@ const PAGE = `<!doctype html>
           row.innerHTML='<span class="n">'+n+'</span><span class="opts">'+esc(opts)+'</span><span class="vazio">vazio</span>';
         }
         (idx<half?left:right).appendChild(row);
+        if(authState.canEdit){
+          if(s.filled && !s.locked){
+            row.classList.add('drag'); row.setAttribute('draggable','true');
+            row.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', s.userId); e.dataTransfer.effectAllowed='move'; });
+          }
+          if(!s.locked){
+            row.addEventListener('dragover',function(e){ e.preventDefault(); row.classList.add('over'); });
+            row.addEventListener('dragleave',function(){ row.classList.remove('over'); });
+            row.addEventListener('drop',function(e){ e.preventDefault(); row.classList.remove('over'); var uid=e.dataTransfer.getData('text/plain'); if(uid) doMove(uid, pt.display, s.n); });
+          }
+        }
       });
       body.appendChild(left); body.appendChild(right);
       col.appendChild(body);
@@ -257,7 +329,7 @@ const PAGE = `<!doctype html>
     var rz=document.getElementById('reserves'); rz.innerHTML='';
     if(data.reserves && data.reserves.length){
       var t=document.createElement('div'); t.className='rz-h'; t.textContent='⏳ Aguardando PT ('+data.reserves.length+')'; rz.appendChild(t);
-      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.textContent=r.username+' — '+r.weapon; rz.appendChild(d); });
+      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.textContent=r.username+' — '+r.weapon; if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', r.userId); e.dataTransfer.effectAllowed='move'; }); } rz.appendChild(d); });
     }
   }
   function connect(id){
@@ -281,15 +353,32 @@ const PAGE = `<!doctype html>
       if(!stillOpen){ var first=document.querySelector('.cta-btn'); if(first){ first.classList.add('on'); connect(list[0].id); } }
     }).catch(function(){});
   }
-  function loadAuth(){
-    fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
-      var el=document.getElementById('auth');
-      if(a.logged){ el.innerHTML='<span>'+(a.canEdit?'✏️ edição liberada':'👁️ somente leitura')+' · '+esc(a.name)+'</span> <a href="/auth/logout">sair</a>'; }
-      else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
-    }).catch(function(){});
+  var authState={logged:false,member:false,canEdit:false,name:''};
+  function renderAuthHeader(){
+    var el=document.getElementById('auth');
+    if(authState.logged){
+      var tag = authState.canEdit ? '✏️ edição liberada' : (authState.member ? '👁️ somente leitura' : '⛔ fora do servidor');
+      el.innerHTML='<span>'+tag+' · '+esc(authState.name)+'</span> <a href="/auth/logout">sair</a>';
+    } else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
   }
-  loadAuth();
-  loadEvents(); setInterval(loadEvents, 15000);
+  function showGate(){
+    document.getElementById('ctas').innerHTML='';
+    document.getElementById('reserves').innerHTML='';
+    if(es){es.close();es=null;} current=null;
+    document.getElementById('live').textContent='';
+    document.getElementById('board').innerHTML = authState.logged
+      ? '<div class="gate">⛔ Você não é membro do servidor IMORTAIS.<br>A formação é restrita à guild.</div>'
+      : '<div class="gate">🔒 Planilha restrita aos IMORTAIS.<br>Entra com o Discord pra ver.<br><a class="gate-btn" href="/auth/login">Entrar com Discord</a></div>';
+  }
+  function boot(){
+    fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
+      authState={logged:!!a.logged, member:!!a.member, canEdit:!!a.canEdit, name:a.name||''};
+      renderAuthHeader();
+      if(authState.logged && authState.member) loadEvents(); else showGate();
+    }).catch(function(){ authState={logged:false,member:false,canEdit:false,name:''}; renderAuthHeader(); showGate(); });
+  }
+  boot();
+  setInterval(function(){ if(authState.member) loadEvents(); }, 15000);
 </script>
 </body>
 </html>`;

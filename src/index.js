@@ -2210,4 +2210,4 @@ client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
-(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client); await client.login(CFG.token); })();
+(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client, { applyEdit: async (eventId) => { const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return; const guild = client.guilds.cache.get(ev.guild_id) || null; await applyReallocation(ev, guild, null); } }); await client.login(CFG.token); })();
