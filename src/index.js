@@ -14,6 +14,7 @@ const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = 
 const cmds = require("./commands");
 const attendance = require("./attendance");
 const perfil = require("./perfil");
+const web = require("./web");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
@@ -2064,8 +2065,9 @@ function refreshRoster(ev) {
 }
 
 async function doRefreshRoster(ev) {
-  if (!ev.thread_id || !ev.roster_msg) return;
   const fresh = (await db.getEvent(ev.id)) || ev;
+  web.notifyRosterChange(fresh.id).catch(() => {});
+  if (!fresh.thread_id || !fresh.roster_msg) return;
   const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
   if (!thread) return;
 
@@ -2208,4 +2210,4 @@ client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
-(async () => { await db.init(); await perfil.initSchema(db.pool); await client.login(CFG.token); })();
+(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client); await client.login(CFG.token); })();
