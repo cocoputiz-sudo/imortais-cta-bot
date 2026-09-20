@@ -55,6 +55,19 @@ function commandDefs() {
     // ---- PERFIL ----
     new SlashCommandBuilder().setName("perfil").setDescription("Monta ou atualiza teu perfil de jogador (função, armas, fill, IP)"),
     new SlashCommandBuilder().setName("perfil_painel").setDescription("(staff) Posta o painel de perfil no canal de perfil"),
+    new SlashCommandBuilder().setName("meu_perfil").setDescription("Mostra teu perfil salvo"),
+    new SlashCommandBuilder().setName("perfil_de").setDescription("(staff) Vê o perfil de um jogador")
+      .addUserOption((o) => o.setName("usuario").setDescription("Jogador").setRequired(true)),
+    new SlashCommandBuilder().setName("perfis").setDescription("(staff) Lista quem tem perfil (com filtros)")
+      .addStringOption((o) => o.setName("funcao").setDescription("Filtra por função").addChoices(
+        { name: "Tank (Def)", value: "Tank" }, { name: "Suporte", value: "Support" },
+        { name: "DPS Melee", value: "Melee" }, { name: "DPS Ranged", value: "Ranged" },
+        { name: "Healer Holy", value: "HealerHoly" }, { name: "Healer Nature", value: "HealerNature" }))
+      .addStringOption((o) => o.setName("turno").setDescription("Filtra por turno").addChoices(
+        { name: "Diurno", value: "Diurno" }, { name: "Noturno", value: "Noturno" }))
+      .addStringOption((o) => o.setName("core").setDescription("Filtra por core").addChoices(
+        { name: "Só core", value: "sim" }, { name: "Sem core", value: "nao" })),
+    new SlashCommandBuilder().setName("core_pendentes").setDescription("(staff) Lista quem se declarou core e falta confirmar"),
     // ---- ROAMING ----
     new SlashCommandBuilder().setName("roaming").setDescription("Cria um roaming (caller)")
       .addStringOption((o) => o.setName("nome").setDescription("Nome do roaming, ex: badmack").setRequired(true))

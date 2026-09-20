@@ -810,6 +810,7 @@ async function onSlash(interaction) {
   if (name === "cta_meurank") return slashRank(interaction, true);
 
   if (name === "perfil") return perfil.openWizard(interaction);
+  if (name === "meu_perfil") return perfil.viewOwn(interaction);
 
   if (name.startsWith("roaming")) return onRoamingCommand(interaction);
 
@@ -819,6 +820,9 @@ async function onSlash(interaction) {
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
   if (name === "perfil_painel") return perfil.postPanelCmd(interaction);
+  if (name === "perfis")        return perfil.listCmd(interaction);
+  if (name === "perfil_de")     return perfil.viewOf(interaction);
+  if (name === "core_pendentes") return perfil.corePending(interaction);
 
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);

@@ -456,7 +456,120 @@ async function handleComponent(interaction) {
   if (interaction.isModalSubmit() && step === "ipmodal") return onIpModal(interaction);
 }
 
+// ---------------------------------------------------------------------------
+// CONSULTA (ver o próprio, ver de alguém, listar)
+// ---------------------------------------------------------------------------
+function coreStatus(p) {
+  return p.core_verified ? "✅ confirmado" : p.core_claimed ? "🕐 declarado (aguardando staff)" : "—";
+}
+function fmtSlot(role, w1, w2) {
+  if (!role) return null;
+  const ws = [w1, w2].filter(Boolean).join(" / ") || "—";
+  return `${ROLE_DEFS[role]?.label || role} — ${ws}`;
+}
+function turnosOf(p) {
+  return (p.turnos || "").split(",").filter(Boolean);
+}
+function formatFull(p) {
+  const lines = [`👤 **${p.username || p.user_id}**`];
+  const main = fmtSlot(p.main_role, p.w1, p.w2); if (main) lines.push(`**Principal:** ${main}`);
+  const s2 = fmtSlot(p.role2, p.r2w1, p.r2w2);   if (s2)   lines.push(`**2ª função:** ${s2}`);
+  const sf = fmtSlot(p.fill_role, p.fw1, p.fw2);  if (sf)   lines.push(`**Fill:** ${sf}`);
+  const t = turnosOf(p).map((x) => TURNO_DEFS[x]?.label || x);
+  if (t.length) lines.push(`**Horários:** ${t.join(", ")}`);
+  const ip = [];
+  if (p.ip_ursinas) ip.push(`URSINAS ${p.ip_ursinas}`);
+  if (p.ip_cravadas) ip.push(`CRAVADAS ${p.ip_cravadas}`);
+  if (ip.length) lines.push(`**IP:** ${ip.join(" · ")}`);
+  lines.push(`**Core:** ${coreStatus(p)}`);
+  return lines.join("\n");
+}
+function formatShort(p) {
+  let head = ROLE_DEFS[p.main_role]?.label || p.main_role || "?";
+  if (p.w1) head += ` (${p.w1})`;
+  const parts = [head];
+  if (p.role2) parts.push(`2ª ${ROLE_DEFS[p.role2]?.label || p.role2}`);
+  if (p.fill_role) parts.push(`fill ${ROLE_DEFS[p.fill_role]?.label || p.fill_role}`);
+  const t = turnosOf(p).map((x) => x[0]).join("");
+  const flag = p.core_verified ? " ⭐" : p.core_claimed ? " 🕐" : "";
+  return `**${p.username || p.user_id}** — ${parts.join(" · ")}${t ? ` · [${t}]` : ""}${flag}`;
+}
+
+async function allPlayers(guildId) {
+  const { rows } = await _pool.query(
+    `SELECT * FROM players WHERE guild_id=$1 ORDER BY main_role, lower(username)`, [guildId]
+  );
+  return rows;
+}
+
+async function viewOwn(interaction) {
+  const p = await getPlayer(interaction.guildId, interaction.user.id);
+  if (!p) return interaction.reply({ content: "Você ainda não montou perfil. Usa **/perfil** ou o botão no canal de perfil.", flags: MessageFlags.Ephemeral });
+  return interaction.reply({ content: formatFull(p), flags: MessageFlags.Ephemeral });
+}
+
+async function viewOf(interaction) {
+  const user = interaction.options.getUser("usuario");
+  const p = await getPlayer(interaction.guildId, user.id);
+  if (!p) return interaction.reply({ content: `**${user.username}** ainda não tem perfil.`, flags: MessageFlags.Ephemeral });
+  return interaction.reply({ content: formatFull(p), flags: MessageFlags.Ephemeral });
+}
+
+async function listCmd(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const funcao = interaction.options.getString("funcao");
+  const turno = interaction.options.getString("turno");
+  const core = interaction.options.getString("core");
+  let rows = await allPlayers(interaction.guildId);
+  if (funcao) rows = rows.filter((p) => [p.main_role, p.role2, p.fill_role].includes(funcao));
+  if (turno)  rows = rows.filter((p) => turnosOf(p).includes(turno));
+  if (core === "sim") rows = rows.filter((p) => p.core_verified);
+  else if (core === "nao") rows = rows.filter((p) => !p.core_verified);
+
+  const filtros = [funcao && ROLE_DEFS[funcao]?.label, turno && TURNO_DEFS[turno]?.label,
+    core === "sim" && "core", core === "nao" && "sem core"].filter(Boolean).join(" · ");
+  const header = `📇 **Perfis** (${rows.length})${filtros ? ` — ${filtros}` : ""}`;
+  if (!rows.length) return interaction.editReply({ content: header + "\n\n_(ninguém com esse filtro)_" });
+
+  const linhas = rows.map((p, i) => `${String(i + 1).padStart(3)}. ${formatShort(p)}`);
+  const msg = { content: `${header}\n\n${linhas.slice(0, 25).join("\n")}` };
+  if (linhas.length > 25) {
+    const plain = linhas.map((l) => l.replace(/\*/g, "")).join("\n");
+    const buf = Buffer.from(`${header.replace(/\*/g, "")}\n\n${plain}\n`, "utf-8");
+    msg.content += `\n\n_Mostrando 25 de ${rows.length}. Lista completa no anexo 👇_`;
+    msg.files = [{ attachment: buf, name: "perfis.txt" }];
+  }
+  return interaction.editReply(msg);
+}
+
+async function corePending(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const { rows } = await _pool.query(
+    `SELECT * FROM players WHERE guild_id=$1 AND core_claimed=true AND core_verified=false
+     ORDER BY updated_at DESC`,
+    [interaction.guildId]
+  );
+  if (!rows.length) return interaction.editReply({ content: "✅ Ninguém com core pendente de confirmação." });
+
+  const cap = rows.slice(0, 20);
+  await interaction.editReply({
+    content: `🧾 **Core pendente** — ${rows.length} pessoa(s)${rows.length > 20 ? " (mostrando as 20 mais recentes)" : ""}. Confirma cada uma abaixo:`,
+  });
+  for (const p of cap) {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`perfil|verify|${p.user_id}|ok`).setLabel("Confirmar core").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`perfil|verify|${p.user_id}|no`).setLabel("Não é core").setStyle(ButtonStyle.Danger)
+    );
+    await interaction.followUp({
+      content: `**${p.username || p.user_id}** — ${ROLE_DEFS[p.main_role]?.label || p.main_role || "?"}${p.w1 ? ` (${p.w1})` : ""}`,
+      components: [row],
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {});
+  }
+}
+
 module.exports = {
   initSchema, openWizard, postPanelCmd, handleComponent,
+  viewOwn, viewOf, listCmd, corePending,
   getPlayer, upsertPlayer, setVerified, weaponsForRole, ROLE_DEFS,
 };
