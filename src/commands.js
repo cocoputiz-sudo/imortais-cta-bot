@@ -40,6 +40,8 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_change_time").setDescription("Muda o horário de um CTA já criado")
       .addStringOption(ctaOpt)
       .addStringOption((o) => o.setName("novo").setDescription("Novo horário, ex 23:00").setRequired(true)),
+    new SlashCommandBuilder().setName("cta_flashmass").setDescription("(staff) Dispara um FLASHMASS no #cta-mandatório (imagem + @imortal)")
+      .addStringOption((o) => o.setName("horario").setDescription("Horário UTC, ex: 21:20").setRequired(true)),
     new SlashCommandBuilder().setName("cta_finish").setDescription("Encerra um CTA (qualquer staff, qualquer caller)")
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
