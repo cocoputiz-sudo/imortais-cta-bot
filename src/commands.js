@@ -52,6 +52,9 @@ function commandDefs() {
     new SlashCommandBuilder().setName("attendance_audit").setDescription("(staff) Auditoria dos CTAs contados / de um jogador")
       .addIntegerOption((o) => o.setName("dias").setDescription("Período").addChoices({ name: "7 dias", value: 7 }, { name: "30 dias", value: 30 }))
       .addUserOption((o) => o.setName("usuario").setDescription("Auditar um jogador específico")),
+    new SlashCommandBuilder().setName("cta_ignore").setDescription("(staff) Remove um CTA da contagem de attendance/rank (ou desfaz)")
+      .addIntegerOption((o) => o.setName("id").setDescription("id do CTA (veja no /attendance_audit)").setRequired(true))
+      .addBooleanOption((o) => o.setName("desfazer").setDescription("Marque pra VOLTAR o CTA pra contagem")),
     new SlashCommandBuilder().setName("cta_start_temporada").setDescription("Inicia uma temporada (Mestre de Guerra)")
       .addIntegerOption((o) => o.setName("numero").setDescription("Número da temporada, ex: 34").setRequired(true).setMinValue(1).setMaxValue(999)),
     new SlashCommandBuilder().setName("cta_finish_temporada").setDescription("Encerra a temporada atual (Mestre de Guerra)"),

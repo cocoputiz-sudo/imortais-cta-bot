@@ -862,6 +862,7 @@ async function onSlash(interaction) {
   if (name === "perfil_de")     return perfil.viewOf(interaction);
   if (name === "core_pendentes") return perfil.corePending(interaction);
   if (name === "attendance_audit") return slashAudit(interaction);
+  if (name === "cta_ignore") return slashIgnore(interaction);
 
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
@@ -1548,6 +1549,21 @@ async function refreshRankingBoard(guildId, seasonOverride) {
   } finally {
     _boardBusy = false;
   }
+}
+
+async function slashIgnore(interaction) {
+  const id = interaction.options.getInteger("id");
+  const desfazer = interaction.options.getBoolean("desfazer") || false;
+  const ev = await db.getEvent(id).catch(() => null);
+  if (!ev) return interaction.reply({ content: `CTA id ${id} não encontrado.`, flags: MessageFlags.Ephemeral });
+  await db.setEventIgnored(id, !desfazer);
+  await interaction.reply({
+    content: desfazer
+      ? `✅ CTA **${ev.time_label}** (id ${id}) voltou pra contagem de attendance/rank.`
+      : `🚫 CTA **${ev.time_label}** (id ${id}) removido da contagem de attendance/rank.`,
+    flags: MessageFlags.Ephemeral,
+  });
+  refreshRankingBoard(interaction.guildId).catch(() => {});
 }
 
 async function slashAudit(interaction) {

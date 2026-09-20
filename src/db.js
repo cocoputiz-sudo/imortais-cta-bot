@@ -162,6 +162,7 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS party_list TEXT DEFAULT '0';`);
   await pool.query(`ALTER TABLE cta_signups ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT false;`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
@@ -390,10 +391,14 @@ async function getPresenceInWindow(guildId, channelKind, startUTC, endUTC) {
   return rows;
 }
 
+async function setEventIgnored(eventId, ignored) {
+  await pool.query(`UPDATE cta_events SET ignored=$2 WHERE id=$1`, [eventId, !!ignored]);
+}
+
 async function getEventsInRange(guildId, startUTC, endUTC) {
   const { rows } = await pool.query(
     `SELECT * FROM cta_events
-     WHERE guild_id=$1 AND created_at >= $2 AND created_at <= $3
+     WHERE guild_id=$1 AND created_at >= $2 AND created_at <= $3 AND NOT ignored
      ORDER BY created_at ASC`,
     [guildId, startUTC, endUTC]
   );
@@ -546,7 +551,7 @@ module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
-  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange,
+  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange, setEventIgnored,
   getCurrentSeason, startSeason, finishSeason,
   getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
