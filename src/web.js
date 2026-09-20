@@ -9,6 +9,30 @@
 const express = require("express");
 const db = require("./db");
 const { PARTIES } = require("./comps");
+const crypto = require("crypto");
+
+// ---- config do login (OAuth2 Discord) ----
+const CLIENT_ID     = process.env.DISCORD_CLIENT_ID || "1541617852056862801";
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
+const GUILD_ID      = process.env.GUILD_ID || "683411304408416285";
+const REDIRECT      = process.env.OAUTH_REDIRECT || "https://cta-imortais.up.railway.app/auth/callback";
+const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
+const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
+
+const sessions = new Map(); // sid -> { id, name, canEdit, roles }
+const states = new Map();   // state -> timestamp (CSRF)
+
+function parseCookies(req) {
+  const h = req.headers.cookie || ""; const o = {};
+  h.split(";").forEach(function (p) { const i = p.indexOf("="); if (i > 0) o[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); });
+  return o;
+}
+function sessionOf(req) { const sid = parseCookies(req).sid; return sid ? sessions.get(sid) : null; }
+function canEditRoles(roles, userId) {
+  const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
+  const isOwner = g && g.ownerId === userId;
+  return !!(isOwner || (STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID)) || (CALLER_TAG_ID && roles.includes(CALLER_TAG_ID)));
+}
 
 let _client = null;
 const streams = new Map(); // eventId(string) -> Set(res)
@@ -94,6 +118,51 @@ function startWebServer(client) {
     req.on("close", () => { clearInterval(ping); const s = streams.get(id); if (s) s.delete(res); });
   });
 
+  app.get("/auth/login", (_req, res) => {
+    if (!CLIENT_SECRET) return res.status(503).send("Login ainda não configurado (falta DISCORD_CLIENT_SECRET no Railway).");
+    const state = crypto.randomBytes(16).toString("hex");
+    states.set(state, Date.now());
+    const url = "https://discord.com/api/oauth2/authorize?" + new URLSearchParams({
+      client_id: CLIENT_ID, redirect_uri: REDIRECT, response_type: "code",
+      scope: "identify guilds.members.read", state, prompt: "none",
+    }).toString();
+    res.redirect(url);
+  });
+
+  app.get("/auth/callback", async (req, res) => {
+    try {
+      const { code, state } = req.query;
+      if (!code || !state || !states.has(state)) return res.status(400).send("Login inválido. <a href='/'>Voltar</a>");
+      states.delete(state);
+      const tok = await fetch("https://discord.com/api/oauth2/token", {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, grant_type: "authorization_code", code, redirect_uri: REDIRECT }),
+      }).then((r) => r.json());
+      if (!tok || !tok.access_token) return res.status(401).send("Falha no login. <a href='/'>Voltar</a>");
+      const auth = { Authorization: `Bearer ${tok.access_token}` };
+      const me = await fetch("https://discord.com/api/users/@me", { headers: auth }).then((r) => r.json());
+      const member = await fetch(`https://discord.com/api/users/@me/guilds/${GUILD_ID}/member`, { headers: auth })
+        .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const roles = (member && member.roles) || [];
+      const name = me.global_name || me.username || "?";
+      const sid = crypto.randomUUID();
+      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), roles });
+      res.setHeader("Set-Cookie", `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`);
+      res.redirect("/");
+    } catch (e) { console.error("oauth:", e); res.status(500).send("Erro no login. <a href='/'>Voltar</a>"); }
+  });
+
+  app.get("/auth/me", (req, res) => {
+    const s = sessionOf(req);
+    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit } : { logged: false });
+  });
+
+  app.get("/auth/logout", (req, res) => {
+    const sid = parseCookies(req).sid; if (sid) sessions.delete(sid);
+    res.setHeader("Set-Cookie", "sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0");
+    res.redirect("/");
+  });
+
   app.get("/", (_req, res) => res.type("html").send(PAGE));
 
   const port = process.env.PORT || 3000;
@@ -116,7 +185,10 @@ const PAGE = `<!doctype html>
   body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif; padding-top:env(safe-area-inset-top,0); }
   header { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
   header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
-  #live { margin-left:auto; font-size:12px; color:var(--green); }
+  #auth { margin-left:auto; display:flex; gap:10px; align-items:center; font-size:13px; color:var(--dim); }
+  #auth a { color:#8ab4ff; text-decoration:none; }
+  #auth a:hover { text-decoration:underline; }
+  #live { margin-left:14px; font-size:12px; color:var(--green); }
   #ctas { display:flex; gap:8px; flex-wrap:wrap; padding:12px 18px; }
   .cta-btn { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; }
   .cta-btn.on { border-color:var(--acc); color:#fff; background:#241417; }
@@ -147,6 +219,7 @@ const PAGE = `<!doctype html>
 <body>
 <header>
   <h1>🛡️ IMORTAIS — Planilha ao vivo</h1>
+  <span id="auth"></span>
   <span id="live">● conectando…</span>
 </header>
 <div id="ctas"></div>
@@ -208,6 +281,14 @@ const PAGE = `<!doctype html>
       if(!stillOpen){ var first=document.querySelector('.cta-btn'); if(first){ first.classList.add('on'); connect(list[0].id); } }
     }).catch(function(){});
   }
+  function loadAuth(){
+    fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
+      var el=document.getElementById('auth');
+      if(a.logged){ el.innerHTML='<span>'+(a.canEdit?'✏️ edição liberada':'👁️ somente leitura')+' · '+esc(a.name)+'</span> <a href="/auth/logout">sair</a>'; }
+      else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
+    }).catch(function(){});
+  }
+  loadAuth();
   loadEvents(); setInterval(loadEvents, 15000);
 </script>
 </body>
