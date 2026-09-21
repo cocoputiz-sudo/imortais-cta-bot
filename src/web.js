@@ -417,6 +417,30 @@ const PAGE = `<!doctype html>
   .srow{ padding:6px 0; color:#c7cdd6; font-size:14px; border-top:1px solid var(--line); }
   .srow:first-of-type{ border-top:0; }
   @media(max-width:1050px){ .shell{ grid-template-columns:1fr;} aside{ display:none;} .board{ grid-template-columns:1fr;} .hero{ grid-template-columns:1fr;} }
+  /* ---- telas de dados do jogo (prévia/mock) ---- */
+  .preview{ display:inline-block; margin-bottom:14px; font-size:11px; letter-spacing:.06em; color:#e0b04a; background:#241d0c; border:1px solid #5a4a1e; border-radius:8px; padding:6px 11px; }
+  .modhead{ font-family:var(--disp); font-weight:700; font-size:20px; letter-spacing:1px; margin:2px 0 12px; }
+  .statgrid{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+  .stat{ background:linear-gradient(180deg,#121923,#0e131b); border:1px solid var(--line); border-radius:13px; padding:14px 16px; }
+  .stat .k{ font-size:11px; color:var(--muted); letter-spacing:.1em; font-weight:700; text-transform:uppercase; }
+  .stat .v{ font-family:var(--disp); font-size:28px; font-weight:900; margin-top:6px; }
+  .stat.g .v{ color:var(--green);} .stat.r .v{ color:var(--dps);} .stat.a .v{ color:var(--amber);} .stat.p .v{ color:var(--support);} .stat.b .v{ color:var(--tank);}
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:14px 16px; margin-bottom:14px; }
+  .panel h3{ margin:0 0 10px; font-size:12px; color:var(--muted); letter-spacing:.1em; font-weight:800; text-transform:uppercase; }
+  .dtable{ width:100%; border-collapse:collapse; font-size:13px; }
+  .dtable th{ text-align:left; color:var(--muted); font-weight:700; font-size:11px; letter-spacing:.06em; padding:6px 8px; border-bottom:1px solid var(--line); }
+  .dtable td{ padding:7px 8px; border-bottom:1px solid #1a222e; }
+  .dtable tr:hover td{ background:#141c26; }
+  .pill{ display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; }
+  .pill.ok{ color:#8ce5ad; background:#10241a; } .pill.miss{ color:#ffb0b0; background:#2a1315; } .pill.extra{ color:#eccf8a; background:#2a230f; } .pill.div{ color:#d6b8ff; background:#231a30; }
+  .pill.entregue{ color:#8ce5ad; background:#10241a; } .pill.pendente{ color:#eccf8a; background:#2a230f; } .pill.divergencia{ color:#d6b8ff; background:#231a30; }
+  .toplist{ display:flex; flex-direction:column; gap:6px; }
+  .toprow{ display:flex; align-items:center; gap:10px; padding:7px 10px; background:var(--bg); border-radius:9px; }
+  .toprow .rk{ width:22px; color:var(--muted); font-weight:800; text-align:center; }
+  .toprow .nm{ font-weight:700; } .toprow .val{ margin-left:auto; color:var(--gold); font-weight:700; font-variant-numeric:tabular-nums; }
+  .toprow .bar{ flex:0 0 120px; height:6px; background:#222a35; border-radius:6px; overflow:hidden; } .toprow .bar i{ display:block; height:100%; background:linear-gradient(90deg,var(--red),var(--amber)); }
+  .split{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media(max-width:1050px){ .statgrid{ grid-template-columns:repeat(2,1fr);} .split{ grid-template-columns:1fr;} }
 </style>
 </head>
 <body>
@@ -432,6 +456,10 @@ const PAGE = `<!doctype html>
     <div class="nav on" data-view="board">⚔ Formação ao vivo</div>
     <div class="nav" data-view="mural">📣 Mural da guilda</div>
     <div class="nav" id="nav-stats">📊 Meu desempenho</div>
+    <div class="navtitle">DADOS DO JOGO</div>
+    <div class="nav" data-view="confirm">🎯 Confirmação pelo jogo <span class="tagsoon">PRÉVIA</span></div>
+    <div class="nav" data-view="loot">📦 Registros &amp; Loot <span class="tagsoon">PRÉVIA</span></div>
+    <div class="nav" data-view="combat">⚔️ Combate <span class="tagsoon">PRÉVIA</span></div>
     <div class="navtitle">EM BREVE</div>
     <div class="nav soon">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
     <div class="nav soon">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
@@ -463,6 +491,9 @@ const PAGE = `<!doctype html>
     </div>
 
     <div id="view-mural" style="display:none"><div id="news"></div></div>
+    <div id="view-confirm" style="display:none"></div>
+    <div id="view-loot" style="display:none"></div>
+    <div id="view-combat" style="display:none"></div>
   </main>
 </div>
 
@@ -490,9 +521,12 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    document.getElementById('view-board').style.display = v==='board'?'':'none';
-    document.getElementById('view-mural').style.display = v==='mural'?'':'none';
+    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat'};
+    for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
+    if(v==='confirm') renderConfirm();
+    if(v==='loot') renderLoot();
+    if(v==='combat') renderCombat();
   }
 
   function renderAuthHeader(){
@@ -662,6 +696,94 @@ const PAGE = `<!doctype html>
   Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.onclick=function(){ show(b.getAttribute('data-view')); }; });
   document.getElementById('nav-stats').onclick=openStats;
   Array.prototype.forEach.call(document.querySelectorAll('.modal'),function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
+
+  // ===================== DADOS DO JOGO — telas de prévia (MOCK) =====================
+  // ATENÇÃO: os dados abaixo são de EXEMPLO. Cada mock* deve virar um fetch real
+  // quando o backend de telemetria existir (ver "dados que o backend precisa fornecer").
+  function fmtS(v){ if(v>=1e6) return (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+'M'; if(v>=1e3) return Math.round(v/1e3)+'K'; return String(v); }
+  function previewBadge(){ return '<div class="preview">⚠ Prévia · dados de exemplo (aguardando telemetria do jogo)</div>'; }
+
+  // TODO backend: GET /api/telemetry/confirm?event=<id>
+  function mockConfirm(){ return {
+    resumo:{ confirmado:74, faltando:6, extra:3, divergencia:2 },
+    pts:[
+      { pt:'PT 1', linhas:[
+        {n:'BadMack', arma:'Galatinas', st:'ok'},
+        {n:'Mitrius', arma:'Braçadeiras', st:'ok'},
+        {n:'Isahel', arma:'Queda Santa', st:'miss', obs:'na planilha, não detectado no jogo'},
+        {n:'ThorXIII', arma:'Quebra Reinos', st:'div', obs:'no jogo com Cravadas'} ]},
+      { pt:'PT 2', linhas:[
+        {n:'LordErmac', arma:'Braçadeiras', st:'ok'},
+        {n:'Tarzan05', arma:'Galatinas', st:'extra', obs:'no jogo, fora da planilha'} ]} ] }; }
+
+  // TODO backend: GET /api/telemetry/loot?event=<id>
+  function mockLoot(){ return {
+    resumo:{ capturado:412000000, entregue:301000000, pendente:96000000, divergencias:5 },
+    top:[ {n:'NegaumBlack', v:82000000},{n:'BadMack', v:64000000},{n:'Mitrius', v:51000000},{n:'Isahel', v:38000000},{n:'LordErmac', v:29000000} ],
+    itens:[
+      {jog:'NegaumBlack', item:'T8 Espadas Duplas', qtd:1, origem:'corpo inimigo', v:1240000, st:'entregue'},
+      {jog:'BadMack', item:'T8 Galatinas', qtd:1, origem:'corpo inimigo', v:980000, st:'pendente'},
+      {jog:'Mitrius', item:'T7 Braçadeiras', qtd:2, origem:'baú', v:410000, st:'divergencia'} ] }; }
+
+  // TODO backend: GET /api/telemetry/combat?event=<id>
+  function mockCombat(){ return {
+    resumo:{ damage:18400000, healing:7200000, mortes:14, fights:6 },
+    porPt:[ {pt:'PT 1', dmg:7100000, heal:2600000, mortes:3},{pt:'PT 2', dmg:5900000, heal:2100000, mortes:5},{pt:'PT 3', dmg:5400000, heal:2500000, mortes:6} ],
+    topDmg:[ {n:'Pvpkabuloso', v:1420000},{n:'BadMack', v:1180000},{n:'Flagelo01', v:990000} ],
+    topHeal:[ {n:'Vxnxq', v:1310000},{n:'Liliflor', v:1120000},{n:'Lasuerte', v:870000} ] }; }
+
+  function topList(arr, fmt){ var mx=arr.reduce(function(a,b){return Math.max(a,b.v);},1);
+    return '<div class="toplist">'+arr.map(function(r,i){ return '<div class="toprow"><span class="rk">'+(i+1)+'</span><span class="nm">'+esc(r.n)+'</span><span class="bar"><i style="width:'+Math.round(r.v/mx*100)+'%"></i></span><span class="val">'+fmt(r.v)+'</span></div>'; }).join('')+'</div>'; }
+
+  function renderConfirm(){
+    var d=mockConfirm(); var r=d.resumo;
+    var html=previewBadge()+'<div class="modhead">🎯 Confirmação pelo jogo</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat g"><div class="k">Confirmado</div><div class="v">'+r.confirmado+'</div></div>'
+      +'<div class="stat r"><div class="k">Faltando no jogo</div><div class="v">'+r.faltando+'</div></div>'
+      +'<div class="stat a"><div class="k">Presente não escalado</div><div class="v">'+r.extra+'</div></div>'
+      +'<div class="stat p"><div class="k">Divergência</div><div class="v">'+r.divergencia+'</div></div></div>';
+    d.pts.forEach(function(pt){
+      html+='<div class="panel"><h3>'+esc(pt.pt)+'</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Arma escalada</th><th>Status</th><th>Observação</th></tr></thead><tbody>';
+      pt.linhas.forEach(function(l){
+        var lbl={ok:'Confirmado',miss:'Faltando no jogo',extra:'Presente não escalado',div:'Divergência'}[l.st]||l.st;
+        html+='<tr><td><b>'+esc(l.n)+'</b></td><td>'+esc(l.arma)+'</td><td><span class="pill '+l.st+'">'+lbl+'</span></td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+      });
+      html+='</tbody></table></div>';
+    });
+    document.getElementById('view-confirm').innerHTML=html;
+  }
+
+  function renderLoot(){
+    var d=mockLoot(); var r=d.resumo;
+    var html=previewBadge()+'<div class="modhead">📦 Registros &amp; Loot</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
+      +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
+      +'<div class="stat a"><div class="k">Pendente</div><div class="v">'+fmtS(r.pendente)+'</div></div>'
+      +'<div class="stat p"><div class="k">Divergências</div><div class="v">'+r.divergencias+'</div></div></div>'
+      +'<div class="split"><div class="panel"><h3>Top looters</h3>'+topList(d.top,fmtS)+'</div>'
+      +'<div class="panel"><h3>Itens recentes</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Item</th><th>Qtd</th><th>Valor</th><th>Status</th></tr></thead><tbody>'
+      +d.itens.map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+i.st+'">'+i.st+'</span></td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+    document.getElementById('view-loot').innerHTML=html;
+  }
+
+  function renderCombat(){
+    var d=mockCombat(); var r=d.resumo;
+    var html=previewBadge()+'<div class="modhead">⚔️ Combate</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
+      +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
+      +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+r.mortes+'</div></div>'
+      +'<div class="stat b"><div class="k">Fights</div><div class="v">'+r.fights+'</div></div></div>'
+      +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
+      +d.porPt.map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+x.mortes+'</td></tr>'; }).join('')
+      +'</tbody></table></div>'
+      +'<div class="split"><div class="panel"><h3>Top dano</h3>'+topList(d.topDmg,fmtS)+'</div>'
+      +'<div class="panel"><h3>Top cura</h3>'+topList(d.topHeal,fmtS)+'</div></div>';
+    document.getElementById('view-combat').innerHTML=html;
+  }
 
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
