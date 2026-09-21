@@ -19,7 +19,6 @@ const GUILD_ID      = process.env.GUILD_ID || "683411304408416285";
 const REDIRECT      = process.env.OAUTH_REDIRECT || "https://cta-imortais.up.railway.app/auth/callback";
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
-const DEVICE_MANAGER_ROLE_ID = process.env.DEVICE_MANAGER_ROLE_ID || null;
 
 const sessions = new Map(); // sid -> { id, name, canEdit, roles }
 const states = new Map();   // state -> timestamp (CSRF)
@@ -51,7 +50,7 @@ function canManageDevices(roles, userId, name) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
   const isMackna = String(name || "").trim().toLowerCase() === "mackna";
-  const hasWarMasterRole = !!(DEVICE_MANAGER_ROLE_ID && roles.includes(DEVICE_MANAGER_ROLE_ID));
+  const hasWarMasterRole = !!(STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID));
   return !!(isOwner || isMackna || hasWarMasterRole);
 }
 function requireDeviceManager(req, res) {
