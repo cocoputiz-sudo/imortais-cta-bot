@@ -112,7 +112,7 @@ function startWebServer(client, opts) {
   _act = opts || {};
   const app = express();
   app.use(express.json({ limit: "12mb" }));
-  telemetry.installRoutes(app, { db, requireMember });
+  telemetry.installRoutes(app, { db, requireMember, requireEditor });
 
   app.get("/api/events", async (req, res) => {
     if (!requireMember(req, res)) return;
@@ -462,6 +462,7 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="confirm">🎯 Confirmação pelo jogo</div>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
+      <div class="nav" data-view="devices">🖥️ Dispositivos</div>
     <div class="navtitle">EM BREVE</div>
     <div class="nav soon">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
     <div class="nav soon">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
@@ -651,6 +652,7 @@ const PAGE = `<!doctype html>
       if(v==='confirm') renderConfirm();
       if(v==='loot') renderLoot();
       if(v==='combat') renderCombat();
+      if(v==='devices') renderDevices();
     };
   }
 
@@ -781,6 +783,61 @@ const PAGE = `<!doctype html>
       if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
       document.getElementById('view-combat').innerHTML=html;
     }).catch(function(){ document.getElementById('view-combat').innerHTML='<div class="modhead">⚔️ Combate</div><div class="empty-note">Sem dados de combate ou erro ao carregar.</div>'; });
+  }
+
+
+  function renderDevices(){
+    var el=document.getElementById('view-devices');
+    if(!el) return;
+    el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Carregando…</div>';
+    Promise.all([
+      fetch('/auth/me').then(function(r){return r.json();}),
+      fetch('/api/telemetry/agents').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    ]).then(function(all){
+      var me=all[0], agents=all[1]||[];
+      if(!me.canEdit){
+        el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Apenas callers/staff podem gerenciar dispositivos.</div>';
+        return;
+      }
+      var html='<div class="modhead">🖥️ Dispositivos · Combat Client</div>'
+        +'<div class="panel"><h3>Vincular novo PC</h3>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">'
+        +'<label>Nome do dispositivo<input id="pair-label" class="input" placeholder="Ex: BadMack-PC"></label>'
+        +'<label>Personagem (opcional)<input id="pair-player" class="input" placeholder="Ex: BadMack"></label>'
+        +'<button class="btn primary" id="pair-generate">Gerar código</button>'
+        +'</div><div id="pair-result" style="margin-top:14px"></div></div>'
+        +'<div class="panel"><h3>Dispositivos vinculados</h3>'
+        +'<table class="dtable"><thead><tr><th>Dispositivo</th><th>Personagem</th><th>Último contato</th><th>Status</th><th></th></tr></thead><tbody>'
+        +agents.map(function(a){
+          var revoked=!!a.revokedAt;
+          var last=a.lastSeen?new Date(a.lastSeen).toLocaleString('pt-BR'):'—';
+          return '<tr><td><b>'+esc(a.label||a.deviceId||'Sem nome')+'</b><br><span style="color:var(--muted)">'+esc(a.deviceId||'não vinculado')+'</span></td>'
+            +'<td>'+esc(a.playerName||'—')+'</td><td>'+esc(last)+'</td>'
+            +'<td><span class="pill '+(revoked?'miss':'ok')+'">'+(revoked?'Revogado':'Ativo')+'</span></td>'
+            +'<td>'+(revoked?'':'<button class="btn danger agent-revoke" data-id="'+esc(a.id)+'">Revogar</button>')+'</td></tr>';
+        }).join('')
+        +'</tbody></table></div>';
+      el.innerHTML=html;
+
+      var gen=document.getElementById('pair-generate');
+      if(gen) gen.onclick=function(){
+        var body={label:(document.getElementById('pair-label').value||'').trim(),playerName:(document.getElementById('pair-player').value||'').trim()};
+        fetch('/api/telemetry/pairing/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+          .then(function(r){return r.json().then(function(j){if(!r.ok) throw new Error(j.error||'erro');return j;});})
+          .then(function(j){
+            document.getElementById('pair-result').innerHTML='<div class="preview" style="font-size:18px;color:#fff">Código de pareamento: <b style="font-size:28px;letter-spacing:.12em">'+esc(j.code)+'</b><br><span style="font-size:12px;color:var(--muted)">Válido por 10 minutos e uso único.</span></div>';
+          }).catch(function(e){ document.getElementById('pair-result').textContent='Erro: '+e.message; });
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('.agent-revoke'),function(b){
+        b.onclick=function(){
+          if(!confirm('Revogar este dispositivo?')) return;
+          fetch('/api/telemetry/agents/revoke-id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.getAttribute('data-id')})})
+            .then(function(){ renderDevices(); });
+        };
+      });
+    }).catch(function(e){
+      el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Erro ao carregar dispositivos: '+esc(e.message)+'</div>';
+    });
   }
 
   function boot(){
