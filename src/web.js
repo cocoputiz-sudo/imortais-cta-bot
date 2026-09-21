@@ -8,7 +8,7 @@
 // ============================================================================
 const express = require("express");
 const db = require("./db");
-const { PARTIES } = require("./comps");
+const { PARTIES, WEAPONS } = require("./comps");
 const crypto = require("crypto");
 
 // ---- config do login (OAuth2 Discord) ----
@@ -69,7 +69,7 @@ async function buildRosterData(ev) {
       const su = bySlot.get(`${p}:${i}`);
       if (su) {
         filled++;
-        slots.push({ n: i + 1, filled: true, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id });
+        slots.push({ n: i + 1, filled: true, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id, options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
       } else {
         const options = [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon);
         slots.push({ n: i + 1, filled: false, locked: !!slot.locked, options });
@@ -246,6 +246,18 @@ function startWebServer(client, opts) {
     res.json(_act.showPT ? await _act.showPT(event, tipo, sess.id) : { ok: false, error: "indisponível" });
   });
 
+  app.post("/api/setweapon", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const { event, userId, weapon } = req.body || {};
+    const w = String(weapon || "").trim();
+    if (!w || !WEAPONS[w.toUpperCase()]) return res.status(400).json({ error: "weapon" });
+    const ev = await db.getEvent(event).catch(() => null);
+    if (!ev) return res.status(404).json({ error: "event" });
+    await db.pool.query("UPDATE cta_signups SET weapon=$3 WHERE event_id=$1 AND user_id=$2", [ev.id, userId, w.toUpperCase()]);
+    if (_act.applyEdit) await _act.applyEdit(ev.id);
+    res.json({ ok: true });
+  });
+
   app.get("/", (_req, res) => res.type("html").send(PAGE));
 
   const port = process.env.PORT || 3000;
@@ -291,6 +303,8 @@ const PAGE = `<!doctype html>
   .slot.drag, .rz-i.drag { cursor:grab; }
   .slot.drag:active, .rz-i.drag:active { cursor:grabbing; }
   .slot.over { outline:2px solid var(--acc); outline-offset:-2px; background:#241417; }
+  .slot .w.wedit { cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
+  .wsel { background:#12151b; color:var(--txt); border:1px solid var(--acc); border-radius:6px; font-size:12px; padding:1px 4px; max-width:180px; }
   .slot .u { font-weight:600; margin-left:2px; }
   .slot .opts { color:var(--dim); }
   .slot .vazio { color:#5a6270; font-style:italic; margin-left:auto; }
@@ -328,6 +342,17 @@ const PAGE = `<!doctype html>
 <script>
   var current=null, es=null;
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function doSetWeapon(uid, weapon){ if(current) post('/api/setweapon',{event:current,userId:uid,weapon:weapon}); }
+  function openWeaponPicker(wspan, s){
+    if(!s.options || !s.options.length) return;
+    if(wspan.nextSibling && wspan.nextSibling.className==='wsel') return;
+    var sel=document.createElement('select'); sel.className='wsel';
+    s.options.forEach(function(w){ var o=document.createElement('option'); o.value=w; o.textContent=w; if(w===s.weapon)o.selected=true; sel.appendChild(o); });
+    wspan.style.display='none'; wspan.parentNode.insertBefore(sel, wspan.nextSibling); sel.focus();
+    function close(){ if(sel.parentNode) sel.parentNode.removeChild(sel); wspan.style.display=''; }
+    sel.addEventListener('change',function(){ var v=sel.value; close(); if(v!==s.weapon) doSetWeapon(s.userId, v); });
+    sel.addEventListener('blur', close);
+  }
   function doMove(uid, party, slot){
     if(!current) return;
     fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,userId:uid,party:party,slot:slot})})
@@ -359,6 +384,8 @@ const PAGE = `<!doctype html>
           if(s.filled && !s.locked){
             row.classList.add('drag'); row.setAttribute('draggable','true');
             row.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', s.userId); e.dataTransfer.effectAllowed='move'; });
+            var wsp=row.querySelector('.w');
+            if(wsp && s.options && s.options.length){ wsp.classList.add('wedit'); wsp.title='trocar arma'; (function(span,slot){ span.addEventListener('click',function(e){ e.stopPropagation(); openWeaponPicker(span, slot); }); })(wsp, s); }
           }
           if(!s.locked){
             row.addEventListener('dragover',function(e){ e.preventDefault(); row.classList.add('over'); });
