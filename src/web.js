@@ -71,10 +71,10 @@ async function buildRosterData(ev) {
       const su = bySlot.get(`${p}:${i}`);
       if (su) {
         filled++;
-        slots.push({ n: i + 1, filled: true, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id, core: coreSet.has(String(su.user_id)), options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
+        slots.push({ n: i + 1, filled: true, role: slot.role, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id, core: coreSet.has(String(su.user_id)), options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
       } else {
         const options = [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon);
-        slots.push({ n: i + 1, filled: false, locked: !!slot.locked, options });
+        slots.push({ n: i + 1, filled: false, role: slot.role, locked: !!slot.locked, options });
       }
     }
     return { display: idx + 1, name: `Party ${idx + 1}`, filled, total: party.slots.length, slots };
@@ -284,210 +284,224 @@ const PAGE = `<!doctype html>
 <html lang="pt-br">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>IMORTAIS · Sala de Guerra</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>IMORTAIS · War Room</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
     color-scheme:dark;
-    --bg:#12141b; --bg2:#0e1016; --surface:#1a1e27; --raised:#222836; --line:#2b313e; --line2:#39414f;
-    --txt:#e9e5db; --dim:#9aa1af; --faint:#666d7b;
-    --ember:#d63b31; --ember-soft:#f0857e; --ember-glow:rgba(214,59,49,.30);
-    --gold:#c9a24b; --green:#54b981;
+    --bg:#080b10; --panel:#10151d; --panel2:#151c26; --line:#243040; --line2:#33425a;
+    --text:#edf2f7; --muted:#8190a5; --faint:#5a6678;
+    --red:#d93b45; --red2:#a92631; --gold:#d9aa52; --green:#42c77a; --amber:#e2b95e;
+    --tank:#5e87ff; --support:#b576ff; --dps:#ef6672; --range:#e2b95e; --heal:#4bd28a;
     --disp:'Cinzel',Georgia,serif; --sans:'Inter',system-ui,sans-serif;
   }
   *{box-sizing:border-box;}
-  body{ margin:0; font-family:var(--sans); color:var(--txt);
-    background:radial-gradient(1200px 600px at 50% -10%, rgba(214,59,49,.10), transparent 60%), linear-gradient(180deg,var(--bg),var(--bg2));
-    background-attachment:fixed; min-height:100vh; padding-top:env(safe-area-inset-top,0); }
+  body{ margin:0; color:var(--text); font-family:var(--sans); font-size:14px;
+    background:radial-gradient(circle at 50% -20%,#1a2433 0,#0b0f15 34%,var(--bg) 70%); background-attachment:fixed;
+    padding-top:env(safe-area-inset-top,0); }
   a{color:inherit;}
-  header{ display:flex; align-items:center; gap:14px; padding:16px 24px; border-bottom:1px solid var(--line); position:sticky; top:0; background:rgba(18,20,27,.92); backdrop-filter:blur(6px); z-index:10; }
-  .crest{ width:32px; height:36px; flex:0 0 auto; filter:drop-shadow(0 2px 6px var(--ember-glow)); }
-  .brand h1{ font-family:var(--disp); font-weight:900; font-size:21px; letter-spacing:2px; margin:0; line-height:1; }
-  .brand p{ margin:3px 0 0; font-size:10px; letter-spacing:3px; color:var(--gold); font-weight:600; }
-  #auth{ margin-left:auto; display:flex; align-items:center; gap:12px; font-size:13px; color:var(--dim); }
-  #auth a{ color:#8ab4ff; text-decoration:none; }
-  #auth a:hover{ text-decoration:underline; }
-  #live{ font-size:12px; color:var(--green); }
-  .nav{ max-width:1180px; margin:18px auto 0; padding:0 24px; display:flex; gap:20px; border-bottom:1px solid var(--line); }
-  .nv{ background:transparent; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; color:var(--dim); font-family:var(--sans); font-weight:700; font-size:15px; padding:10px 2px; cursor:pointer; }
-  .nv.on{ color:var(--txt); border-bottom-color:var(--ember); }
-  .warroom{ max-width:1180px; margin:20px auto 8px; padding:0 24px; }
-  /* central de comando */
-  .cmd{ background:linear-gradient(180deg,var(--raised),var(--surface)); border:1px solid var(--line2); border-radius:16px; padding:16px 20px; box-shadow:0 18px 50px -24px rgba(0,0,0,.8); }
-  .cmd-top{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  .cmd-title{ font-family:var(--disp); font-weight:700; font-size:13px; letter-spacing:2px; color:var(--gold); }
-  .tabs{ display:flex; gap:8px; flex-wrap:wrap; }
-  .tab{ background:var(--bg); border:1px solid var(--line); color:var(--dim); border-radius:10px; padding:8px 14px; cursor:pointer; font-size:13px; font-weight:600; }
-  .tab.on{ color:#fff; border-color:var(--ember); background:linear-gradient(180deg,rgba(214,59,49,.22),rgba(214,59,49,.06)); }
-  .cmd-actions{ margin-left:auto; display:flex; gap:10px; flex-wrap:wrap; }
-  .btn{ border:0; border-radius:11px; padding:10px 16px; font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; }
-  .btn-primary{ background:linear-gradient(180deg,#e5443a,#b92f26); color:#fff; }
-  .btn-primary:hover{ filter:brightness(1.06); }
-  .btn-gold{ background:transparent; border:1px solid var(--gold); color:var(--gold); }
-  .btn-danger{ background:transparent; border:1px solid #7a2a2a; color:#ff9a9a; }
-  .cmd-sel{ margin-top:14px; padding-top:14px; border-top:1px solid var(--line); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .cmd-sel:empty{ display:none; }
-  .cmd-sel .lbl{ font-size:12px; color:var(--faint); font-weight:600; letter-spacing:1px; }
-  .chip{ background:var(--bg); border:1px solid var(--line); color:var(--txt); border-radius:9px; padding:8px 13px; cursor:pointer; font-size:13px; font-weight:600; }
-  .chip:hover{ border-color:var(--ember); }
+  header{ height:64px; padding:0 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--line); background:rgba(8,11,16,.92); position:sticky; top:0; z-index:20; backdrop-filter:blur(10px); }
+  .crest{ width:34px; height:36px; flex:0 0 auto; filter:drop-shadow(0 2px 6px rgba(217,59,69,.3)); }
+  .brand h1{ font-family:var(--disp); font-weight:900; font-size:19px; letter-spacing:2px; margin:0; line-height:1; }
+  .brand small{ display:block; margin-top:3px; font-size:10px; letter-spacing:3px; color:var(--gold); font-weight:700; }
+  #live{ margin-left:22px; color:var(--green); font-size:12px; }
+  #auth{ margin-left:auto; display:flex; align-items:center; gap:12px; font-size:13px; color:var(--muted); }
+  #auth a{ color:#7fb0ff; text-decoration:none; } #auth a:hover{ text-decoration:underline; }
+  .shell{ display:grid; grid-template-columns:224px 1fr; min-height:calc(100vh - 64px); }
+  aside{ border-right:1px solid var(--line); padding:16px 12px; background:#0b0f15; }
+  .navtitle{ font-size:10px; color:#5a6678; font-weight:800; letter-spacing:.14em; margin:14px 10px 6px; }
+  .nav{ display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:9px; color:#a9b5c5; margin:3px 0; cursor:pointer; font-weight:600; font-size:13.5px; border-left:3px solid transparent; }
+  .nav:hover{ background:#141a22; }
+  .nav.on{ background:#1a202a; color:#fff; border-left-color:var(--red); }
+  .nav.soon{ color:#4f5a6b; cursor:default; } .nav.soon:hover{ background:transparent; }
+  .nav.soon .tagsoon{ margin-left:auto; font-size:9px; letter-spacing:.1em; color:#455063; border:1px solid #2a3546; border-radius:5px; padding:2px 5px; }
+  main{ padding:20px 24px 40px; min-width:0; }
+  /* topline */
+  .topline{ display:flex; align-items:center; gap:9px; margin-bottom:14px; flex-wrap:wrap; }
+  .tab{ border:1px solid var(--line); background:var(--panel); color:#c9d2df; border-radius:9px; padding:8px 13px; cursor:pointer; font-weight:600; font-size:13px; }
+  .tab.on{ border-color:#87343d; background:#271317; color:#fff; }
+  .spacer{ flex:1; }
+  .btn{ border:0; border-radius:9px; padding:9px 14px; font-family:var(--sans); font-weight:800; font-size:13px; cursor:pointer; }
+  .primary{ background:linear-gradient(180deg,var(--red),var(--red2)); color:#fff; }
+  .primary:hover{ filter:brightness(1.07); }
+  .ghost{ border:1px solid var(--line); background:#111720; color:#c9d2df; font-weight:600; }
+  .ghost:hover{ border-color:var(--red); }
+  .gold{ border:1px solid var(--gold); background:transparent; color:var(--gold); font-weight:700; }
+  .danger{ border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; font-weight:700; }
+  /* hero */
+  .hero{ display:grid; grid-template-columns:1.3fr .7fr; gap:12px; margin-bottom:14px; }
+  .card{ background:linear-gradient(180deg,#121923,#0e131b); border:1px solid var(--line); border-radius:13px; padding:15px 17px; }
+  .status h2{ margin:0 0 6px; font-size:17px; font-family:var(--disp); font-weight:700; letter-spacing:1px; }
+  .status p{ margin:0; color:var(--muted); }
+  .badges{ display:flex; gap:7px; margin-top:12px; flex-wrap:wrap; }
+  .badge{ font-size:11px; padding:5px 9px; border-radius:999px; background:#18202b; color:#aeb9c7; }
+  .badge.ok{ color:#8ce5ad; background:#10241a; }
+  .actions h3{ margin:0 0 10px; font-size:10px; color:var(--muted); letter-spacing:.12em; font-weight:800; }
+  .actionrow{ display:flex; flex-wrap:wrap; gap:7px; }
+  .actionrow:empty::before{ content:'Somente leitura'; color:var(--faint); font-size:12px; }
+  /* legend */
+  .legend{ display:flex; gap:14px; margin:2px 2px 12px; color:var(--muted); font-size:11px; flex-wrap:wrap; }
+  .legend i{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; vertical-align:middle; }
   /* board */
-  .board-wrap{ max-width:1180px; margin:14px auto 40px; padding:0 24px; }
-  .board{ display:flex; gap:16px; overflow-x:auto; padding-bottom:6px; align-items:flex-start; }
-  .pt{ min-width:560px; flex:0 0 auto; background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
-  .pt-h{ display:flex; align-items:baseline; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line); }
-  .pt-h .name{ font-family:var(--disp); font-weight:700; font-size:15px; letter-spacing:1px; }
-  .pt-h .count{ margin-left:auto; font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums; }
-  .pt-body{ display:flex; }
-  .col{ flex:1 1 0; min-width:0; }
-  .col + .col{ border-left:1px solid var(--line); }
-  .slot{ display:flex; align-items:center; gap:9px; padding:7px 14px; border-bottom:1px solid #1d222c; font-size:13.5px; }
+  .board{ display:grid; grid-template-columns:repeat(2,minmax(500px,1fr)); gap:12px; }
+  .party{ background:var(--panel); border:1px solid var(--line); border-radius:13px; overflow:hidden; }
+  .ph{ height:44px; padding:0 14px; display:flex; align-items:center; gap:8px; background:#0d1219; border-bottom:1px solid var(--line); }
+  .ph .name{ font-family:var(--disp); font-weight:700; font-size:14px; letter-spacing:1px; }
+  .ph .ct{ color:var(--muted); font-weight:600; font-size:12px; }
+  .meter{ margin-left:auto; width:84px; height:5px; background:#222a35; border-radius:10px; overflow:hidden; }
+  .meter i{ display:block; height:100%; background:var(--green); }
+  .slots{ display:grid; grid-template-columns:1fr 1fr; }
+  .col+.col{ border-left:1px solid var(--line); }
+  .slot{ min-height:40px; display:grid; grid-template-columns:24px 8px minmax(96px,1fr) 1fr auto; align-items:center; gap:7px; padding:5px 11px; border-bottom:1px solid #1a222e; }
   .slot:last-child{ border-bottom:0; }
-  .slot .n{ color:var(--faint); width:20px; font-variant-numeric:tabular-nums; font-size:12px; }
-  .slot.filled{ background:linear-gradient(90deg,rgba(84,185,129,.06),transparent 40%); }
-  .slot .w{ color:#bfc6d1; }
-  .slot .w.wedit{ cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
-  .slot .sep{ width:1px; align-self:stretch; background:var(--line2); margin:0 8px; }
-  .slot .u{ font-weight:600; }
-  .slot .opts{ color:var(--faint); }
-  .slot .empty{ color:#4d5563; font-style:italic; margin-left:auto; }
-  .slot .tail{ margin-left:auto; display:inline-flex; align-items:center; gap:7px; }
+  .slot:hover{ background:#141c26; }
+  .num{ color:#59687b; font-variant-numeric:tabular-nums; font-size:12px; }
+  .role{ width:7px; height:22px; border-radius:4px; background:#39445a; }
+  .role-tank{ background:var(--tank);} .role-support{ background:var(--support);} .role-dps{ background:var(--dps);} .role-range{ background:var(--range);} .role-heal{ background:var(--heal);}
+  .weapon{ font-size:12px; color:#aab5c4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .weapon.wedit{ cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
+  .player{ font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .slot.empty .player{ color:#4d5968; font-weight:500; font-style:italic; }
+  .slot.empty .weapon{ color:#5a6678; }
+  .tail{ display:inline-flex; align-items:center; gap:6px; justify-self:end; }
   .core{ color:var(--gold); }
+  .lock{ color:#5a6678; font-size:11px; }
   .pres{ width:8px; height:8px; border-radius:50%; }
-  .pres.on{ background:var(--green); box-shadow:0 0 6px rgba(84,185,129,.6); }
-  .pres.wait{ background:var(--gold); }
-  .lock{ color:var(--faint); font-size:12px; }
+  .pres.on{ background:var(--green); box-shadow:0 0 6px rgba(66,199,122,.6);} .pres.wait{ background:var(--amber); }
   .slot.drag{ cursor:grab; } .slot.drag:active{ cursor:grabbing; }
-  .slot.over{ outline:2px solid var(--ember); outline-offset:-2px; background:#241417; }
-  .wsel{ background:var(--bg); color:var(--txt); border:1px solid var(--ember); border-radius:6px; font-size:12px; padding:1px 4px; max-width:180px; }
-  .reserve{ min-width:300px; flex:0 0 auto; background:var(--surface); border:1px dashed var(--line2); border-radius:14px; padding:12px 16px; }
-  .reserve h3{ font-family:var(--disp); font-weight:700; font-size:13px; letter-spacing:1px; color:var(--gold); margin:0 0 8px; }
-  .reserve .rz-i{ padding:5px 0; color:#bfc6d1; font-size:13.5px; }
-  .reserve .rz-i.drag{ cursor:grab; }
-  /* mural / notícias */
-  .mural{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:18px 22px; box-shadow:0 14px 40px -26px #000; margin-bottom:14px; }
+  .slot.over{ outline:2px solid var(--red); outline-offset:-2px; background:#241417; }
+  .wsel{ background:var(--bg); color:var(--text); border:1px solid var(--red); border-radius:6px; font-size:12px; padding:1px 3px; grid-column:3; }
+  /* reserve */
+  .reserve{ margin-top:14px; background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:13px 15px; }
+  .reservehead{ font-family:var(--disp); font-weight:700; font-size:13px; letter-spacing:1px; }
+  .reservehead span{ color:var(--muted); margin-left:8px; font-family:var(--sans); font-weight:500; }
+  .chips{ display:flex; flex-wrap:wrap; gap:7px; margin-top:11px; }
+  .chip{ border:1px solid var(--line); background:#141b24; border-radius:8px; padding:7px 10px; color:#c5cfdb; font-size:13px; }
+  .chip b{ color:#fff; } .chip.drag{ cursor:grab; }
+  /* mural */
+  .mural{ background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:18px 22px; margin-bottom:14px; }
   .mural-h{ display:flex; align-items:baseline; gap:12px; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--line); }
-  .mural-title{ font-family:var(--disp); font-weight:700; font-size:14px; letter-spacing:1px; color:var(--gold); }
+  .mural-title{ font-family:var(--disp); font-weight:700; font-size:13px; letter-spacing:1px; color:var(--gold); }
   .mural-meta{ margin-left:auto; font-size:12px; color:var(--faint); }
-  .news-body h2{ font-family:var(--disp); font-weight:700; font-size:19px; margin:2px 0 8px; color:var(--gold); }
+  .news-body h2{ font-family:var(--disp); font-weight:700; font-size:18px; margin:2px 0 8px; color:var(--gold); }
   .news-body h3{ font-family:var(--disp); font-weight:700; font-size:15px; margin:14px 0 6px; }
   .news-body h4{ font-size:14px; margin:10px 0 4px; }
-  .news-body p{ margin:6px 0; color:#d3d7de; font-size:14px; line-height:1.55; max-width:74ch; }
-  .news-body blockquote{ margin:6px 0; padding:6px 0 6px 14px; border-left:3px solid var(--line2); color:var(--dim); font-size:13.5px; }
-  .news-body strong{ color:var(--txt); }
-  .enter{ text-align:center; margin-top:18px; }
-  .enter .btn{ font-size:15px; padding:14px 24px; }
-  .empty-note{ color:var(--faint); text-align:center; padding:30px; }
-  /* gate */
-  .gate{ padding:60px 18px; color:var(--dim); text-align:center; font-size:15px; line-height:1.7; }
-  .gate-btn{ display:inline-block; margin-top:10px; background:var(--surface); border:1px solid var(--line2); color:#8ab4ff; padding:10px 20px; border-radius:10px; text-decoration:none; }
+  .news-body p{ margin:6px 0; color:#d3d7de; line-height:1.55; max-width:76ch; }
+  .news-body blockquote{ margin:6px 0; padding:5px 0 5px 14px; border-left:3px solid var(--line2); color:var(--muted); font-size:13.5px; }
+  .news-body strong{ color:var(--text); }
+  .empty-note{ color:var(--faint); text-align:center; padding:34px; }
+  .gate{ padding:70px 18px; color:var(--muted); text-align:center; font-size:15px; line-height:1.7; }
+  .gate-btn{ display:inline-block; margin-top:10px; background:var(--panel); border:1px solid var(--line2); color:#7fb0ff; padding:10px 20px; border-radius:10px; text-decoration:none; }
   /* modais */
-  .modal{ display:none; position:fixed; inset:0; z-index:30; background:rgba(6,7,10,.72); backdrop-filter:blur(3px); align-items:center; justify-content:center; padding:18px; }
+  .modal{ display:none; position:fixed; inset:0; z-index:40; background:rgba(4,6,9,.74); backdrop-filter:blur(3px); align-items:center; justify-content:center; padding:18px; }
   .modal.open{ display:flex; }
-  .sheet{ background:linear-gradient(180deg,var(--raised),var(--surface)); border:1px solid var(--line2); border-radius:18px; width:100%; max-width:520px; padding:22px 24px; position:relative; box-shadow:0 30px 80px -30px #000; }
+  .sheet{ background:linear-gradient(180deg,var(--panel2),var(--panel)); border:1px solid var(--line2); border-radius:16px; width:100%; max-width:520px; padding:22px 24px; position:relative; box-shadow:0 30px 80px -30px #000; }
   .sheet h2{ font-family:var(--disp); font-weight:700; font-size:18px; letter-spacing:1px; margin:0 0 4px; }
-  .sheet .sub{ color:var(--dim); font-size:13px; margin:0 0 18px; }
-  .x{ position:absolute; top:14px; right:16px; background:none; border:0; color:var(--dim); font-size:20px; cursor:pointer; }
+  .sheet .sub{ color:var(--muted); font-size:13px; margin:0 0 18px; }
+  .x{ position:absolute; top:14px; right:16px; background:none; border:0; color:var(--muted); font-size:20px; cursor:pointer; }
   .timegrid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
-  .time{ background:var(--bg); border:1px solid var(--line); color:var(--txt); border-radius:11px; padding:14px 0; font-size:15px; font-weight:700; cursor:pointer; text-align:center; }
-  .time:hover{ border-color:var(--ember); }
-  .time.on{ border-color:var(--ember); background:linear-gradient(180deg,rgba(214,59,49,.25),rgba(214,59,49,.05)); color:#fff; }
-  .drop{ display:block; border:1.5px dashed var(--line2); border-radius:12px; padding:20px; text-align:center; color:var(--dim); font-size:13px; cursor:pointer; margin-bottom:18px; }
-  .drop:hover{ border-color:var(--ember); color:var(--txt); }
-  .drop .ic{ font-size:24px; display:block; margin-bottom:6px; }
-  .drop small{ color:var(--faint); }
-  .drop img{ max-height:120px; border-radius:8px; margin-top:6px; }
-  .field input{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--txt); border-radius:11px; padding:12px 14px; font-size:15px; font-family:var(--sans); margin-bottom:14px; }
+  .time{ background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:11px; padding:14px 0; font-size:15px; font-weight:800; cursor:pointer; text-align:center; }
+  .time:hover{ border-color:var(--red); }
+  .time.on{ border-color:var(--red); background:#271317; color:#fff; }
+  .drop{ display:block; border:1.5px dashed var(--line2); border-radius:12px; padding:18px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; margin-bottom:18px; }
+  .drop:hover{ border-color:var(--red); color:var(--text); }
+  .drop .ic{ font-size:24px; display:block; margin-bottom:6px; } .drop small{ color:var(--faint); } .drop img{ max-height:110px; border-radius:8px; margin-top:6px; }
+  .field input{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:11px; padding:12px 14px; font-size:15px; font-family:var(--sans); margin-bottom:14px; }
   .note{ font-size:12px; color:var(--faint); margin:-4px 0 16px; }
-  .sheet .go{ width:100%; justify-content:center; padding:13px; font-size:15px; }
+  .sheet .go{ width:100%; padding:13px; font-size:15px; }
   .big{ font-family:var(--disp); font-size:42px; font-weight:900; line-height:1; margin:6px 0 4px; }
-  .big small{ font-family:var(--sans); font-size:15px; color:var(--dim); font-weight:400; }
+  .big small{ font-family:var(--sans); font-size:15px; color:var(--muted); font-weight:400; }
   .srow{ padding:6px 0; color:#c7cdd6; font-size:14px; border-top:1px solid var(--line); }
   .srow:first-of-type{ border-top:0; }
-  @media (max-width:620px){ .pt,.reserve{ min-width:88vw; } .timegrid{ grid-template-columns:repeat(2,1fr);} }
+  @media(max-width:1050px){ .shell{ grid-template-columns:1fr;} aside{ display:none;} .board{ grid-template-columns:1fr;} .hero{ grid-template-columns:1fr;} }
 </style>
 </head>
 <body>
 <header>
-  <svg class="crest" viewBox="0 0 34 38" fill="none"><path d="M17 1 33 6v13c0 9-7 15-16 18C8 34 1 28 1 19V6L17 1Z" fill="#1a1e27" stroke="#d63b31" stroke-width="1.5"/><path d="M17 8v22M9 14h16" stroke="#c9a24b" stroke-width="1.6" stroke-linecap="round"/></svg>
-  <div class="brand"><h1>IMORTAIS</h1><p>SALA DE GUERRA</p></div>
-  <span id="auth"></span>
+  <svg class="crest" viewBox="0 0 34 38" fill="none"><path d="M17 1 33 6v13c0 9-7 15-16 18C8 34 1 28 1 19V6L17 1Z" fill="#12161e" stroke="#d93b45" stroke-width="1.5"/><path d="M17 8v22M9 14h16" stroke="#d9aa52" stroke-width="1.6" stroke-linecap="round"/></svg>
+  <div class="brand"><h1>IMORTAIS</h1><small>CTA WAR ROOM</small></div>
   <span id="live">conectando…</span>
+  <span id="auth"></span>
 </header>
+<div class="shell">
+  <aside id="side">
+    <div class="navtitle">OPERAÇÃO</div>
+    <div class="nav on" data-view="board">⚔ Formação ao vivo</div>
+    <div class="nav" data-view="mural">📣 Mural da guilda</div>
+    <div class="nav" id="nav-stats">📊 Meu desempenho</div>
+    <div class="navtitle">EM BREVE</div>
+    <div class="nav soon">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon">🧭 Roaming <span class="tagsoon">EM BREVE</span></div>
+  </aside>
+  <main id="main">
+    <div id="gate"></div>
 
-<div class="nav" id="nav" style="display:none">
-  <button class="nv on" data-view="mural">📣 Mural</button>
-  <button class="nv" data-view="board">🗺️ Planilha ao vivo</button>
-</div>
-
-<div id="gate"></div>
-
-<div id="view-mural" class="view" style="display:none">
-  <div class="warroom">
-    <div id="news"></div>
-    <div class="enter"><button class="btn btn-primary" onclick="show('board')">🗺️ Entrar na Sala de Guerra · ver planilha ao vivo</button></div>
-  </div>
-</div>
-
-<div id="view-board" class="view" style="display:none">
-  <div class="warroom">
-    <div class="cmd">
-      <div class="cmd-top">
-        <span class="cmd-title">CTAs</span>
-        <div class="tabs" id="ctas"></div>
-        <div class="cmd-actions" id="cmd-actions"></div>
+    <div id="view-board">
+      <div class="topline">
+        <div class="tabs" id="ctas" style="display:flex;gap:9px;flex-wrap:wrap"></div>
+        <div class="spacer"></div>
+        <div id="cmd-actions" style="display:flex;gap:9px;flex-wrap:wrap"></div>
       </div>
-      <div class="cmd-sel" id="cmd-sel"></div>
+      <div class="hero">
+        <div class="card status" id="status"><h2>Sem CTA selecionado</h2><p>Abra ou selecione um CTA.</p></div>
+        <div class="card actions"><h3>COMANDO RÁPIDO</h3><div class="actionrow" id="cmd-sel"></div></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--tank)"></i>Tank</span>
+        <span><i style="background:var(--support)"></i>Suporte</span>
+        <span><i style="background:var(--dps)"></i>DPS melee</span>
+        <span><i style="background:var(--range)"></i>Ranged</span>
+        <span><i style="background:var(--heal)"></i>Healer</span>
+        <span>⭐ Core</span><span>🔒 Manual</span>
+      </div>
+      <div class="board" id="board"></div>
+      <div id="reserves"></div>
     </div>
-  </div>
-  <div class="board-wrap"><div class="board" id="board"></div><div id="reserves" style="max-width:1180px;margin:0 auto;padding:0 24px 30px"></div></div>
+
+    <div id="view-mural" style="display:none"><div id="news"></div></div>
+  </main>
 </div>
 
-<!-- modal abrir CTA -->
 <div class="modal" id="m-open"><div class="sheet"><button class="x" onclick="mclose('m-open')">✕</button>
-  <h2>Abrir CTA</h2><p class="sub">Escolha o horário e, se quiser, uma arte pra ilustrar o chamado.</p>
+  <h2>Abrir CTA</h2><p class="sub">Escolha o horário e, se quiser, uma arte pro chamado.</p>
   <div class="timegrid" id="open-times"></div>
-  <label class="drop" id="open-drop"><span class="ic">🖼️</span><span id="drop-txt">Clique pra escolher a arte do CTA</span><br><small>opcional · PNG ou JPG</small><input type="file" id="open-file" accept="image/*" style="display:none"></label>
-  <button class="btn btn-primary go" id="open-go">Abrir CTA</button>
+  <label class="drop"><span class="ic">🖼️</span><span id="drop-txt">Clique pra escolher a arte do CTA</span><br><small>opcional · PNG ou JPG</small><input type="file" id="open-file" accept="image/*" style="display:none"></label>
+  <button class="btn primary go" id="open-go">Abrir CTA</button>
 </div></div>
-
-<!-- modal flashmass -->
 <div class="modal" id="m-flash"><div class="sheet"><button class="x" onclick="mclose('m-flash')">✕</button>
   <h2>⚡ Flashmass</h2><p class="sub">Massa relâmpago com ping do @imortal.</p>
   <div class="field"><input id="flash-time" placeholder="21:20"></div>
   <p class="note">Usa a arte padrão do flashmass — não precisa subir imagem.</p>
-  <button class="btn btn-gold go" id="flash-go">⚡ Disparar flashmass</button>
+  <button class="btn gold go" id="flash-go">⚡ Disparar flashmass</button>
 </div></div>
-
-<!-- modal meu desempenho -->
 <div class="modal" id="m-stats"><div class="sheet"><button class="x" onclick="mclose('m-stats')">✕</button><div id="stats-body"></div></div></div>
 
 <script>
   var authState={logged:false,member:false,canEdit:false,name:''};
   var current=null, es=null, selTime=null, selImg=null;
+  var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
-  function flash(msg,color){ var l=document.getElementById('live'); l.textContent=msg; l.style.color=color||'var(--dim)'; }
+  function flash(m,c){ var l=document.getElementById('live'); l.textContent=m; l.style.color=c||'var(--muted)'; }
   function mopen(id){ document.getElementById(id).classList.add('open'); }
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    document.getElementById('view-mural').style.display = v==='mural'?'':'none';
     document.getElementById('view-board').style.display = v==='board'?'':'none';
-    Array.prototype.forEach.call(document.querySelectorAll('.nv'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
-    window.scrollTo(0,0);
+    document.getElementById('view-mural').style.display = v==='mural'?'':'none';
+    Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
   }
 
   function renderAuthHeader(){
     var el=document.getElementById('auth');
     if(authState.logged){
-      var tag = authState.canEdit ? '✏️ edição liberada' : (authState.member ? '👁️ leitura' : '⛔ fora do servidor');
-      el.innerHTML='<span>'+tag+' · '+esc(authState.name)+'</span> '+(authState.member?'<a href="#" id="mystats">📊 meu desempenho</a>':'')+' <a href="/auth/logout">sair</a>';
-      var ms=document.getElementById('mystats'); if(ms) ms.onclick=function(e){ e.preventDefault(); openStats(); };
+      var tag = authState.canEdit ? 'CALLER' : (authState.member ? 'MEMBRO' : 'FORA');
+      el.innerHTML='<span>'+tag+' · <b style="color:var(--text)">'+esc(authState.name)+'</b></span> <a href="/auth/logout">sair</a>';
     } else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
   }
-
   function openStats(){
     var b=document.getElementById('stats-body'); b.innerHTML='carregando…'; mopen('m-stats');
     fetch('/api/me/stats').then(function(r){return r.json();}).then(function(s){
@@ -505,7 +519,7 @@ const PAGE = `<!doctype html>
   function loadNews(){
     fetch('/api/news').then(function(r){return r.json();}).then(function(list){
       var box=document.getElementById('news');
-      if(!list || !list.length){ box.innerHTML='<div class="mural"><div class="empty-note">📭 Nenhuma notícia por enquanto.</div></div>'; return; }
+      if(!list||!list.length){ box.innerHTML='<div class="mural"><div class="empty-note">📭 Nenhuma notícia por enquanto.</div></div>'; return; }
       box.innerHTML=list.map(function(n){
         var when=new Date(n.time).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
         return '<div class="mural"><div class="mural-h"><span class="mural-title">📣 Mural da guilda</span><span class="mural-meta">'+esc(n.author)+' · '+when+'</span></div><div class="news-body">'+n.html+'</div></div>';
@@ -516,9 +530,9 @@ const PAGE = `<!doctype html>
   function post(url,body){
     fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
       .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){
-        if(!r.ok || j.ok===false){ flash('● '+(j.error||'não foi possível'),'var(--ember)'); }
+        if(!r.ok||j.ok===false){ flash('● '+(j.error||'não foi possível'),'var(--red)'); }
         else { flash('● feito','var(--green)'); setTimeout(function(){ loadEvents(); },700); }
-      }); }).catch(function(){ flash('● erro','var(--ember)'); });
+      }); }).catch(function(){ flash('● erro','var(--red)'); });
   }
   function doMove(uid,party,slot){ if(current) post('/api/move',{event:current,userId:uid,party:party,slot:slot}); }
   function doSetWeapon(uid,weapon){ if(current) post('/api/setweapon',{event:current,userId:uid,weapon:weapon}); }
@@ -534,29 +548,38 @@ const PAGE = `<!doctype html>
   }
 
   function render(data){
+    // status
+    var alloc=0, total=0; (data.parties||[]).forEach(function(pt){ pt.slots.forEach(function(s){ if(s.filled) alloc++; }); });
+    var wait=(data.reserves||[]).length; total=alloc+wait;
+    var st=document.getElementById('status');
+    st.innerHTML='<h2>CTA '+esc((data.event&&data.event.time)||'')+' UTC · Formação</h2>'
+      +'<p>'+total+' inscritos · '+alloc+' alocados · '+wait+' aguardando PT</p>'
+      +'<div class="badges"><span class="badge ok">● '+(data.parties||[]).length+' PTs ativas</span><span class="badge">atualizado agora</span></div>';
+    // board
     var board=document.getElementById('board'); board.innerHTML='';
     (data.parties||[]).forEach(function(pt){
-      var col=document.createElement('div'); col.className='pt';
-      var h=document.createElement('div'); h.className='pt-h'; h.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="count">'+pt.filled+' / '+pt.total+'</span>'; col.appendChild(h);
-      var body=document.createElement('div'); body.className='pt-body';
-      var left=document.createElement('div'); left.className='col';
-      var right=document.createElement('div'); right.className='col';
+      var sec=document.createElement('section'); sec.className='party';
+      var pct=pt.total?Math.round(pt.filled/pt.total*100):0;
+      var ph=document.createElement('div'); ph.className='ph'; ph.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="ct">'+pt.filled+'/'+pt.total+'</span><div class="meter"><i style="width:'+pct+'%"></i></div>'; sec.appendChild(ph);
+      var slots=document.createElement('div'); slots.className='slots';
+      var left=document.createElement('div'); left.className='col'; var right=document.createElement('div'); right.className='col';
       var half=Math.ceil(pt.slots.length/2);
       pt.slots.forEach(function(s,idx){
-        var row=document.createElement('div'); row.className='slot'+(s.filled?' filled':'');
+        var row=document.createElement('div'); row.className='slot'+(s.filled?'':' empty');
         var n=('0'+s.n).slice(-2);
+        var rc=ROLE[s.role]||'';
         if(s.filled){
           var dot=s.presence==='online'?'pres on':'pres wait';
-          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="sep"></span><span class="u">'+esc(s.username)+'</span><span class="tail">'+(s.core?'<span class="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="'+dot+'"></span></span>';
+          row.innerHTML='<span class="num">'+n+'</span><i class="role role-'+rc+'"></i><span class="weapon">'+esc(s.weapon)+'</span><span class="player">'+esc(s.username)+'</span><span class="tail">'+(s.core?'<span class="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="'+dot+'"></span></span>';
         } else {
-          var opts=s.locked?'👑 CALLER':((s.options||[]).slice(0,3).join(' / ')+(((s.options||[]).length>3)?'…':''));
-          row.innerHTML='<span class="n">'+n+'</span><span class="opts">'+esc(opts)+'</span><span class="empty">vazio</span>';
+          var opts=s.locked?'👑 CALLER':((s.options||[]).slice(0,2).join(' / ')+(((s.options||[]).length>2)?'…':''));
+          row.innerHTML='<span class="num">'+n+'</span><i class="role role-'+rc+'" style="opacity:.4"></i><span class="weapon">'+esc(opts)+'</span><span class="player">vazio</span><span class="tail"></span>';
         }
         if(authState.canEdit){
           if(s.filled && !s.locked){
             row.classList.add('drag'); row.setAttribute('draggable','true');
             row.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',s.userId); e.dataTransfer.effectAllowed='move'; });
-            var wsp=row.querySelector('.w');
+            var wsp=row.querySelector('.weapon');
             if(wsp && s.options && s.options.length){ wsp.classList.add('wedit'); wsp.title='trocar arma'; (function(span,slot){ span.addEventListener('click',function(e){ e.stopPropagation(); openWeaponPicker(span,slot); }); })(wsp,s); }
           }
           if(!s.locked){
@@ -567,32 +590,34 @@ const PAGE = `<!doctype html>
         }
         (idx<half?left:right).appendChild(row);
       });
-      body.appendChild(left); body.appendChild(right); col.appendChild(body); board.appendChild(col);
+      slots.appendChild(left); slots.appendChild(right); sec.appendChild(slots); board.appendChild(sec);
     });
+    // reserva
     var rz=document.getElementById('reserves'); rz.innerHTML='';
     if(data.reserves && data.reserves.length){
       var wrap=document.createElement('div'); wrap.className='reserve';
-      var t=document.createElement('h3'); t.textContent='⏳ AGUARDANDO PT ('+data.reserves.length+')'; wrap.appendChild(t);
-      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.innerHTML=esc(r.username)+' — '+esc(r.weapon)+(r.core?' <span class="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',r.userId); e.dataTransfer.effectAllowed='move'; }); } wrap.appendChild(d); });
-      rz.appendChild(wrap);
+      wrap.innerHTML='<div class="reservehead">AGUARDANDO PT <span>'+data.reserves.length+' jogadores</span></div>';
+      var chips=document.createElement('div'); chips.className='chips';
+      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='chip'; d.innerHTML='<b>'+esc(r.username)+'</b> · '+esc(r.weapon)+(r.core?' <span class="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',r.userId); e.dataTransfer.effectAllowed='move'; }); } chips.appendChild(d); });
+      wrap.appendChild(chips); rz.appendChild(wrap);
     }
   }
 
   function connect(id){
     current=id; if(es) es.close();
     es=new EventSource('/api/stream?event='+encodeURIComponent(id));
-    es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); flash('● ao vivo','var(--green)'); }catch(e){} };
+    es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); flash('● ao vivo · sincronizado com Discord','var(--green)'); }catch(e){} };
     es.onerror=function(){ flash('● reconectando…','var(--gold)'); };
   }
 
   function renderCaller(){
     var acts=document.getElementById('cmd-actions'), sel=document.getElementById('cmd-sel');
     if(!authState.canEdit){ acts.innerHTML=''; sel.innerHTML=''; return; }
-    acts.innerHTML='<button class="btn btn-primary" id="c-open">+ Abrir CTA</button><button class="btn btn-gold" id="c-flash">⚡ Flashmass</button>';
+    acts.innerHTML='<button class="btn ghost" id="c-flash">⚡ Flashmass</button><button class="btn primary" id="c-open">+ Abrir CTA</button>';
     document.getElementById('c-open').onclick=openOpenModal;
     document.getElementById('c-flash').onclick=function(){ mopen('m-flash'); };
     if(current){
-      sel.innerHTML='<span class="lbl">CTA selecionado —</span><button class="chip" data-show="flex">+ PT Flex</button><button class="chip" data-show="press">+ Press</button><button class="chip" data-show="pt6teste">+ pt6teste</button><button class="btn btn-danger" id="c-finish" style="margin-left:auto">🏁 Finalizar CTA</button>';
+      sel.innerHTML='<button class="btn ghost" data-show="flex">+ PT Flex</button><button class="btn ghost" data-show="press">+ Press</button><button class="btn ghost" data-show="pt6teste">+ pt6teste</button><button class="btn danger" id="c-finish">🏁 Finalizar CTA</button>';
       Array.prototype.forEach.call(sel.querySelectorAll('[data-show]'),function(b){ b.onclick=function(){ if(current) post('/api/cta/show',{event:current,tipo:b.getAttribute('data-show')}); }; });
       document.getElementById('c-finish').onclick=function(){ if(current && confirm('Finalizar este CTA?')) post('/api/cta/finish',{event:current}); };
     } else { sel.innerHTML=''; }
@@ -606,28 +631,22 @@ const PAGE = `<!doctype html>
       var openT={}; (c.open||[]).forEach(function(e){ openT[e.time]=true; });
       var avail=(c.presetTimes||[]).filter(function(t){ return !openT[t]; });
       var grid=document.getElementById('open-times');
-      grid.innerHTML = avail.length? avail.map(function(t){ return '<button class="time" data-t="'+t+'">'+t+'</button>'; }).join('') : '<span style="color:var(--dim)">Todos os horários já estão abertos.</span>';
+      grid.innerHTML = avail.length? avail.map(function(t){ return '<button class="time" data-t="'+t+'">'+t+'</button>'; }).join('') : '<span style="color:var(--muted)">Todos os horários já estão abertos.</span>';
       Array.prototype.forEach.call(grid.querySelectorAll('.time'),function(b){ b.onclick=function(){ grid.querySelectorAll('.time').forEach(function(x){x.classList.remove('on');}); b.classList.add('on'); selTime=b.getAttribute('data-t'); document.getElementById('open-go').textContent='Abrir CTA às '+selTime; }; });
       mopen('m-open');
     });
   }
-
   document.getElementById('open-file').addEventListener('change',function(e){
     var f=e.target.files[0]; if(!f) return;
     var rd=new FileReader(); rd.onload=function(){ selImg=rd.result; document.getElementById('drop-txt').innerHTML='✅ '+esc(f.name)+'<br><img src="'+selImg+'">'; }; rd.readAsDataURL(f);
   });
-  document.getElementById('open-go').onclick=function(){
-    if(!selTime){ flash('● escolha um horário','var(--ember)'); return; }
-    mclose('m-open'); post('/api/cta/open',{time:selTime,image:selImg||null});
-  };
-  document.getElementById('flash-go').onclick=function(){
-    var t=(document.getElementById('flash-time').value||'').trim(); if(!t) return; mclose('m-flash'); post('/api/cta/flashmass',{time:t});
-  };
+  document.getElementById('open-go').onclick=function(){ if(!selTime){ flash('● escolha um horário','var(--red)'); return; } mclose('m-open'); post('/api/cta/open',{time:selTime,image:selImg||null}); };
+  document.getElementById('flash-go').onclick=function(){ var t=(document.getElementById('flash-time').value||'').trim(); if(!t) return; mclose('m-flash'); post('/api/cta/flashmass',{time:t}); };
 
   function loadEvents(){
     fetch('/api/events').then(function(r){return r.json();}).then(function(list){
       var bar=document.getElementById('ctas'); bar.innerHTML='';
-      if(!list.length){ bar.innerHTML='<span style="color:var(--dim)">Nenhum CTA aberto.</span>'; document.getElementById('board').innerHTML='<div class="empty-note">Nenhum CTA aberto agora.</div>'; document.getElementById('reserves').innerHTML=''; current=null; if(es){es.close();es=null;} renderCaller(); return; }
+      if(!list.length){ bar.innerHTML='<span style="color:var(--muted)">Nenhum CTA aberto.</span>'; document.getElementById('board').innerHTML='<div class="empty-note">Nenhum CTA aberto agora.</div>'; document.getElementById('reserves').innerHTML=''; document.getElementById('status').innerHTML='<h2>Sem CTA</h2><p>Abra um CTA pra começar.</p>'; current=null; if(es){es.close();es=null;} renderCaller(); return; }
       var stillOpen=false;
       list.forEach(function(e){
         if(e.id===current) stillOpen=true;
@@ -640,7 +659,8 @@ const PAGE = `<!doctype html>
     }).catch(function(){});
   }
 
-  Array.prototype.forEach.call(document.querySelectorAll('.nv'),function(b){ b.onclick=function(){ show(b.getAttribute('data-view')); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.onclick=function(){ show(b.getAttribute('data-view')); }; });
+  document.getElementById('nav-stats').onclick=openStats;
   Array.prototype.forEach.call(document.querySelectorAll('.modal'),function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
 
   function boot(){
@@ -649,16 +669,16 @@ const PAGE = `<!doctype html>
       renderAuthHeader();
       if(authState.logged && authState.member){
         document.getElementById('gate').innerHTML='';
-        document.getElementById('nav').style.display='flex';
-        show('mural'); loadNews(); loadEvents();
+        document.getElementById('side').style.visibility='visible';
+        show('board'); loadNews(); loadEvents();
       } else {
-        document.getElementById('nav').style.display='none';
-        document.getElementById('view-mural').style.display='none';
+        document.getElementById('side').style.visibility='hidden';
         document.getElementById('view-board').style.display='none';
+        document.getElementById('view-mural').style.display='none';
         document.getElementById('live').textContent='';
         document.getElementById('gate').innerHTML = authState.logged
           ? '<div class="gate">⛔ Você não é membro do servidor IMORTAIS.<br>O conteúdo é restrito à guilda.</div>'
-          : '<div class="gate">🔒 Restrito aos IMORTAIS.<br>Entre com o Discord pra ver o mural e a planilha.<br><a class="gate-btn" href="/auth/login">Entrar com Discord</a></div>';
+          : '<div class="gate">🔒 War Room restrita aos IMORTAIS.<br>Entre com o Discord pra ver.<br><a class="gate-btn" href="/auth/login">Entrar com Discord</a></div>';
       }
     }).catch(function(){ document.getElementById('gate').innerHTML='<div class="gate">Erro ao carregar.</div>'; });
   }
