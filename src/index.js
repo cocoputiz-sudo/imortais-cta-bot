@@ -15,6 +15,7 @@ const cmds = require("./commands");
 const attendance = require("./attendance");
 const perfil = require("./perfil");
 const web = require("./web");
+const telemetry = require("./telemetry");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
@@ -2379,4 +2380,4 @@ const webActions = {
   },
 };
 
-(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client, webActions); await client.login(CFG.token); })();
+(async () => { await db.init(); await perfil.initSchema(db.pool); await telemetry.initSchema(db.pool); web.startWebServer(client, webActions); await client.login(CFG.token); })();
