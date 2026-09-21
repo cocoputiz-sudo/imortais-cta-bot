@@ -34,6 +34,12 @@ function requireMember(req, res) {
   if (!sess.isMember) { res.status(403).json({ error: "not_member" }); return null; }
   return sess;
 }
+function requireEditor(req, res) {
+  const sess = requireMember(req, res);
+  if (!sess) return null;
+  if (!sess.canEdit) { res.status(403).json({ error: "no_edit" }); return null; }
+  return sess;
+}
 function canEditRoles(roles, userId) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
@@ -97,10 +103,10 @@ async function notifyRosterChange(eventId) {
   for (const res of set) { try { res.write(payload); } catch { /* ignore */ } }
 }
 
-let _applyEdit = null;
+let _act = {};
 function startWebServer(client, opts) {
   _client = client;
-  _applyEdit = (opts && opts.applyEdit) || null;
+  _act = opts || {};
   const app = express();
   app.use(express.json());
 
@@ -206,9 +212,38 @@ function startWebServer(client, opts) {
         }
       }
       await db.pool.query("UPDATE cta_signups SET party_index=$3, slot_index=$4, manual=true WHERE event_id=$1 AND user_id=$2", [ev.id, A.user_id, rawTo, slotIndex]);
-      if (_applyEdit) await _applyEdit(ev.id);
+      if (_act.applyEdit) await _act.applyEdit(ev.id);
       res.json({ ok: true });
     } catch (e) { console.error("/api/move:", e); res.status(500).json({ error: "server" }); }
+  });
+
+  app.get("/api/caller", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const times = (_act.presetTimes && _act.presetTimes()) || [];
+    const open = await openEventsAll().catch(() => []);
+    res.json({ presetTimes: times, open });
+  });
+  app.post("/api/cta/open", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const time = String((req.body || {}).time || "").trim();
+    if (!/^\d{1,2}:\d{2}$/.test(time)) return res.status(400).json({ error: "time" });
+    res.json(_act.openCTA ? await _act.openCTA(time, sess.id) : { ok: false, error: "indisponível" });
+  });
+  app.post("/api/cta/flashmass", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const time = String((req.body || {}).time || "").trim();
+    if (!/^\d{1,2}:\d{2}$/.test(time)) return res.status(400).json({ error: "time" });
+    res.json(_act.flashmass ? await _act.flashmass(time, sess.id) : { ok: false, error: "indisponível" });
+  });
+  app.post("/api/cta/finish", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    res.json(_act.finishCTA ? await _act.finishCTA((req.body || {}).event, sess.id) : { ok: false, error: "indisponível" });
+  });
+  app.post("/api/cta/show", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const { event, tipo } = req.body || {};
+    if (!["flex", "press", "pt6teste"].includes(tipo)) return res.status(400).json({ error: "tipo" });
+    res.json(_act.showPT ? await _act.showPT(event, tipo, sess.id) : { ok: false, error: "indisponível" });
   });
 
   app.get("/", (_req, res) => res.type("html").send(PAGE));
@@ -268,6 +303,15 @@ const PAGE = `<!doctype html>
   .gate { padding:60px 18px; color:var(--dim); text-align:center; font-size:15px; line-height:1.7; }
   .gate-btn { display:inline-block; margin-top:8px; background:var(--card); border:1px solid var(--line); color:#8ab4ff; padding:9px 18px; border-radius:8px; text-decoration:none; }
   .gate-btn:hover { border-color:var(--acc); }
+  #caller { padding:0 18px 6px; display:none; }
+  #caller.on { display:block; }
+  .cbox { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:8px; }
+  .cbox h3 { margin:0 0 8px; font-size:12px; color:var(--dim); font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+  .cbtn { background:#12151b; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; margin:0 6px 6px 0; }
+  .cbtn:hover { border-color:var(--acc); }
+  .cbtn.fm { border-color:var(--acc); color:#ffb3b3; }
+  .cbtn.danger { border-color:#7a2a2a; color:#ff9a9a; }
+  #fmtime { background:#12151b; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; width:88px; font-size:13px; }
 </style>
 </head>
 <body>
@@ -277,6 +321,7 @@ const PAGE = `<!doctype html>
   <span id="live">● conectando…</span>
 </header>
 <div id="ctas"></div>
+<div id="caller"></div>
 <div id="board"></div>
 <div id="reserves"></div>
 <footer>Telão em tempo real · edição em breve (Fase 2)</footer>
@@ -342,15 +387,16 @@ const PAGE = `<!doctype html>
   function loadEvents(){
     fetch('/api/events').then(function(r){return r.json();}).then(function(list){
       var bar=document.getElementById('ctas'); bar.innerHTML='';
-      if(!list.length){ bar.innerHTML='<span class="none">Nenhum CTA aberto agora.</span>'; document.getElementById('board').innerHTML=''; document.getElementById('reserves').innerHTML=''; current=null; if(es){es.close();es=null;} document.getElementById('live').textContent='● aguardando CTA'; document.getElementById('live').style.color='var(--dim)'; return; }
+      if(!list.length){ bar.innerHTML='<span class="none">Nenhum CTA aberto agora.</span>'; document.getElementById('board').innerHTML=''; document.getElementById('reserves').innerHTML=''; current=null; if(es){es.close();es=null;} document.getElementById('live').textContent='● aguardando CTA'; document.getElementById('live').style.color='var(--dim)'; renderCaller(); return; }
       var stillOpen=false;
       list.forEach(function(e){
         if(e.id===current) stillOpen=true;
         var b=document.createElement('button'); b.textContent='CTA '+e.time; b.className='cta-btn'+(e.id===current?' on':'');
-        b.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.cta-btn'),function(x){x.classList.remove('on');}); b.classList.add('on'); connect(e.id); };
+        b.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.cta-btn'),function(x){x.classList.remove('on');}); b.classList.add('on'); connect(e.id); renderCaller(); };
         bar.appendChild(b);
       });
       if(!stillOpen){ var first=document.querySelector('.cta-btn'); if(first){ first.classList.add('on'); connect(list[0].id); } }
+      renderCaller();
     }).catch(function(){});
   }
   var authState={logged:false,member:false,canEdit:false,name:''};
@@ -364,11 +410,46 @@ const PAGE = `<!doctype html>
   function showGate(){
     document.getElementById('ctas').innerHTML='';
     document.getElementById('reserves').innerHTML='';
+    var cp=document.getElementById('caller'); cp.className=''; cp.innerHTML='';
     if(es){es.close();es=null;} current=null;
     document.getElementById('live').textContent='';
     document.getElementById('board').innerHTML = authState.logged
       ? '<div class="gate">⛔ Você não é membro do servidor IMORTAIS.<br>A formação é restrita à guild.</div>'
       : '<div class="gate">🔒 Planilha restrita aos IMORTAIS.<br>Entra com o Discord pra ver.<br><a class="gate-btn" href="/auth/login">Entrar com Discord</a></div>';
+  }
+  function flash(msg,color){ var l=document.getElementById('live'); l.textContent='● '+msg; l.style.color=color||'var(--dim)'; }
+  function post(url,body){
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
+      .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){
+        if(!r.ok || j.ok===false){ flash(j.error||'não foi possível','var(--acc)'); }
+        else { flash('feito','var(--green)'); setTimeout(function(){ loadEvents(); },700); }
+      }); })
+      .catch(function(){ flash('erro','var(--acc)'); });
+  }
+  function renderCaller(){
+    var panel=document.getElementById('caller');
+    if(!authState.canEdit){ panel.className=''; panel.innerHTML=''; return; }
+    fetch('/api/caller').then(function(r){return r.json();}).then(function(c){
+      var openTimes={}; (c.open||[]).forEach(function(e){ openTimes[e.time]=true; });
+      var avail=(c.presetTimes||[]).filter(function(t){ return !openTimes[t]; });
+      var html='<div class="cbox"><h3>Abrir CTA</h3>';
+      if(avail.length){ avail.forEach(function(t){ html+='<button class="cbtn" data-open="'+t+'">+ '+t+'</button>'; }); }
+      else { html+='<span style="color:var(--dim)">Todos os horários do preset já estão abertos.</span>'; }
+      html+='</div>';
+      html+='<div class="cbox"><h3>Flashmass</h3><input id="fmtime" placeholder="21:20"> <button class="cbtn fm" id="fmgo">⚡ Disparar flashmass</button></div>';
+      if(current){
+        html+='<div class="cbox"><h3>CTA selecionado</h3>'
+          +'<button class="cbtn" data-show="flex">+ PT Flex</button>'
+          +'<button class="cbtn" data-show="press">+ Press</button>'
+          +'<button class="cbtn" data-show="pt6teste">+ pt6teste</button>'
+          +'<button class="cbtn danger" id="finish">🏁 Finalizar CTA</button></div>';
+      }
+      panel.innerHTML=html; panel.className='on';
+      Array.prototype.forEach.call(panel.querySelectorAll('[data-open]'),function(b){ b.onclick=function(){ post('/api/cta/open',{time:b.getAttribute('data-open')}); }; });
+      var fmgo=document.getElementById('fmgo'); if(fmgo) fmgo.onclick=function(){ var t=document.getElementById('fmtime').value.trim(); if(t) post('/api/cta/flashmass',{time:t}); };
+      Array.prototype.forEach.call(panel.querySelectorAll('[data-show]'),function(b){ b.onclick=function(){ if(current) post('/api/cta/show',{event:current,tipo:b.getAttribute('data-show')}); }; });
+      var fin=document.getElementById('finish'); if(fin) fin.onclick=function(){ if(current && confirm('Finalizar este CTA?')) post('/api/cta/finish',{event:current}); };
+    }).catch(function(){});
   }
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){

@@ -887,26 +887,23 @@ async function onSlash(interaction) {
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
 }
 
-async function slashShow(interaction, ev, tipo) {
-  // tipo: "flex" (índice 1, 2, 3), "press" (índice 4) ou "pt6teste" (índice 5)
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+async function showPTCore(ev, guild, tipo, actor) {
   const fresh = (await db.getEvent(ev.id)) || ev;
-  if (!fresh.thread_id) return interaction.editReply({ content: "⚠️ Thread deste CTA não encontrada." });
+  if (!fresh.thread_id) return { ok: false, error: "Thread deste CTA não encontrada." };
   const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
-  if (!thread) return interaction.editReply({ content: "⚠️ Não foi possível acessar a thread do CTA." });
+  if (!thread) return { ok: false, error: "Não foi possível acessar a thread do CTA." };
 
   const pl = db.parsePartyList(fresh);
   let idx;
   if (tipo === "press") {
     idx = 4;
-    if (pl.includes(4)) return interaction.editReply({ content: `⚠️ A **press comp** já está aberta neste CTA.` });
+    if (pl.includes(4)) return { ok: false, error: "A press comp já está aberta neste CTA." };
   } else if (tipo === "pt6teste") {
     idx = 5;
-    if (pl.includes(5)) return interaction.editReply({ content: `⚠️ A **pt6teste** já está aberta neste CTA.` });
+    if (pl.includes(5)) return { ok: false, error: "A pt6teste já está aberta neste CTA." };
   } else {
-    // flex: acha a próxima das PTs flex (1, 2, 3) que ainda não está aberta
     idx = [1, 2, 3].find((i) => !pl.includes(i));
-    if (idx == null) return interaction.editReply({ content: `⚠️ Todas as PTs flex já estão abertas (máximo 3). Use a press ou pt6teste se precisar de mais.` });
+    if (idx == null) return { ok: false, error: "Todas as PTs flex já estão abertas (máximo 3). Use a press ou pt6teste." };
   }
 
   pl.push(idx);
@@ -934,9 +931,16 @@ async function slashShow(interaction, ev, tipo) {
     ...allow,
   });
 
-  await applyReallocation(fresh, interaction.guild, null);
-  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **${nomeTipo}** · CTA ${fresh.time_label}`);
-  await interaction.editReply({ content: `✅ **${nomeTipo}** aberta! Quem estava aguardando PT foi realocado.` });
+  await applyReallocation(fresh, guild, null);
+  await logStaff(guild, `🚀 ${actor} liberou a **${nomeTipo}** · CTA ${fresh.time_label}`);
+  return { ok: true, nomeTipo };
+}
+
+async function slashShow(interaction, ev, tipo) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const r = await showPTCore(ev, interaction.guild, tipo, `${interaction.user}`);
+  if (!r.ok) return interaction.editReply({ content: `⚠️ ${r.error}` });
+  return interaction.editReply({ content: `✅ **${r.nomeTipo}** aberta! Quem estava aguardando PT foi realocado.` });
 }
 
 async function applyConsolidation(ev, guild) {
@@ -1451,13 +1455,20 @@ async function slashChangeTime(interaction, ev) {
   await logStaff(interaction.guild, `🕐 ${interaction.user} mudou horário do CTA **${antigo} → ${novo}**`);
 }
 
+async function finishCTACore(ev, actor, guild) {
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  if (fresh.status !== "open") return { ok: false, error: `CTA ${fresh.time_label} já está encerrado.` };
+  await db.setStatus(fresh.id, "closed");
+  await logStaff(guild, `🏁 ${actor} encerrou o CTA **${fresh.time_label} UTC**`);
+  refreshRankingBoard(fresh.guild_id).catch(() => {});
+  web.notifyRosterChange(fresh.id).catch(() => {});
+  return { ok: true, time: fresh.time_label, thread_id: fresh.thread_id };
+}
+
 async function slashFinish(interaction, ev) {
-  if (ev.status !== "open")
-    return interaction.reply({ content: `CTA ${ev.time_label} já está encerrado.`, flags: MessageFlags.Ephemeral });
-  await db.setStatus(ev.id, "closed");
-  await interaction.reply({ content: `🏁 **CTA ${ev.time_label} ENCERRADO** por staff — inscrições travadas.` });
-  await logStaff(interaction.guild, `🏁 ${interaction.user} encerrou o CTA **${ev.time_label} UTC** (via /cta_finish)`);
-  refreshRankingBoard(ev.guild_id).catch(() => {});
+  const r = await finishCTACore(ev, `${interaction.user}`, interaction.guild);
+  if (!r.ok) return interaction.reply({ content: r.error, flags: MessageFlags.Ephemeral });
+  return interaction.reply({ content: `🏁 **CTA ${r.time} ENCERRADO** por staff — inscrições travadas.` });
 }
 
 async function slashAttendance(interaction, dias, rotulo) {
@@ -2261,4 +2272,45 @@ client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
-(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client, { applyEdit: async (eventId) => { const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return; const guild = client.guilds.cache.get(ev.guild_id) || null; await applyReallocation(ev, guild, null); } }); await client.login(CFG.token); })();
+const webActions = {
+  presetTimes: () => CFG.presetTimes,
+  applyEdit: async (eventId) => {
+    const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return;
+    const guild = client.guilds.cache.get(ev.guild_id) || null;
+    await applyReallocation(ev, guild, null);
+  },
+  openCTA: async (time, actorId) => {
+    const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
+    if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
+    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time);
+    return { ok: true };
+  },
+  flashmass: async (time, actorId) => {
+    const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
+    if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
+    const fs = require("fs"); const path = require("path");
+    const imgPath = path.join(__dirname, "..", "assets", "flashmass.png");
+    const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "flashmass.png" }] : [];
+    const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+    const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+    await ch.send({ content: `${mention} ⚡🚨 **FLASHMASS ${time} UTC!** 🚨⚡\nMassa relâmpago — todos pra call, loga e pinga tua função na thread 👇`, files, ...allow }).catch(() => {});
+    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time, { flashmass: true });
+    return { ok: true };
+  },
+  finishCTA: async (eventId, actorId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev) return { ok: false, error: "CTA não encontrado." };
+    const guild = client.guilds.cache.get(ev.guild_id) || null;
+    const r = await finishCTACore(ev, `<@${actorId}>`, guild);
+    if (r.ok && r.thread_id) { const th = await client.channels.fetch(r.thread_id).catch(() => null); if (th) await th.send({ content: `🏁 **CTA ${r.time} ENCERRADO** — inscrições travadas.` }).catch(() => {}); }
+    return r;
+  },
+  showPT: async (eventId, tipo, actorId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev) return { ok: false, error: "CTA não encontrado." };
+    const guild = client.guilds.cache.get(ev.guild_id) || null;
+    return showPTCore(ev, guild, tipo, `<@${actorId}>`);
+  },
+};
+
+(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client, webActions); await client.login(CFG.token); })();
