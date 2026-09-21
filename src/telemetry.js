@@ -27,6 +27,71 @@ function safeSecretEqual(a, b) {
   return aa.length === bb.length && aa.length > 0 && crypto.timingSafeEqual(aa, bb);
 }
 
+function tokenHash(token) {
+  return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("hex");
+}
+
+function createAgentToken() {
+  return "imt_" + crypto.randomBytes(32).toString("base64url");
+}
+
+async function authenticateTelemetry(req, { deviceId = "", playerName = "", allowMaster = true } = {}) {
+  const token = bearer(req);
+  if (!token) return null;
+
+  const master = process.env.TELEMETRY_INGEST_KEY || "";
+  if (allowMaster && master && safeSecretEqual(token, master)) {
+    return { kind: "master", tokenHash: null, agent: null };
+  }
+
+  const hash = tokenHash(token);
+  const { rows } = await pool.query(
+    `SELECT token_hash, label, device_id, player_name, revoked_at
+       FROM albion_telemetry_agent_tokens
+      WHERE token_hash=$1 AND revoked_at IS NULL
+      LIMIT 1`,
+    [hash]
+  );
+  const agent = rows[0];
+  if (!agent) return null;
+
+  if (agent.device_id && deviceId && String(agent.device_id) !== String(deviceId)) return null;
+  if (agent.player_name && playerName && normName(agent.player_name) !== normName(playerName)) return null;
+
+  if (!agent.device_id && deviceId) {
+    await pool.query(
+      `UPDATE albion_telemetry_agent_tokens
+          SET device_id=$2, last_seen=now()
+        WHERE token_hash=$1`,
+      [hash, deviceId]
+    );
+    agent.device_id = deviceId;
+  } else {
+    await pool.query(
+      `UPDATE albion_telemetry_agent_tokens SET last_seen=now() WHERE token_hash=$1`,
+      [hash]
+    );
+  }
+
+  return { kind: "agent", tokenHash: hash, agent };
+}
+
+async function resolveActiveCtaForPlayer(playerName) {
+  const name = String(playerName || "").trim();
+  if (!name) return null;
+  const { rows } = await pool.query(
+    `SELECT e.id, e.time_label, e.status, e.created_at
+       FROM cta_events e
+       JOIN cta_signups s ON s.event_id=e.id
+      WHERE e.status='open'
+        AND lower(s.username)=lower($1)
+      ORDER BY e.created_at DESC
+      LIMIT 1`,
+    [name]
+  );
+  return rows[0] || null;
+}
+
 async function initSchema(dbPool) {
   pool = dbPool;
   await pool.query(`
@@ -37,6 +102,21 @@ async function initSchema(dbPool) {
       first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_seen    TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS albion_telemetry_agent_tokens (
+      token_hash   TEXT PRIMARY KEY,
+      label        TEXT,
+      device_id    TEXT,
+      player_name  TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      last_seen    TIMESTAMPTZ,
+      revoked_at   TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_albion_tel_agents_device
+      ON albion_telemetry_agent_tokens(device_id);
+    CREATE INDEX IF NOT EXISTS idx_albion_tel_agents_player
+      ON albion_telemetry_agent_tokens(lower(player_name));
 
     CREATE TABLE IF NOT EXISTS albion_telemetry_events (
       event_id      TEXT PRIMARY KEY,
@@ -243,22 +323,89 @@ async function getCombat(db, eventId) {
 function installRoutes(app, { db, requireMember }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
+  app.post("/api/telemetry/agents/create", async (req, res) => {
+    try {
+      const master = process.env.TELEMETRY_INGEST_KEY || "";
+      if (!master || !safeSecretEqual(bearer(req), master)) return res.status(401).json({ error: "unauthorized" });
+
+      const body = req.body || {};
+      const label = String(body.label || "").trim().slice(0, 120) || null;
+      const playerName = String(body.playerName || "").trim().slice(0, 120) || null;
+      const token = createAgentToken();
+      const hash = tokenHash(token);
+
+      await pool.query(
+        `INSERT INTO albion_telemetry_agent_tokens(token_hash, label, player_name)
+         VALUES($1,$2,$3)`,
+        [hash, label, playerName]
+      );
+
+      res.json({ ok: true, token, label, playerName });
+    } catch (e) {
+      console.error("/api/telemetry/agents/create:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.post("/api/telemetry/agents/revoke", async (req, res) => {
+    try {
+      const master = process.env.TELEMETRY_INGEST_KEY || "";
+      if (!master || !safeSecretEqual(bearer(req), master)) return res.status(401).json({ error: "unauthorized" });
+      const token = String((req.body || {}).token || "").trim();
+      if (!token) return res.status(400).json({ error: "token" });
+      await pool.query(
+        `UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE token_hash=$1`,
+        [tokenHash(token)]
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("/api/telemetry/agents/revoke:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/telemetry/context", async (req, res) => {
+    try {
+      const deviceId = String(req.query.deviceId || "").trim();
+      const requestedPlayer = String(req.query.playerName || "").trim();
+      const auth = await authenticateTelemetry(req, { deviceId, playerName: requestedPlayer, allowMaster: true });
+      if (!auth) return res.status(401).json({ error: "unauthorized" });
+
+      const playerName = requestedPlayer || String(auth.agent?.player_name || "").trim();
+      const cta = await resolveActiveCtaForPlayer(playerName);
+      res.json({
+        ok: true,
+        playerName: playerName || null,
+        cta: cta ? { id: String(cta.id), time: cta.time_label, status: cta.status } : null,
+      });
+    } catch (e) {
+      console.error("/api/telemetry/context:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
   app.post("/api/telemetry/ingest", async (req, res) => {
     try {
-      const configured = process.env.TELEMETRY_INGEST_KEY || "";
-      if (!configured || !safeSecretEqual(bearer(req), configured)) return res.status(401).json({ error: "unauthorized" });
-
       const body = req.body || {};
       const device = body.device || {};
       const deviceId = String(device.deviceId || "").trim();
       if (!deviceId) return res.status(400).json({ error: "device_id" });
+
+      const detectedPlayer = String(device.playerName || "").trim();
+      const auth = await authenticateTelemetry(req, { deviceId, playerName: detectedPlayer, allowMaster: true });
+      if (!auth) return res.status(401).json({ error: "unauthorized" });
+
       const events = Array.isArray(body.events) ? body.events : [];
       if (!events.length || events.length > 500) return res.status(400).json({ error: "events" });
 
       let ctaEventId = body.ctaEventId != null && String(body.ctaEventId).trim() !== "" ? String(body.ctaEventId).trim() : null;
+      if (!ctaEventId) {
+        const active = await resolveActiveCtaForPlayer(detectedPlayer);
+        ctaEventId = active ? String(active.id) : null;
+      }
       if (ctaEventId) {
         const ev = await db.getEvent(ctaEventId).catch(() => null);
-        if (!ev) return res.status(400).json({ error: "cta_event" });
+        if (!ev || ev.status !== "open") ctaEventId = null;
       }
 
       await pool.query(`
@@ -328,7 +475,12 @@ function installRoutes(app, { db, requireMember }) {
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
     if (!id) return res.status(400).end();
-    res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+    res.set({
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no"
+    });
+    res.socket?.setKeepAlive?.(true);
     if (res.flushHeaders) res.flushHeaders();
     if (!telemetryStreams.has(id)) telemetryStreams.set(id, new Set());
     telemetryStreams.get(id).add(res);
