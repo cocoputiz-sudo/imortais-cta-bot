@@ -330,12 +330,12 @@ async function getCombat(db, eventId) {
   };
 }
 
-function installRoutes(app, { db, requireMember, requireEditor }) {
+function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
   app.post("/api/telemetry/pairing/create", async (req, res) => {
     try {
-      const sess = requireEditor ? requireEditor(req, res) : null;
+      const sess = requireDeviceManager ? requireDeviceManager(req, res) : null;
       if (!sess) return;
 
       const body = req.body || {};
@@ -408,7 +408,7 @@ function installRoutes(app, { db, requireMember, requireEditor }) {
 
   app.get("/api/telemetry/agents", async (req, res) => {
     try {
-      const sess = requireEditor ? requireEditor(req, res) : null;
+      const sess = requireDeviceManager ? requireDeviceManager(req, res) : null;
       if (!sess) return;
       const { rows } = await pool.query(
         `SELECT token_hash, label, device_id, player_name, created_at, last_seen, revoked_at
@@ -433,7 +433,7 @@ function installRoutes(app, { db, requireMember, requireEditor }) {
 
   app.post("/api/telemetry/agents/revoke-id", async (req, res) => {
     try {
-      const sess = requireEditor ? requireEditor(req, res) : null;
+      const sess = requireDeviceManager ? requireDeviceManager(req, res) : null;
       if (!sess) return;
       const id = String((req.body || {}).id || "").trim();
       if (!/^[a-f0-9]{64}$/i.test(id)) return res.status(400).json({ error: "id" });
