@@ -19,6 +19,7 @@ const GUILD_ID      = process.env.GUILD_ID || "683411304408416285";
 const REDIRECT      = process.env.OAUTH_REDIRECT || "https://cta-imortais.up.railway.app/auth/callback";
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
+const BOMB_LEADER_ROLE_ID = process.env.BOMB_LEADER_ROLE_ID || null;
 
 const sessions = new Map(); // sid -> { id, name, canEdit, roles }
 const states = new Map();   // state -> timestamp (CSRF)
@@ -58,6 +59,23 @@ function requireDeviceManager(req, res) {
   if (!sess) return null;
   if (!sess.canManageDevices) { res.status(403).json({ error: "no_device_admin" }); return null; }
   return sess;
+}
+function isSiteAdmin(roles, userId, name) {
+  const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
+  const isOwner = g && g.ownerId === userId;
+  const isMackna = String(name || "").trim().toLowerCase() === "mackna";
+  const isWarMaster = !!(STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID));
+  return !!(isOwner || isMackna || isWarMaster);
+}
+function canManageBomb(roles, userId, name) {
+  return !!(isSiteAdmin(roles, userId, name) || (BOMB_LEADER_ROLE_ID && roles.includes(BOMB_LEADER_ROLE_ID)));
+}
+function canManageCastleRoaming(roles, userId, name) {
+  return !!(
+    isSiteAdmin(roles, userId, name) ||
+    (BOMB_LEADER_ROLE_ID && roles.includes(BOMB_LEADER_ROLE_ID)) ||
+    (CALLER_TAG_ID && roles.includes(CALLER_TAG_ID))
+  );
 }
 
 let _client = null;
@@ -183,7 +201,17 @@ function startWebServer(client, opts) {
       const roles = (member && member.roles) || [];
       const name = me.global_name || me.username || "?";
       const sid = crypto.randomUUID();
-      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), canManageDevices: canManageDevices(roles, me.id, name), isMember: !!member, roles });
+      sessions.set(sid, {
+        id: me.id,
+        name,
+        canEdit: canEditRoles(roles, me.id),
+        canManageDevices: canManageDevices(roles, me.id, name),
+        canManageBomb: canManageBomb(roles, me.id, name),
+        canManageCastleRoaming: canManageCastleRoaming(roles, me.id, name),
+        isSiteAdmin: isSiteAdmin(roles, me.id, name),
+        isMember: !!member,
+        roles
+      });
       res.setHeader("Set-Cookie", `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`);
       res.redirect("/");
     } catch (e) { console.error("oauth:", e); res.status(500).send("Erro no login. <a href='/'>Voltar</a>"); }
@@ -191,7 +219,16 @@ function startWebServer(client, opts) {
 
   app.get("/auth/me", (req, res) => {
     const s = sessionOf(req);
-    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit, canManageDevices: !!s.canManageDevices, member: !!s.isMember } : { logged: false });
+    res.json(s ? {
+      logged: true,
+      name: s.name,
+      canEdit: s.canEdit,
+      canManageDevices: !!s.canManageDevices,
+      canManageBomb: !!s.canManageBomb,
+      canManageCastleRoaming: !!s.canManageCastleRoaming,
+      isSiteAdmin: !!s.isSiteAdmin,
+      member: !!s.isMember
+    } : { logged: false });
   });
 
   app.get("/auth/logout", (req, res) => {
@@ -480,9 +517,9 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="combat">⚔️ Combate</div>
       <div class="nav" data-view="devices">🖥️ Dispositivos</div>
     <div class="navtitle">EM BREVE</div>
-    <div class="nav soon">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
-    <div class="nav soon">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
-    <div class="nav soon">🧭 Roaming <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon" id="nav-bomb">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon" id="nav-castelo">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon" id="nav-roaming">🧭 Roaming <span class="tagsoon">EM BREVE</span></div>
   </aside>
   <main id="main">
     <div id="gate"></div>
@@ -532,7 +569,10 @@ const PAGE = `<!doctype html>
 <div class="modal" id="m-stats"><div class="sheet"><button class="x" onclick="mclose('m-stats')">✕</button><div id="stats-body"></div></div></div>
 
 <script>
-  var authState={logged:false,member:false,canEdit:false,canManageDevices:false,name:''};
+  var authState={
+    logged:false,member:false,canEdit:false,canManageDevices:false,
+    canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,name:''
+  };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -860,10 +900,25 @@ const PAGE = `<!doctype html>
 
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
-      authState={logged:!!a.logged,member:!!a.member,canEdit:!!a.canEdit,canManageDevices:!!a.canManageDevices,name:a.name||''};
+      authState={
+        logged:!!a.logged,
+        member:!!a.member,
+        canEdit:!!a.canEdit,
+        canManageDevices:!!a.canManageDevices,
+        canManageBomb:!!a.canManageBomb,
+        canManageCastleRoaming:!!a.canManageCastleRoaming,
+        isSiteAdmin:!!a.isSiteAdmin,
+        name:a.name||''
+      };
       renderAuthHeader();
       var devicesNav=document.querySelector('.nav[data-view="devices"]');
       if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
+      var navBomb=document.getElementById('nav-bomb');
+      var navCastelo=document.getElementById('nav-castelo');
+      var navRoaming=document.getElementById('nav-roaming');
+      if(navBomb) navBomb.style.display=authState.canManageBomb?'':'none';
+      if(navCastelo) navCastelo.style.display=authState.canManageCastleRoaming?'':'none';
+      if(navRoaming) navRoaming.style.display=authState.canManageCastleRoaming?'':'none';
       if(authState.logged && authState.member){
         document.getElementById('gate').innerHTML='';
         document.getElementById('side').style.visibility='visible';
