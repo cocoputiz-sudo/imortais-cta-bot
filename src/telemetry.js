@@ -113,6 +113,16 @@ async function initSchema(dbPool) {
       revoked_at   TIMESTAMPTZ
     );
 
+    CREATE TABLE IF NOT EXISTS albion_telemetry_pairing_codes (
+      code_hash    TEXT PRIMARY KEY,
+      label        TEXT,
+      player_name  TEXT,
+      created_by   TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at   TIMESTAMPTZ NOT NULL,
+      used_at      TIMESTAMPTZ
+    );
+
     CREATE INDEX IF NOT EXISTS idx_albion_tel_agents_device
       ON albion_telemetry_agent_tokens(device_id);
     CREATE INDEX IF NOT EXISTS idx_albion_tel_agents_player
@@ -320,8 +330,123 @@ async function getCombat(db, eventId) {
   };
 }
 
-function installRoutes(app, { db, requireMember }) {
+function installRoutes(app, { db, requireMember, requireEditor }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
+
+  app.post("/api/telemetry/pairing/create", async (req, res) => {
+    try {
+      const sess = requireEditor ? requireEditor(req, res) : null;
+      if (!sess) return;
+
+      const body = req.body || {};
+      const label = String(body.label || "").trim().slice(0, 120) || null;
+      const playerName = String(body.playerName || "").trim().slice(0, 120) || null;
+      const code = String(crypto.randomInt(100000, 1000000));
+      const hash = tokenHash("pair:" + code);
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+      await pool.query(
+        `INSERT INTO albion_telemetry_pairing_codes(code_hash, label, player_name, created_by, expires_at)
+         VALUES($1,$2,$3,$4,$5)`,
+        [hash, label, playerName, String(sess.id || ""), expiresAt]
+      );
+
+      res.json({ ok: true, code, expiresAt: expiresAt.toISOString(), label, playerName });
+    } catch (e) {
+      console.error("/api/telemetry/pairing/create:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.post("/api/telemetry/pair", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const code = String(body.code || "").trim();
+      const deviceId = String(body.deviceId || "").trim();
+      const playerName = String(body.playerName || "").trim();
+      if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: "code" });
+      if (!deviceId) return res.status(400).json({ error: "device_id" });
+
+      const hash = tokenHash("pair:" + code);
+      const { rows } = await pool.query(
+        `SELECT * FROM albion_telemetry_pairing_codes
+          WHERE code_hash=$1 AND used_at IS NULL AND expires_at > now()
+          LIMIT 1`,
+        [hash]
+      );
+      const pairing = rows[0];
+      if (!pairing) return res.status(401).json({ error: "invalid_or_expired_code" });
+
+      const token = createAgentToken();
+      const agentHash = tokenHash(token);
+      const boundPlayer = playerName || pairing.player_name || null;
+      const label = pairing.label || (boundPlayer ? boundPlayer + "-PC" : deviceId);
+
+      await pool.query("BEGIN");
+      try {
+        await pool.query(
+          `INSERT INTO albion_telemetry_agent_tokens(token_hash, label, device_id, player_name, last_seen)
+           VALUES($1,$2,$3,$4,now())`,
+          [agentHash, label, deviceId, boundPlayer]
+        );
+        await pool.query(
+          `UPDATE albion_telemetry_pairing_codes SET used_at=now() WHERE code_hash=$1`,
+          [hash]
+        );
+        await pool.query("COMMIT");
+      } catch (e) {
+        await pool.query("ROLLBACK");
+        throw e;
+      }
+
+      res.json({ ok: true, token, label, deviceId, playerName: boundPlayer });
+    } catch (e) {
+      console.error("/api/telemetry/pair:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/telemetry/agents", async (req, res) => {
+    try {
+      const sess = requireEditor ? requireEditor(req, res) : null;
+      if (!sess) return;
+      const { rows } = await pool.query(
+        `SELECT token_hash, label, device_id, player_name, created_at, last_seen, revoked_at
+           FROM albion_telemetry_agent_tokens
+          ORDER BY created_at DESC
+          LIMIT 200`
+      );
+      res.json(rows.map(r => ({
+        id: r.token_hash,
+        label: r.label,
+        deviceId: r.device_id,
+        playerName: r.player_name,
+        createdAt: r.created_at,
+        lastSeen: r.last_seen,
+        revokedAt: r.revoked_at
+      })));
+    } catch (e) {
+      console.error("/api/telemetry/agents:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.post("/api/telemetry/agents/revoke-id", async (req, res) => {
+    try {
+      const sess = requireEditor ? requireEditor(req, res) : null;
+      if (!sess) return;
+      const id = String((req.body || {}).id || "").trim();
+      if (!/^[a-f0-9]{64}$/i.test(id)) return res.status(400).json({ error: "id" });
+      await pool.query(
+        `UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE token_hash=$1`,
+        [id]
+      );
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("/api/telemetry/agents/revoke-id:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
 
   app.post("/api/telemetry/agents/create", async (req, res) => {
     try {
