@@ -19,6 +19,7 @@ const GUILD_ID      = process.env.GUILD_ID || "683411304408416285";
 const REDIRECT      = process.env.OAUTH_REDIRECT || "https://cta-imortais.up.railway.app/auth/callback";
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
+const DEVICE_MANAGER_ROLE_ID = process.env.DEVICE_MANAGER_ROLE_ID || null;
 
 const sessions = new Map(); // sid -> { id, name, canEdit, roles }
 const states = new Map();   // state -> timestamp (CSRF)
@@ -45,6 +46,19 @@ function canEditRoles(roles, userId) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
   return !!(isOwner || (STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID)) || (CALLER_TAG_ID && roles.includes(CALLER_TAG_ID)));
+}
+function canManageDevices(roles, userId, name) {
+  const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
+  const isOwner = g && g.ownerId === userId;
+  const isMackna = String(name || "").trim().toLowerCase() === "mackna";
+  const hasWarMasterRole = !!(DEVICE_MANAGER_ROLE_ID && roles.includes(DEVICE_MANAGER_ROLE_ID));
+  return !!(isOwner || isMackna || hasWarMasterRole);
+}
+function requireDeviceManager(req, res) {
+  const sess = requireMember(req, res);
+  if (!sess) return null;
+  if (!sess.canManageDevices) { res.status(403).json({ error: "no_device_admin" }); return null; }
+  return sess;
 }
 
 let _client = null;
@@ -112,7 +126,7 @@ function startWebServer(client, opts) {
   _act = opts || {};
   const app = express();
   app.use(express.json({ limit: "12mb" }));
-  telemetry.installRoutes(app, { db, requireMember, requireEditor });
+  telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager });
 
   app.get("/api/events", async (req, res) => {
     if (!requireMember(req, res)) return;
@@ -170,7 +184,7 @@ function startWebServer(client, opts) {
       const roles = (member && member.roles) || [];
       const name = me.global_name || me.username || "?";
       const sid = crypto.randomUUID();
-      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), isMember: !!member, roles });
+      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), canManageDevices: canManageDevices(roles, me.id, name), isMember: !!member, roles });
       res.setHeader("Set-Cookie", `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`);
       res.redirect("/");
     } catch (e) { console.error("oauth:", e); res.status(500).send("Erro no login. <a href='/'>Voltar</a>"); }
@@ -178,7 +192,7 @@ function startWebServer(client, opts) {
 
   app.get("/auth/me", (req, res) => {
     const s = sessionOf(req);
-    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit, member: !!s.isMember } : { logged: false });
+    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit, canManageDevices: !!s.canManageDevices, member: !!s.isMember } : { logged: false });
   });
 
   app.get("/auth/logout", (req, res) => {
@@ -519,7 +533,7 @@ const PAGE = `<!doctype html>
 <div class="modal" id="m-stats"><div class="sheet"><button class="x" onclick="mclose('m-stats')">✕</button><div id="stats-body"></div></div></div>
 
 <script>
-  var authState={logged:false,member:false,canEdit:false,name:''};
+  var authState={logged:false,member:false,canEdit:false,canManageDevices:false,name:''};
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -800,8 +814,8 @@ const PAGE = `<!doctype html>
       fetch('/api/telemetry/agents').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
     ]).then(function(all){
       var me=all[0], agents=all[1]||[];
-      if(!me.canEdit){
-        el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Apenas callers/staff podem gerenciar dispositivos.</div>';
+      if(!me.canManageDevices){
+        el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Acesso restrito ao Mackna, dono da guilda e Mestre de Guerra.</div>';
         return;
       }
       var html='<div class="modhead">🖥️ Dispositivos · Combat Client</div>'
@@ -847,8 +861,10 @@ const PAGE = `<!doctype html>
 
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
-      authState={logged:!!a.logged,member:!!a.member,canEdit:!!a.canEdit,name:a.name||''};
+      authState={logged:!!a.logged,member:!!a.member,canEdit:!!a.canEdit,canManageDevices:!!a.canManageDevices,name:a.name||''};
       renderAuthHeader();
+      var devicesNav=document.querySelector('.nav[data-view="devices"]');
+      if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
       if(authState.logged && authState.member){
         document.getElementById('gate').innerHTML='';
         document.getElementById('side').style.visibility='visible';
