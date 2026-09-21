@@ -429,6 +429,9 @@ const PAGE = `<!doctype html>
   .stat.g .v{ color:var(--green);} .stat.r .v{ color:var(--dps);} .stat.a .v{ color:var(--amber);} .stat.p .v{ color:var(--support);} .stat.b .v{ color:var(--tank);}
   .panel{ background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:14px 16px; margin-bottom:14px; }
   .panel h3{ margin:0 0 10px; font-size:12px; color:var(--muted); letter-spacing:.1em; font-weight:800; text-transform:uppercase; }
+  .input{ width:100%; margin-top:5px; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:9px; padding:10px 11px; font:inherit; outline:none; }
+  .input:focus{ border-color:#7fb0ff; }
+  label{ color:var(--muted); font-size:12px; }
   .dtable{ width:100%; border-collapse:collapse; font-size:13px; }
   .dtable th{ text-align:left; color:var(--muted); font-weight:700; font-size:11px; letter-spacing:.06em; padding:6px 8px; border-bottom:1px solid var(--line); }
   .dtable td{ padding:7px 8px; border-bottom:1px solid #1a222e; }
@@ -497,6 +500,7 @@ const PAGE = `<!doctype html>
     <div id="view-confirm" style="display:none"></div>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
+    <div id="view-devices" style="display:none"></div>
   </main>
 </div>
 
@@ -524,12 +528,13 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat'};
+    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='confirm') renderConfirm();
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
+    if(v==='devices') renderDevices();
   }
 
   function renderAuthHeader(){
