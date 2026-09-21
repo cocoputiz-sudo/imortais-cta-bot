@@ -2272,8 +2272,51 @@ client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
+function renderDiscordMd(raw, guild) {
+  let t = String(raw || "");
+  t = t.replace(/<@!?(\d+)>/g, (m, id) => { const mem = guild && guild.members.cache.get(id); return "@" + (mem ? mem.displayName : "membro"); });
+  t = t.replace(/<@&(\d+)>/g, (m, id) => { const r = guild && guild.roles.cache.get(id); return "@" + (r ? r.name : "cargo"); });
+  t = t.replace(/<#(\d+)>/g, (m, id) => { const c = guild && guild.channels.cache.get(id); return "#" + (c ? c.name : "canal"); });
+  t = t.replace(/<a?:(\w+):\d+>/g, ":$1:");
+  t = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (x) => x
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
+  const lines = t.split("\n");
+  let html = "", quote = [];
+  const flush = () => { if (quote.length) { html += "<blockquote>" + quote.map(inline).join("<br>") + "</blockquote>"; quote = []; } };
+  for (const line of lines) {
+    const q = /^&gt;\s?(.*)$/.exec(line);
+    if (q) { quote.push(q[1]); continue; }
+    flush();
+    let m;
+    if ((m = /^###\s+(.*)$/.exec(line))) html += "<h4>" + inline(m[1]) + "</h4>";
+    else if ((m = /^##\s+(.*)$/.exec(line))) html += "<h3>" + inline(m[1]) + "</h3>";
+    else if ((m = /^#\s+(.*)$/.exec(line))) html += "<h2>" + inline(m[1]) + "</h2>";
+    else if (line.trim() === "") html += "";
+    else html += "<p>" + inline(line) + "</p>";
+  }
+  flush();
+  return html;
+}
+
 const webActions = {
   presetTimes: () => CFG.presetTimes,
+  fetchNews: async () => {
+    const NEWS = process.env.NEWS_CHANNEL_ID;
+    if (!NEWS) return [];
+    const ch = await client.channels.fetch(NEWS).catch(() => null);
+    if (!ch || !ch.messages) return [];
+    const msgs = await ch.messages.fetch({ limit: 8 }).catch(() => null);
+    if (!msgs) return [];
+    const out = [];
+    for (const m of msgs.values()) {
+      if (!m.content || !m.content.trim()) continue;
+      out.push({ author: (m.member && m.member.displayName) || m.author.username, time: m.createdTimestamp, html: renderDiscordMd(m.content, ch.guild) });
+    }
+    return out;
+  },
   myStats: async (userId, guildId) => {
     const season = await db.getCurrentSeason(guildId);
     if (!season) return { season: false };
@@ -2294,9 +2337,17 @@ const webActions = {
     const guild = client.guilds.cache.get(ev.guild_id) || null;
     await applyReallocation(ev, guild, null);
   },
-  openCTA: async (time, actorId) => {
+  openCTA: async (time, actorId, imageBase64) => {
     const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
     if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
+    if (imageBase64) {
+      try {
+        const b = Buffer.from(String(imageBase64).replace(/^data:[^;]+;base64,/, ""), "base64");
+        const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+        const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+        await ch.send({ content: `${mention} 🛡️ **CTA ${time} UTC** — chamado! Loga e pinga tua função na thread 👇`, files: [{ attachment: b, name: "cta.png" }], ...allow }).catch(() => {});
+      } catch (_) { /* ignora imagem inválida */ }
+    }
     await criarCTA(ch, ch.guild, ch.guild.id, actorId, time);
     return { ok: true };
   },

@@ -110,7 +110,7 @@ function startWebServer(client, opts) {
   _client = client;
   _act = opts || {};
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "12mb" }));
 
   app.get("/api/events", async (req, res) => {
     if (!requireMember(req, res)) return;
@@ -229,7 +229,7 @@ function startWebServer(client, opts) {
     const sess = requireEditor(req, res); if (!sess) return;
     const time = String((req.body || {}).time || "").trim();
     if (!/^\d{1,2}:\d{2}$/.test(time)) return res.status(400).json({ error: "time" });
-    res.json(_act.openCTA ? await _act.openCTA(time, sess.id) : { ok: false, error: "indisponível" });
+    res.json(_act.openCTA ? await _act.openCTA(time, sess.id, (req.body || {}).image) : { ok: false, error: "indisponível" });
   });
   app.post("/api/cta/flashmass", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
@@ -260,6 +260,10 @@ function startWebServer(client, opts) {
     res.json({ ok: true });
   });
 
+  app.get("/api/news", async (req, res) => {
+    const sess = requireMember(req, res); if (!sess) return;
+    res.json(_act.fetchNews ? await _act.fetchNews() : []);
+  });
   app.get("/api/me/stats", async (req, res) => {
     const sess = requireMember(req, res); if (!sess) return;
     const r = _act.myStats ? await _act.myStats(sess.id, GUILD_ID) : null;
@@ -281,247 +285,385 @@ const PAGE = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>IMORTAIS · Planilha ao vivo</title>
+<title>IMORTAIS · Sala de Guerra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: dark; --bg:#0f1115; --card:#171a21; --line:#252a34; --txt:#e6e8ec; --dim:#8b93a1; --acc:#e23b3b; --green:#3ba55d; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif; padding-top:env(safe-area-inset-top,0); }
-  header { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
-  header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
-  #auth { margin-left:auto; display:flex; gap:10px; align-items:center; font-size:13px; color:var(--dim); }
-  #auth a { color:#8ab4ff; text-decoration:none; }
-  #auth a:hover { text-decoration:underline; }
-  #live { margin-left:14px; font-size:12px; color:var(--green); }
-  #ctas { display:flex; gap:8px; flex-wrap:wrap; padding:12px 18px; }
-  .cta-btn { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; }
-  .cta-btn.on { border-color:var(--acc); color:#fff; background:#241417; }
-  .none { color:var(--dim); }
-  #board { display:flex; gap:14px; overflow-x:auto; padding:6px 18px 18px; align-items:flex-start; }
-  .pt { min-width:560px; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; flex:0 0 auto; }
-  .pt-body { display:flex; }
-  .pt-col { flex:1 1 0; min-width:0; }
-  .pt-col + .pt-col { border-left:1px solid var(--line); }
-  .pt-h { font-weight:700; padding:10px 12px; border-bottom:1px solid var(--line); background:#12151b; }
-  .slot { display:flex; align-items:center; gap:8px; padding:6px 12px; border-bottom:1px solid #1f232b; }
-  .slot:last-child { border-bottom:0; }
-  .slot .n { color:var(--dim); font-variant-numeric:tabular-nums; width:22px; }
-  .slot.filled { background:#141b16; }
-  .slot .w { color:#c7cdd6; }
-  .slot .sep { flex:0 0 auto; align-self:stretch; width:1px; background:var(--line); margin:0 8px; }
-  .slot.drag, .rz-i.drag { cursor:grab; }
-  .slot.drag:active, .rz-i.drag:active { cursor:grabbing; }
-  .slot.over { outline:2px solid var(--acc); outline-offset:-2px; background:#241417; }
-  .slot .w.wedit { cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
-  .wsel { background:#12151b; color:var(--txt); border:1px solid var(--acc); border-radius:6px; font-size:12px; padding:1px 4px; max-width:180px; }
-  .slot .core { margin-left:4px; }
-  .rz-i .core { margin-left:2px; }
-  .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:20; align-items:center; justify-content:center; padding:16px; }
-  .modal-box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; max-width:420px; width:100%; position:relative; }
-  .modal-x { position:absolute; top:10px; right:12px; background:none; border:0; color:var(--dim); font-size:18px; cursor:pointer; }
-  .modal-box h2 { font-size:16px; margin:0 0 14px; }
-  .big { font-size:34px; font-weight:800; margin:4px 0 10px; }
-  .big span { font-size:15px; color:var(--dim); font-weight:400; }
-  .stat-row { padding:4px 0; color:#c7cdd6; }
-  .slot .u { font-weight:600; margin-left:2px; }
-  .slot .opts { color:var(--dim); }
-  .slot .vazio { color:#5a6270; font-style:italic; margin-left:auto; }
-  .slot .lock, .slot .dot { margin-left:auto; }
-  .slot .dot { margin-left:6px; }
-  #reserves { padding:0 18px 30px; }
-  .rz-h { color:var(--dim); font-weight:700; margin:10px 0 6px; }
-  .rz-i { color:#c7cdd6; padding:3px 0; }
-  footer { color:#5a6270; text-align:center; padding:20px; font-size:12px; }
-  .gate { padding:60px 18px; color:var(--dim); text-align:center; font-size:15px; line-height:1.7; }
-  .gate-btn { display:inline-block; margin-top:8px; background:var(--card); border:1px solid var(--line); color:#8ab4ff; padding:9px 18px; border-radius:8px; text-decoration:none; }
-  .gate-btn:hover { border-color:var(--acc); }
-  #caller { padding:0 18px 6px; display:none; }
-  #caller.on { display:block; }
-  .cbox { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 14px; margin-bottom:8px; }
-  .cbox h3 { margin:0 0 8px; font-size:12px; color:var(--dim); font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
-  .cbtn { background:#12151b; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; margin:0 6px 6px 0; }
-  .cbtn:hover { border-color:var(--acc); }
-  .cbtn.fm { border-color:var(--acc); color:#ffb3b3; }
-  .cbtn.danger { border-color:#7a2a2a; color:#ff9a9a; }
-  #fmtime { background:#12151b; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; width:88px; font-size:13px; }
+  :root{
+    color-scheme:dark;
+    --bg:#12141b; --bg2:#0e1016; --surface:#1a1e27; --raised:#222836; --line:#2b313e; --line2:#39414f;
+    --txt:#e9e5db; --dim:#9aa1af; --faint:#666d7b;
+    --ember:#d63b31; --ember-soft:#f0857e; --ember-glow:rgba(214,59,49,.30);
+    --gold:#c9a24b; --green:#54b981;
+    --disp:'Cinzel',Georgia,serif; --sans:'Inter',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:var(--sans); color:var(--txt);
+    background:radial-gradient(1200px 600px at 50% -10%, rgba(214,59,49,.10), transparent 60%), linear-gradient(180deg,var(--bg),var(--bg2));
+    background-attachment:fixed; min-height:100vh; padding-top:env(safe-area-inset-top,0); }
+  a{color:inherit;}
+  header{ display:flex; align-items:center; gap:14px; padding:16px 24px; border-bottom:1px solid var(--line); position:sticky; top:0; background:rgba(18,20,27,.92); backdrop-filter:blur(6px); z-index:10; }
+  .crest{ width:32px; height:36px; flex:0 0 auto; filter:drop-shadow(0 2px 6px var(--ember-glow)); }
+  .brand h1{ font-family:var(--disp); font-weight:900; font-size:21px; letter-spacing:2px; margin:0; line-height:1; }
+  .brand p{ margin:3px 0 0; font-size:10px; letter-spacing:3px; color:var(--gold); font-weight:600; }
+  #auth{ margin-left:auto; display:flex; align-items:center; gap:12px; font-size:13px; color:var(--dim); }
+  #auth a{ color:#8ab4ff; text-decoration:none; }
+  #auth a:hover{ text-decoration:underline; }
+  #live{ font-size:12px; color:var(--green); }
+  .nav{ max-width:1180px; margin:18px auto 0; padding:0 24px; display:flex; gap:20px; border-bottom:1px solid var(--line); }
+  .nv{ background:transparent; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; color:var(--dim); font-family:var(--sans); font-weight:700; font-size:15px; padding:10px 2px; cursor:pointer; }
+  .nv.on{ color:var(--txt); border-bottom-color:var(--ember); }
+  .warroom{ max-width:1180px; margin:20px auto 8px; padding:0 24px; }
+  /* central de comando */
+  .cmd{ background:linear-gradient(180deg,var(--raised),var(--surface)); border:1px solid var(--line2); border-radius:16px; padding:16px 20px; box-shadow:0 18px 50px -24px rgba(0,0,0,.8); }
+  .cmd-top{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .cmd-title{ font-family:var(--disp); font-weight:700; font-size:13px; letter-spacing:2px; color:var(--gold); }
+  .tabs{ display:flex; gap:8px; flex-wrap:wrap; }
+  .tab{ background:var(--bg); border:1px solid var(--line); color:var(--dim); border-radius:10px; padding:8px 14px; cursor:pointer; font-size:13px; font-weight:600; }
+  .tab.on{ color:#fff; border-color:var(--ember); background:linear-gradient(180deg,rgba(214,59,49,.22),rgba(214,59,49,.06)); }
+  .cmd-actions{ margin-left:auto; display:flex; gap:10px; flex-wrap:wrap; }
+  .btn{ border:0; border-radius:11px; padding:10px 16px; font-family:var(--sans); font-weight:700; font-size:14px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; }
+  .btn-primary{ background:linear-gradient(180deg,#e5443a,#b92f26); color:#fff; }
+  .btn-primary:hover{ filter:brightness(1.06); }
+  .btn-gold{ background:transparent; border:1px solid var(--gold); color:var(--gold); }
+  .btn-danger{ background:transparent; border:1px solid #7a2a2a; color:#ff9a9a; }
+  .cmd-sel{ margin-top:14px; padding-top:14px; border-top:1px solid var(--line); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .cmd-sel:empty{ display:none; }
+  .cmd-sel .lbl{ font-size:12px; color:var(--faint); font-weight:600; letter-spacing:1px; }
+  .chip{ background:var(--bg); border:1px solid var(--line); color:var(--txt); border-radius:9px; padding:8px 13px; cursor:pointer; font-size:13px; font-weight:600; }
+  .chip:hover{ border-color:var(--ember); }
+  /* board */
+  .board-wrap{ max-width:1180px; margin:14px auto 40px; padding:0 24px; }
+  .board{ display:flex; gap:16px; overflow-x:auto; padding-bottom:6px; align-items:flex-start; }
+  .pt{ min-width:560px; flex:0 0 auto; background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  .pt-h{ display:flex; align-items:baseline; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line); }
+  .pt-h .name{ font-family:var(--disp); font-weight:700; font-size:15px; letter-spacing:1px; }
+  .pt-h .count{ margin-left:auto; font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums; }
+  .pt-body{ display:flex; }
+  .col{ flex:1 1 0; min-width:0; }
+  .col + .col{ border-left:1px solid var(--line); }
+  .slot{ display:flex; align-items:center; gap:9px; padding:7px 14px; border-bottom:1px solid #1d222c; font-size:13.5px; }
+  .slot:last-child{ border-bottom:0; }
+  .slot .n{ color:var(--faint); width:20px; font-variant-numeric:tabular-nums; font-size:12px; }
+  .slot.filled{ background:linear-gradient(90deg,rgba(84,185,129,.06),transparent 40%); }
+  .slot .w{ color:#bfc6d1; }
+  .slot .w.wedit{ cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
+  .slot .sep{ width:1px; align-self:stretch; background:var(--line2); margin:0 8px; }
+  .slot .u{ font-weight:600; }
+  .slot .opts{ color:var(--faint); }
+  .slot .empty{ color:#4d5563; font-style:italic; margin-left:auto; }
+  .slot .tail{ margin-left:auto; display:inline-flex; align-items:center; gap:7px; }
+  .core{ color:var(--gold); }
+  .pres{ width:8px; height:8px; border-radius:50%; }
+  .pres.on{ background:var(--green); box-shadow:0 0 6px rgba(84,185,129,.6); }
+  .pres.wait{ background:var(--gold); }
+  .lock{ color:var(--faint); font-size:12px; }
+  .slot.drag{ cursor:grab; } .slot.drag:active{ cursor:grabbing; }
+  .slot.over{ outline:2px solid var(--ember); outline-offset:-2px; background:#241417; }
+  .wsel{ background:var(--bg); color:var(--txt); border:1px solid var(--ember); border-radius:6px; font-size:12px; padding:1px 4px; max-width:180px; }
+  .reserve{ min-width:300px; flex:0 0 auto; background:var(--surface); border:1px dashed var(--line2); border-radius:14px; padding:12px 16px; }
+  .reserve h3{ font-family:var(--disp); font-weight:700; font-size:13px; letter-spacing:1px; color:var(--gold); margin:0 0 8px; }
+  .reserve .rz-i{ padding:5px 0; color:#bfc6d1; font-size:13.5px; }
+  .reserve .rz-i.drag{ cursor:grab; }
+  /* mural / notícias */
+  .mural{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:18px 22px; box-shadow:0 14px 40px -26px #000; margin-bottom:14px; }
+  .mural-h{ display:flex; align-items:baseline; gap:12px; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+  .mural-title{ font-family:var(--disp); font-weight:700; font-size:14px; letter-spacing:1px; color:var(--gold); }
+  .mural-meta{ margin-left:auto; font-size:12px; color:var(--faint); }
+  .news-body h2{ font-family:var(--disp); font-weight:700; font-size:19px; margin:2px 0 8px; color:var(--gold); }
+  .news-body h3{ font-family:var(--disp); font-weight:700; font-size:15px; margin:14px 0 6px; }
+  .news-body h4{ font-size:14px; margin:10px 0 4px; }
+  .news-body p{ margin:6px 0; color:#d3d7de; font-size:14px; line-height:1.55; max-width:74ch; }
+  .news-body blockquote{ margin:6px 0; padding:6px 0 6px 14px; border-left:3px solid var(--line2); color:var(--dim); font-size:13.5px; }
+  .news-body strong{ color:var(--txt); }
+  .enter{ text-align:center; margin-top:18px; }
+  .enter .btn{ font-size:15px; padding:14px 24px; }
+  .empty-note{ color:var(--faint); text-align:center; padding:30px; }
+  /* gate */
+  .gate{ padding:60px 18px; color:var(--dim); text-align:center; font-size:15px; line-height:1.7; }
+  .gate-btn{ display:inline-block; margin-top:10px; background:var(--surface); border:1px solid var(--line2); color:#8ab4ff; padding:10px 20px; border-radius:10px; text-decoration:none; }
+  /* modais */
+  .modal{ display:none; position:fixed; inset:0; z-index:30; background:rgba(6,7,10,.72); backdrop-filter:blur(3px); align-items:center; justify-content:center; padding:18px; }
+  .modal.open{ display:flex; }
+  .sheet{ background:linear-gradient(180deg,var(--raised),var(--surface)); border:1px solid var(--line2); border-radius:18px; width:100%; max-width:520px; padding:22px 24px; position:relative; box-shadow:0 30px 80px -30px #000; }
+  .sheet h2{ font-family:var(--disp); font-weight:700; font-size:18px; letter-spacing:1px; margin:0 0 4px; }
+  .sheet .sub{ color:var(--dim); font-size:13px; margin:0 0 18px; }
+  .x{ position:absolute; top:14px; right:16px; background:none; border:0; color:var(--dim); font-size:20px; cursor:pointer; }
+  .timegrid{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+  .time{ background:var(--bg); border:1px solid var(--line); color:var(--txt); border-radius:11px; padding:14px 0; font-size:15px; font-weight:700; cursor:pointer; text-align:center; }
+  .time:hover{ border-color:var(--ember); }
+  .time.on{ border-color:var(--ember); background:linear-gradient(180deg,rgba(214,59,49,.25),rgba(214,59,49,.05)); color:#fff; }
+  .drop{ display:block; border:1.5px dashed var(--line2); border-radius:12px; padding:20px; text-align:center; color:var(--dim); font-size:13px; cursor:pointer; margin-bottom:18px; }
+  .drop:hover{ border-color:var(--ember); color:var(--txt); }
+  .drop .ic{ font-size:24px; display:block; margin-bottom:6px; }
+  .drop small{ color:var(--faint); }
+  .drop img{ max-height:120px; border-radius:8px; margin-top:6px; }
+  .field input{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--txt); border-radius:11px; padding:12px 14px; font-size:15px; font-family:var(--sans); margin-bottom:14px; }
+  .note{ font-size:12px; color:var(--faint); margin:-4px 0 16px; }
+  .sheet .go{ width:100%; justify-content:center; padding:13px; font-size:15px; }
+  .big{ font-family:var(--disp); font-size:42px; font-weight:900; line-height:1; margin:6px 0 4px; }
+  .big small{ font-family:var(--sans); font-size:15px; color:var(--dim); font-weight:400; }
+  .srow{ padding:6px 0; color:#c7cdd6; font-size:14px; border-top:1px solid var(--line); }
+  .srow:first-of-type{ border-top:0; }
+  @media (max-width:620px){ .pt,.reserve{ min-width:88vw; } .timegrid{ grid-template-columns:repeat(2,1fr);} }
 </style>
 </head>
 <body>
 <header>
-  <h1>🛡️ IMORTAIS — Planilha ao vivo</h1>
+  <svg class="crest" viewBox="0 0 34 38" fill="none"><path d="M17 1 33 6v13c0 9-7 15-16 18C8 34 1 28 1 19V6L17 1Z" fill="#1a1e27" stroke="#d63b31" stroke-width="1.5"/><path d="M17 8v22M9 14h16" stroke="#c9a24b" stroke-width="1.6" stroke-linecap="round"/></svg>
+  <div class="brand"><h1>IMORTAIS</h1><p>SALA DE GUERRA</p></div>
   <span id="auth"></span>
-  <span id="live">● conectando…</span>
+  <span id="live">conectando…</span>
 </header>
-<div id="ctas"></div>
-<div id="caller"></div>
-<div id="board"></div>
-<div id="reserves"></div>
-<footer>Telão em tempo real · edição em breve (Fase 2)</footer>
-<div id="stats" class="modal"><div class="modal-box"><button class="modal-x" id="stats-x">✕</button><div id="stats-body"></div></div></div>
+
+<div class="nav" id="nav" style="display:none">
+  <button class="nv on" data-view="mural">📣 Mural</button>
+  <button class="nv" data-view="board">🗺️ Planilha ao vivo</button>
+</div>
+
+<div id="gate"></div>
+
+<div id="view-mural" class="view" style="display:none">
+  <div class="warroom">
+    <div id="news"></div>
+    <div class="enter"><button class="btn btn-primary" onclick="show('board')">🗺️ Entrar na Sala de Guerra · ver planilha ao vivo</button></div>
+  </div>
+</div>
+
+<div id="view-board" class="view" style="display:none">
+  <div class="warroom">
+    <div class="cmd">
+      <div class="cmd-top">
+        <span class="cmd-title">CTAs</span>
+        <div class="tabs" id="ctas"></div>
+        <div class="cmd-actions" id="cmd-actions"></div>
+      </div>
+      <div class="cmd-sel" id="cmd-sel"></div>
+    </div>
+  </div>
+  <div class="board-wrap"><div class="board" id="board"></div><div id="reserves" style="max-width:1180px;margin:0 auto;padding:0 24px 30px"></div></div>
+</div>
+
+<!-- modal abrir CTA -->
+<div class="modal" id="m-open"><div class="sheet"><button class="x" onclick="mclose('m-open')">✕</button>
+  <h2>Abrir CTA</h2><p class="sub">Escolha o horário e, se quiser, uma arte pra ilustrar o chamado.</p>
+  <div class="timegrid" id="open-times"></div>
+  <label class="drop" id="open-drop"><span class="ic">🖼️</span><span id="drop-txt">Clique pra escolher a arte do CTA</span><br><small>opcional · PNG ou JPG</small><input type="file" id="open-file" accept="image/*" style="display:none"></label>
+  <button class="btn btn-primary go" id="open-go">Abrir CTA</button>
+</div></div>
+
+<!-- modal flashmass -->
+<div class="modal" id="m-flash"><div class="sheet"><button class="x" onclick="mclose('m-flash')">✕</button>
+  <h2>⚡ Flashmass</h2><p class="sub">Massa relâmpago com ping do @imortal.</p>
+  <div class="field"><input id="flash-time" placeholder="21:20"></div>
+  <p class="note">Usa a arte padrão do flashmass — não precisa subir imagem.</p>
+  <button class="btn btn-gold go" id="flash-go">⚡ Disparar flashmass</button>
+</div></div>
+
+<!-- modal meu desempenho -->
+<div class="modal" id="m-stats"><div class="sheet"><button class="x" onclick="mclose('m-stats')">✕</button><div id="stats-body"></div></div></div>
+
 <script>
-  var current=null, es=null;
+  var authState={logged:false,member:false,canEdit:false,name:''};
+  var current=null, es=null, selTime=null, selImg=null;
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
-  function doSetWeapon(uid, weapon){ if(current) post('/api/setweapon',{event:current,userId:uid,weapon:weapon}); }
-  function openWeaponPicker(wspan, s){
-    if(!s.options || !s.options.length) return;
+  function flash(msg,color){ var l=document.getElementById('live'); l.textContent=msg; l.style.color=color||'var(--dim)'; }
+  function mopen(id){ document.getElementById(id).classList.add('open'); }
+  function mclose(id){ document.getElementById(id).classList.remove('open'); }
+
+  function show(v){
+    document.getElementById('view-mural').style.display = v==='mural'?'':'none';
+    document.getElementById('view-board').style.display = v==='board'?'':'none';
+    Array.prototype.forEach.call(document.querySelectorAll('.nv'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
+    window.scrollTo(0,0);
+  }
+
+  function renderAuthHeader(){
+    var el=document.getElementById('auth');
+    if(authState.logged){
+      var tag = authState.canEdit ? '✏️ edição liberada' : (authState.member ? '👁️ leitura' : '⛔ fora do servidor');
+      el.innerHTML='<span>'+tag+' · '+esc(authState.name)+'</span> '+(authState.member?'<a href="#" id="mystats">📊 meu desempenho</a>':'')+' <a href="/auth/logout">sair</a>';
+      var ms=document.getElementById('mystats'); if(ms) ms.onclick=function(e){ e.preventDefault(); openStats(); };
+    } else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
+  }
+
+  function openStats(){
+    var b=document.getElementById('stats-body'); b.innerHTML='carregando…'; mopen('m-stats');
+    fetch('/api/me/stats').then(function(r){return r.json();}).then(function(s){
+      if(s.season===false){ b.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa.'; return; }
+      if(!s.found){ b.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>Você ainda não pontuou nesta temporada.'; return; }
+      b.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>'
+        +'<div class="big">#'+s.rank+' <small>de '+s.total+'</small></div>'
+        +'<div class="srow"><b>'+s.score+'</b> pontos · '+esc(s.cat)+'</div>'
+        +'<div class="srow">✅ Veio: <b>'+s.came+'</b> de '+s.ctaCount+' CTAs <span style="color:var(--faint)">('+s.integral+' integrais · '+s.parcial+' parciais · '+s.rapida+' rápidas)</span></div>'
+        +'<div class="srow">📣 Pingou que viria: <b>'+s.pinged+'</b></div>'
+        +'<div class="srow">🔴 Faltou (pingou e não veio): <b>'+s.fantasma+'</b></div>';
+    }).catch(function(){ b.innerHTML='Erro ao carregar.'; });
+  }
+
+  function loadNews(){
+    fetch('/api/news').then(function(r){return r.json();}).then(function(list){
+      var box=document.getElementById('news');
+      if(!list || !list.length){ box.innerHTML='<div class="mural"><div class="empty-note">📭 Nenhuma notícia por enquanto.</div></div>'; return; }
+      box.innerHTML=list.map(function(n){
+        var when=new Date(n.time).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        return '<div class="mural"><div class="mural-h"><span class="mural-title">📣 Mural da guilda</span><span class="mural-meta">'+esc(n.author)+' · '+when+'</span></div><div class="news-body">'+n.html+'</div></div>';
+      }).join('');
+    }).catch(function(){});
+  }
+
+  function post(url,body){
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
+      .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){
+        if(!r.ok || j.ok===false){ flash('● '+(j.error||'não foi possível'),'var(--ember)'); }
+        else { flash('● feito','var(--green)'); setTimeout(function(){ loadEvents(); },700); }
+      }); }).catch(function(){ flash('● erro','var(--ember)'); });
+  }
+  function doMove(uid,party,slot){ if(current) post('/api/move',{event:current,userId:uid,party:party,slot:slot}); }
+  function doSetWeapon(uid,weapon){ if(current) post('/api/setweapon',{event:current,userId:uid,weapon:weapon}); }
+  function openWeaponPicker(wspan,s){
+    if(!s.options||!s.options.length) return;
     if(wspan.nextSibling && wspan.nextSibling.className==='wsel') return;
     var sel=document.createElement('select'); sel.className='wsel';
     s.options.forEach(function(w){ var o=document.createElement('option'); o.value=w; o.textContent=w; if(w===s.weapon)o.selected=true; sel.appendChild(o); });
-    wspan.style.display='none'; wspan.parentNode.insertBefore(sel, wspan.nextSibling); sel.focus();
+    wspan.style.display='none'; wspan.parentNode.insertBefore(sel,wspan.nextSibling); sel.focus();
     function close(){ if(sel.parentNode) sel.parentNode.removeChild(sel); wspan.style.display=''; }
-    sel.addEventListener('change',function(){ var v=sel.value; close(); if(v!==s.weapon) doSetWeapon(s.userId, v); });
-    sel.addEventListener('blur', close);
+    sel.addEventListener('change',function(){ var v=sel.value; close(); if(v!==s.weapon) doSetWeapon(s.userId,v); });
+    sel.addEventListener('blur',close);
   }
-  function doMove(uid, party, slot){
-    if(!current) return;
-    fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,userId:uid,party:party,slot:slot})})
-      .then(function(r){ if(!r.ok){ document.getElementById('live').textContent='● não foi possível mover'; document.getElementById('live').style.color='var(--acc)'; } })
-      .catch(function(){});
-    // a planilha se atualiza sozinha pelo SSE quando o bot reencaixa
-  }
+
   function render(data){
     var board=document.getElementById('board'); board.innerHTML='';
     (data.parties||[]).forEach(function(pt){
       var col=document.createElement('div'); col.className='pt';
-      var h=document.createElement('div'); h.className='pt-h'; h.textContent=pt.name+' ('+pt.filled+'/'+pt.total+')'; col.appendChild(h);
+      var h=document.createElement('div'); h.className='pt-h'; h.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="count">'+pt.filled+' / '+pt.total+'</span>'; col.appendChild(h);
       var body=document.createElement('div'); body.className='pt-body';
-      var left=document.createElement('div'); left.className='pt-col';
-      var right=document.createElement('div'); right.className='pt-col';
+      var left=document.createElement('div'); left.className='col';
+      var right=document.createElement('div'); right.className='col';
       var half=Math.ceil(pt.slots.length/2);
-      pt.slots.forEach(function(s, idx){
+      pt.slots.forEach(function(s,idx){
         var row=document.createElement('div'); row.className='slot'+(s.filled?' filled':'');
         var n=('0'+s.n).slice(-2);
         if(s.filled){
-          var dot=s.presence==='online'?'🟢':'🕐';
-          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="sep"></span><span class="u">'+esc(s.username)+'</span>'+(s.core?'<span class="core" title="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="dot">'+dot+'</span>';
+          var dot=s.presence==='online'?'pres on':'pres wait';
+          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="sep"></span><span class="u">'+esc(s.username)+'</span><span class="tail">'+(s.core?'<span class="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="'+dot+'"></span></span>';
         } else {
           var opts=s.locked?'👑 CALLER':((s.options||[]).slice(0,3).join(' / ')+(((s.options||[]).length>3)?'…':''));
-          row.innerHTML='<span class="n">'+n+'</span><span class="opts">'+esc(opts)+'</span><span class="vazio">vazio</span>';
+          row.innerHTML='<span class="n">'+n+'</span><span class="opts">'+esc(opts)+'</span><span class="empty">vazio</span>';
         }
-        (idx<half?left:right).appendChild(row);
         if(authState.canEdit){
           if(s.filled && !s.locked){
             row.classList.add('drag'); row.setAttribute('draggable','true');
-            row.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', s.userId); e.dataTransfer.effectAllowed='move'; });
+            row.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',s.userId); e.dataTransfer.effectAllowed='move'; });
             var wsp=row.querySelector('.w');
-            if(wsp && s.options && s.options.length){ wsp.classList.add('wedit'); wsp.title='trocar arma'; (function(span,slot){ span.addEventListener('click',function(e){ e.stopPropagation(); openWeaponPicker(span, slot); }); })(wsp, s); }
+            if(wsp && s.options && s.options.length){ wsp.classList.add('wedit'); wsp.title='trocar arma'; (function(span,slot){ span.addEventListener('click',function(e){ e.stopPropagation(); openWeaponPicker(span,slot); }); })(wsp,s); }
           }
           if(!s.locked){
             row.addEventListener('dragover',function(e){ e.preventDefault(); row.classList.add('over'); });
             row.addEventListener('dragleave',function(){ row.classList.remove('over'); });
-            row.addEventListener('drop',function(e){ e.preventDefault(); row.classList.remove('over'); var uid=e.dataTransfer.getData('text/plain'); if(uid) doMove(uid, pt.display, s.n); });
+            row.addEventListener('drop',function(e){ e.preventDefault(); row.classList.remove('over'); var uid=e.dataTransfer.getData('text/plain'); if(uid) doMove(uid,pt.display,s.n); });
           }
         }
+        (idx<half?left:right).appendChild(row);
       });
-      body.appendChild(left); body.appendChild(right);
-      col.appendChild(body);
-      board.appendChild(col);
+      body.appendChild(left); body.appendChild(right); col.appendChild(body); board.appendChild(col);
     });
     var rz=document.getElementById('reserves'); rz.innerHTML='';
     if(data.reserves && data.reserves.length){
-      var t=document.createElement('div'); t.className='rz-h'; t.textContent='⏳ Aguardando PT ('+data.reserves.length+')'; rz.appendChild(t);
-      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.innerHTML=esc(r.username)+' — '+esc(r.weapon)+(r.core?' <span class="core" title="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', r.userId); e.dataTransfer.effectAllowed='move'; }); } rz.appendChild(d); });
+      var wrap=document.createElement('div'); wrap.className='reserve';
+      var t=document.createElement('h3'); t.textContent='⏳ AGUARDANDO PT ('+data.reserves.length+')'; wrap.appendChild(t);
+      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.innerHTML=esc(r.username)+' — '+esc(r.weapon)+(r.core?' <span class="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',r.userId); e.dataTransfer.effectAllowed='move'; }); } wrap.appendChild(d); });
+      rz.appendChild(wrap);
     }
   }
+
   function connect(id){
-    current=id;
-    if(es) es.close();
+    current=id; if(es) es.close();
     es=new EventSource('/api/stream?event='+encodeURIComponent(id));
-    es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); document.getElementById('live').textContent='● ao vivo'; document.getElementById('live').style.color='var(--green)'; }catch(e){} };
-    es.onerror=function(){ document.getElementById('live').textContent='● reconectando…'; document.getElementById('live').style.color='#c9a227'; };
+    es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); flash('● ao vivo','var(--green)'); }catch(e){} };
+    es.onerror=function(){ flash('● reconectando…','var(--gold)'); };
   }
+
+  function renderCaller(){
+    var acts=document.getElementById('cmd-actions'), sel=document.getElementById('cmd-sel');
+    if(!authState.canEdit){ acts.innerHTML=''; sel.innerHTML=''; return; }
+    acts.innerHTML='<button class="btn btn-primary" id="c-open">+ Abrir CTA</button><button class="btn btn-gold" id="c-flash">⚡ Flashmass</button>';
+    document.getElementById('c-open').onclick=openOpenModal;
+    document.getElementById('c-flash').onclick=function(){ mopen('m-flash'); };
+    if(current){
+      sel.innerHTML='<span class="lbl">CTA selecionado —</span><button class="chip" data-show="flex">+ PT Flex</button><button class="chip" data-show="press">+ Press</button><button class="chip" data-show="pt6teste">+ pt6teste</button><button class="btn btn-danger" id="c-finish" style="margin-left:auto">🏁 Finalizar CTA</button>';
+      Array.prototype.forEach.call(sel.querySelectorAll('[data-show]'),function(b){ b.onclick=function(){ if(current) post('/api/cta/show',{event:current,tipo:b.getAttribute('data-show')}); }; });
+      document.getElementById('c-finish').onclick=function(){ if(current && confirm('Finalizar este CTA?')) post('/api/cta/finish',{event:current}); };
+    } else { sel.innerHTML=''; }
+  }
+
+  function openOpenModal(){
+    selTime=null; selImg=null;
+    document.getElementById('drop-txt').textContent='Clique pra escolher a arte do CTA';
+    document.getElementById('open-go').textContent='Abrir CTA';
+    fetch('/api/caller').then(function(r){return r.json();}).then(function(c){
+      var openT={}; (c.open||[]).forEach(function(e){ openT[e.time]=true; });
+      var avail=(c.presetTimes||[]).filter(function(t){ return !openT[t]; });
+      var grid=document.getElementById('open-times');
+      grid.innerHTML = avail.length? avail.map(function(t){ return '<button class="time" data-t="'+t+'">'+t+'</button>'; }).join('') : '<span style="color:var(--dim)">Todos os horários já estão abertos.</span>';
+      Array.prototype.forEach.call(grid.querySelectorAll('.time'),function(b){ b.onclick=function(){ grid.querySelectorAll('.time').forEach(function(x){x.classList.remove('on');}); b.classList.add('on'); selTime=b.getAttribute('data-t'); document.getElementById('open-go').textContent='Abrir CTA às '+selTime; }; });
+      mopen('m-open');
+    });
+  }
+
+  document.getElementById('open-file').addEventListener('change',function(e){
+    var f=e.target.files[0]; if(!f) return;
+    var rd=new FileReader(); rd.onload=function(){ selImg=rd.result; document.getElementById('drop-txt').innerHTML='✅ '+esc(f.name)+'<br><img src="'+selImg+'">'; }; rd.readAsDataURL(f);
+  });
+  document.getElementById('open-go').onclick=function(){
+    if(!selTime){ flash('● escolha um horário','var(--ember)'); return; }
+    mclose('m-open'); post('/api/cta/open',{time:selTime,image:selImg||null});
+  };
+  document.getElementById('flash-go').onclick=function(){
+    var t=(document.getElementById('flash-time').value||'').trim(); if(!t) return; mclose('m-flash'); post('/api/cta/flashmass',{time:t});
+  };
+
   function loadEvents(){
     fetch('/api/events').then(function(r){return r.json();}).then(function(list){
       var bar=document.getElementById('ctas'); bar.innerHTML='';
-      if(!list.length){ bar.innerHTML='<span class="none">Nenhum CTA aberto agora.</span>'; document.getElementById('board').innerHTML=''; document.getElementById('reserves').innerHTML=''; current=null; if(es){es.close();es=null;} document.getElementById('live').textContent='● aguardando CTA'; document.getElementById('live').style.color='var(--dim)'; renderCaller(); return; }
+      if(!list.length){ bar.innerHTML='<span style="color:var(--dim)">Nenhum CTA aberto.</span>'; document.getElementById('board').innerHTML='<div class="empty-note">Nenhum CTA aberto agora.</div>'; document.getElementById('reserves').innerHTML=''; current=null; if(es){es.close();es=null;} renderCaller(); return; }
       var stillOpen=false;
       list.forEach(function(e){
         if(e.id===current) stillOpen=true;
-        var b=document.createElement('button'); b.textContent='CTA '+e.time; b.className='cta-btn'+(e.id===current?' on':'');
-        b.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('.cta-btn'),function(x){x.classList.remove('on');}); b.classList.add('on'); connect(e.id); renderCaller(); };
+        var b=document.createElement('button'); b.textContent='CTA '+e.time; b.className='tab'+(e.id===current?' on':'');
+        b.onclick=function(){ Array.prototype.forEach.call(document.querySelectorAll('#ctas .tab'),function(x){x.classList.remove('on');}); b.classList.add('on'); connect(e.id); renderCaller(); };
         bar.appendChild(b);
       });
-      if(!stillOpen){ var first=document.querySelector('.cta-btn'); if(first){ first.classList.add('on'); connect(list[0].id); } }
+      if(!stillOpen){ var first=document.querySelector('#ctas .tab'); if(first){ first.classList.add('on'); connect(list[0].id); } }
       renderCaller();
     }).catch(function(){});
   }
-  var authState={logged:false,member:false,canEdit:false,name:''};
-  function renderAuthHeader(){
-    var el=document.getElementById('auth');
-    if(authState.logged){
-      var tag = authState.canEdit ? '✏️ edição liberada' : (authState.member ? '👁️ somente leitura' : '⛔ fora do servidor');
-      el.innerHTML='<span>'+tag+' · '+esc(authState.name)+'</span> '+(authState.member?'<a href="#" id="mystats">📊 meu desempenho</a> ':'')+'<a href="/auth/logout">sair</a>';
-      var ms=document.getElementById('mystats'); if(ms) ms.onclick=function(e){ e.preventDefault(); openStats(); };
-    } else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
-  }
-  function showGate(){
-    document.getElementById('ctas').innerHTML='';
-    document.getElementById('reserves').innerHTML='';
-    var cp=document.getElementById('caller'); cp.className=''; cp.innerHTML='';
-    if(es){es.close();es=null;} current=null;
-    document.getElementById('live').textContent='';
-    document.getElementById('board').innerHTML = authState.logged
-      ? '<div class="gate">⛔ Você não é membro do servidor IMORTAIS.<br>A formação é restrita à guild.</div>'
-      : '<div class="gate">🔒 Planilha restrita aos IMORTAIS.<br>Entra com o Discord pra ver.<br><a class="gate-btn" href="/auth/login">Entrar com Discord</a></div>';
-  }
-  function flash(msg,color){ var l=document.getElementById('live'); l.textContent='● '+msg; l.style.color=color||'var(--dim)'; }
-  function post(url,body){
-    fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})})
-      .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){
-        if(!r.ok || j.ok===false){ flash(j.error||'não foi possível','var(--acc)'); }
-        else { flash('feito','var(--green)'); setTimeout(function(){ loadEvents(); },700); }
-      }); })
-      .catch(function(){ flash('erro','var(--acc)'); });
-  }
-  function renderCaller(){
-    var panel=document.getElementById('caller');
-    if(!authState.canEdit){ panel.className=''; panel.innerHTML=''; return; }
-    fetch('/api/caller').then(function(r){return r.json();}).then(function(c){
-      var openTimes={}; (c.open||[]).forEach(function(e){ openTimes[e.time]=true; });
-      var avail=(c.presetTimes||[]).filter(function(t){ return !openTimes[t]; });
-      var html='<div class="cbox"><h3>Abrir CTA</h3>';
-      if(avail.length){ avail.forEach(function(t){ html+='<button class="cbtn" data-open="'+t+'">+ '+t+'</button>'; }); }
-      else { html+='<span style="color:var(--dim)">Todos os horários do preset já estão abertos.</span>'; }
-      html+='</div>';
-      html+='<div class="cbox"><h3>Flashmass</h3><input id="fmtime" placeholder="21:20"> <button class="cbtn fm" id="fmgo">⚡ Disparar flashmass</button></div>';
-      if(current){
-        html+='<div class="cbox"><h3>CTA selecionado</h3>'
-          +'<button class="cbtn" data-show="flex">+ PT Flex</button>'
-          +'<button class="cbtn" data-show="press">+ Press</button>'
-          +'<button class="cbtn" data-show="pt6teste">+ pt6teste</button>'
-          +'<button class="cbtn danger" id="finish">🏁 Finalizar CTA</button></div>';
-      }
-      panel.innerHTML=html; panel.className='on';
-      Array.prototype.forEach.call(panel.querySelectorAll('[data-open]'),function(b){ b.onclick=function(){ post('/api/cta/open',{time:b.getAttribute('data-open')}); }; });
-      var fmgo=document.getElementById('fmgo'); if(fmgo) fmgo.onclick=function(){ var t=document.getElementById('fmtime').value.trim(); if(t) post('/api/cta/flashmass',{time:t}); };
-      Array.prototype.forEach.call(panel.querySelectorAll('[data-show]'),function(b){ b.onclick=function(){ if(current) post('/api/cta/show',{event:current,tipo:b.getAttribute('data-show')}); }; });
-      var fin=document.getElementById('finish'); if(fin) fin.onclick=function(){ if(current && confirm('Finalizar este CTA?')) post('/api/cta/finish',{event:current}); };
-    }).catch(function(){});
-  }
-  function openStats(){
-    var m=document.getElementById('stats'); var body=document.getElementById('stats-body');
-    body.innerHTML='carregando…'; m.style.display='flex';
-    fetch('/api/me/stats').then(function(r){return r.json();}).then(function(s){
-      if(s.season===false){ body.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa no momento.'; return; }
-      if(!s.found){ body.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>Você ainda não pontuou nesta temporada.'; return; }
-      body.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>'
-        +'<div class="big">#'+s.rank+' <span>de '+s.total+'</span></div>'
-        +'<div class="stat-row"><b>'+s.score+'</b> pontos · '+esc(s.cat)+'</div>'
-        +'<div class="stat-row">✅ Veio: <b>'+s.came+'</b> de '+s.ctaCount+' CTAs</div>'
-        +'<div class="stat-row" style="color:var(--dim)">&nbsp;&nbsp;↳ '+s.integral+' integrais · '+s.parcial+' parciais · '+s.rapida+' rápidas</div>'
-        +'<div class="stat-row">📣 Pingou que viria: <b>'+s.pinged+'</b></div>'
-        +'<div class="stat-row">🔴 Faltou (pingou e não veio): <b>'+s.fantasma+'</b></div>';
-    }).catch(function(){ body.innerHTML='Erro ao carregar.'; });
-  }
-  (function(){ var x=document.getElementById('stats-x'); if(x) x.onclick=function(){ document.getElementById('stats').style.display='none'; }; var m=document.getElementById('stats'); if(m) m.onclick=function(e){ if(e.target===m) m.style.display='none'; }; })();
+
+  Array.prototype.forEach.call(document.querySelectorAll('.nv'),function(b){ b.onclick=function(){ show(b.getAttribute('data-view')); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.modal'),function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
+
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
-      authState={logged:!!a.logged, member:!!a.member, canEdit:!!a.canEdit, name:a.name||''};
+      authState={logged:!!a.logged,member:!!a.member,canEdit:!!a.canEdit,name:a.name||''};
       renderAuthHeader();
-      if(authState.logged && authState.member) loadEvents(); else showGate();
-    }).catch(function(){ authState={logged:false,member:false,canEdit:false,name:''}; renderAuthHeader(); showGate(); });
+      if(authState.logged && authState.member){
+        document.getElementById('gate').innerHTML='';
+        document.getElementById('nav').style.display='flex';
+        show('mural'); loadNews(); loadEvents();
+      } else {
+        document.getElementById('nav').style.display='none';
+        document.getElementById('view-mural').style.display='none';
+        document.getElementById('view-board').style.display='none';
+        document.getElementById('live').textContent='';
+        document.getElementById('gate').innerHTML = authState.logged
+          ? '<div class="gate">⛔ Você não é membro do servidor IMORTAIS.<br>O conteúdo é restrito à guilda.</div>'
+          : '<div class="gate">🔒 Restrito aos IMORTAIS.<br>Entre com o Discord pra ver o mural e a planilha.<br><a class="gate-btn" href="/auth/login">Entrar com Discord</a></div>';
+      }
+    }).catch(function(){ document.getElementById('gate').innerHTML='<div class="gate">Erro ao carregar.</div>'; });
   }
   boot();
-  setInterval(function(){ if(authState.member) loadEvents(); }, 15000);
+  setInterval(function(){ if(authState.member){ loadEvents(); loadNews(); } }, 20000);
 </script>
 </body>
 </html>`;
