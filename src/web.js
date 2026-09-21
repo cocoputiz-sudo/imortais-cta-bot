@@ -54,6 +54,8 @@ function plOf(ev) { try { return db.parsePartyList(ev); } catch { return [0]; } 
 async function buildRosterData(ev) {
   const pl = plOf(ev);
   const signups = await db.getSignups(ev.id);
+  let coreSet = new Set();
+  try { const cr = await db.pool.query("SELECT user_id FROM players WHERE guild_id=$1 AND core_verified=true", [ev.guild_id]); coreSet = new Set(cr.rows.map((r) => String(r.user_id))); } catch (_) { /* players pode não existir */ }
   const bySlot = new Map();
   const reserves = [];
   for (const s of signups) {
@@ -69,7 +71,7 @@ async function buildRosterData(ev) {
       const su = bySlot.get(`${p}:${i}`);
       if (su) {
         filled++;
-        slots.push({ n: i + 1, filled: true, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id, options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
+        slots.push({ n: i + 1, filled: true, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id, core: coreSet.has(String(su.user_id)), options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
       } else {
         const options = [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon);
         slots.push({ n: i + 1, filled: false, locked: !!slot.locked, options });
@@ -80,7 +82,7 @@ async function buildRosterData(ev) {
   return {
     event: { id: ev.id, time: ev.time_label, status: ev.status },
     parties,
-    reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon, userId: r.user_id })),
+    reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon, userId: r.user_id, core: coreSet.has(String(r.user_id)) })),
   };
 }
 
@@ -258,6 +260,12 @@ function startWebServer(client, opts) {
     res.json({ ok: true });
   });
 
+  app.get("/api/me/stats", async (req, res) => {
+    const sess = requireMember(req, res); if (!sess) return;
+    const r = _act.myStats ? await _act.myStats(sess.id, GUILD_ID) : null;
+    res.json(r || { error: "indisponível" });
+  });
+
   app.get("/", (_req, res) => res.type("html").send(PAGE));
 
   const port = process.env.PORT || 3000;
@@ -305,6 +313,15 @@ const PAGE = `<!doctype html>
   .slot.over { outline:2px solid var(--acc); outline-offset:-2px; background:#241417; }
   .slot .w.wedit { cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px; }
   .wsel { background:#12151b; color:var(--txt); border:1px solid var(--acc); border-radius:6px; font-size:12px; padding:1px 4px; max-width:180px; }
+  .slot .core { margin-left:4px; }
+  .rz-i .core { margin-left:2px; }
+  .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:20; align-items:center; justify-content:center; padding:16px; }
+  .modal-box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; max-width:420px; width:100%; position:relative; }
+  .modal-x { position:absolute; top:10px; right:12px; background:none; border:0; color:var(--dim); font-size:18px; cursor:pointer; }
+  .modal-box h2 { font-size:16px; margin:0 0 14px; }
+  .big { font-size:34px; font-weight:800; margin:4px 0 10px; }
+  .big span { font-size:15px; color:var(--dim); font-weight:400; }
+  .stat-row { padding:4px 0; color:#c7cdd6; }
   .slot .u { font-weight:600; margin-left:2px; }
   .slot .opts { color:var(--dim); }
   .slot .vazio { color:#5a6270; font-style:italic; margin-left:auto; }
@@ -339,6 +356,7 @@ const PAGE = `<!doctype html>
 <div id="board"></div>
 <div id="reserves"></div>
 <footer>Telão em tempo real · edição em breve (Fase 2)</footer>
+<div id="stats" class="modal"><div class="modal-box"><button class="modal-x" id="stats-x">✕</button><div id="stats-body"></div></div></div>
 <script>
   var current=null, es=null;
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -374,7 +392,7 @@ const PAGE = `<!doctype html>
         var n=('0'+s.n).slice(-2);
         if(s.filled){
           var dot=s.presence==='online'?'🟢':'🕐';
-          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="sep"></span><span class="u">'+esc(s.username)+'</span>'+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="dot">'+dot+'</span>';
+          row.innerHTML='<span class="n">'+n+'</span><span class="w">'+esc(s.weapon)+'</span><span class="sep"></span><span class="u">'+esc(s.username)+'</span>'+(s.core?'<span class="core" title="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="dot">'+dot+'</span>';
         } else {
           var opts=s.locked?'👑 CALLER':((s.options||[]).slice(0,3).join(' / ')+(((s.options||[]).length>3)?'…':''));
           row.innerHTML='<span class="n">'+n+'</span><span class="opts">'+esc(opts)+'</span><span class="vazio">vazio</span>';
@@ -401,7 +419,7 @@ const PAGE = `<!doctype html>
     var rz=document.getElementById('reserves'); rz.innerHTML='';
     if(data.reserves && data.reserves.length){
       var t=document.createElement('div'); t.className='rz-h'; t.textContent='⏳ Aguardando PT ('+data.reserves.length+')'; rz.appendChild(t);
-      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.textContent=r.username+' — '+r.weapon; if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', r.userId); e.dataTransfer.effectAllowed='move'; }); } rz.appendChild(d); });
+      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='rz-i'; d.innerHTML=esc(r.username)+' — '+esc(r.weapon)+(r.core?' <span class="core" title="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain', r.userId); e.dataTransfer.effectAllowed='move'; }); } rz.appendChild(d); });
     }
   }
   function connect(id){
@@ -431,7 +449,8 @@ const PAGE = `<!doctype html>
     var el=document.getElementById('auth');
     if(authState.logged){
       var tag = authState.canEdit ? '✏️ edição liberada' : (authState.member ? '👁️ somente leitura' : '⛔ fora do servidor');
-      el.innerHTML='<span>'+tag+' · '+esc(authState.name)+'</span> <a href="/auth/logout">sair</a>';
+      el.innerHTML='<span>'+tag+' · '+esc(authState.name)+'</span> '+(authState.member?'<a href="#" id="mystats">📊 meu desempenho</a> ':'')+'<a href="/auth/logout">sair</a>';
+      var ms=document.getElementById('mystats'); if(ms) ms.onclick=function(e){ e.preventDefault(); openStats(); };
     } else { el.innerHTML='<a href="/auth/login">Entrar com Discord</a>'; }
   }
   function showGate(){
@@ -478,6 +497,22 @@ const PAGE = `<!doctype html>
       var fin=document.getElementById('finish'); if(fin) fin.onclick=function(){ if(current && confirm('Finalizar este CTA?')) post('/api/cta/finish',{event:current}); };
     }).catch(function(){});
   }
+  function openStats(){
+    var m=document.getElementById('stats'); var body=document.getElementById('stats-body');
+    body.innerHTML='carregando…'; m.style.display='flex';
+    fetch('/api/me/stats').then(function(r){return r.json();}).then(function(s){
+      if(s.season===false){ body.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa no momento.'; return; }
+      if(!s.found){ body.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>Você ainda não pontuou nesta temporada.'; return; }
+      body.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>'
+        +'<div class="big">#'+s.rank+' <span>de '+s.total+'</span></div>'
+        +'<div class="stat-row"><b>'+s.score+'</b> pontos · '+esc(s.cat)+'</div>'
+        +'<div class="stat-row">✅ Veio: <b>'+s.came+'</b> de '+s.ctaCount+' CTAs</div>'
+        +'<div class="stat-row" style="color:var(--dim)">&nbsp;&nbsp;↳ '+s.integral+' integrais · '+s.parcial+' parciais · '+s.rapida+' rápidas</div>'
+        +'<div class="stat-row">📣 Pingou que viria: <b>'+s.pinged+'</b></div>'
+        +'<div class="stat-row">🔴 Faltou (pingou e não veio): <b>'+s.fantasma+'</b></div>';
+    }).catch(function(){ body.innerHTML='Erro ao carregar.'; });
+  }
+  (function(){ var x=document.getElementById('stats-x'); if(x) x.onclick=function(){ document.getElementById('stats').style.display='none'; }; var m=document.getElementById('stats'); if(m) m.onclick=function(e){ if(e.target===m) m.style.display='none'; }; })();
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
       authState={logged:!!a.logged, member:!!a.member, canEdit:!!a.canEdit, name:a.name||''};

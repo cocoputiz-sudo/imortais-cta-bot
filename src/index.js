@@ -2274,6 +2274,21 @@ process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
 const webActions = {
   presetTimes: () => CFG.presetTimes,
+  myStats: async (userId, guildId) => {
+    const season = await db.getCurrentSeason(guildId);
+    if (!season) return { season: false };
+    const report = await attendance.buildReport(guildId, new Date(season.started_at), new Date());
+    const rows = report.rows;
+    const idx = rows.findIndex((r) => r.user_id === userId);
+    if (idx < 0) return { season: season.number, ctaCount: report.ctaCount, found: false };
+    const r = rows[idx];
+    return {
+      season: season.number, ctaCount: report.ctaCount, found: true,
+      rank: idx + 1, total: rows.length, score: r.score, cat: r.cat,
+      came: r.integral + r.parcial + r.rapida, integral: r.integral, parcial: r.parcial, rapida: r.rapida,
+      pinged: r.pingou, fantasma: r.fantasma,
+    };
+  },
   applyEdit: async (eventId) => {
     const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return;
     const guild = client.guilds.cache.get(ev.guild_id) || null;
