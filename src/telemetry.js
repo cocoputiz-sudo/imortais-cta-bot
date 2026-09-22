@@ -212,6 +212,21 @@ async function initSchema(dbPool) {
       ON albion_telemetry_events(device_id, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_albion_tel_type_time
       ON albion_telemetry_events(type, occurred_at DESC);
+
+    CREATE TABLE IF NOT EXISTS albion_guild_presence (
+      player_key      TEXT PRIMARY KEY,
+      player_name     TEXT NOT NULL,
+      player_id       TEXT,
+      online          BOOLEAN NOT NULL,
+      last_seen_at    TIMESTAMPTZ,
+      state_at        TIMESTAMPTZ NOT NULL,
+      last_event_at   TIMESTAMPTZ NOT NULL,
+      observer_device TEXT,
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_albion_guild_presence_online
+      ON albion_guild_presence(online, state_at DESC);
   `);
 }
 
@@ -733,6 +748,75 @@ function previewValue(value) {
   return String(value).slice(0, 120);
 }
 
+function dotNetTicksToDate(value, fallback) {
+  const ticks = Number(value);
+  if (!Number.isFinite(ticks)) return fallback instanceof Date ? fallback : new Date(fallback);
+  const ms = (ticks - 621355968000000000) / 10000;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? (fallback instanceof Date ? fallback : new Date(fallback)) : d;
+}
+
+async function applyGuildPresenceProbe({ payload, deviceId, occurredAt }) {
+  if (!payload || String(payload.eventName || "") !== "GuildPlayerUpdated") return;
+  const parameters = payload.parameters && typeof payload.parameters === "object" ? payload.parameters : {};
+  const playerName = String(parameters["1"] || "").trim();
+  const playerKey = normName(playerName);
+  if (!playerKey) return;
+
+  const hasOnlineFlag = Object.prototype.hasOwnProperty.call(parameters, "2");
+  const online = hasOnlineFlag ? parameters["2"] === true : false;
+  const stateAt = dotNetTicksToDate(parameters["3"], occurredAt);
+  const playerId = parameters["0"] && typeof parameters["0"] === "object"
+    ? String(parameters["0"].previewBase64 || "").trim() || null
+    : null;
+  const lastSeenAt = online ? null : stateAt;
+
+  await pool.query(`
+    INSERT INTO albion_guild_presence(
+      player_key, player_name, player_id, online, last_seen_at,
+      state_at, last_event_at, observer_device, updated_at
+    )
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())
+    ON CONFLICT(player_key) DO UPDATE SET
+      player_name=EXCLUDED.player_name,
+      player_id=COALESCE(EXCLUDED.player_id, albion_guild_presence.player_id),
+      online=EXCLUDED.online,
+      last_seen_at=CASE
+        WHEN EXCLUDED.online THEN albion_guild_presence.last_seen_at
+        ELSE EXCLUDED.last_seen_at
+      END,
+      state_at=EXCLUDED.state_at,
+      last_event_at=EXCLUDED.last_event_at,
+      observer_device=EXCLUDED.observer_device,
+      updated_at=now()
+    WHERE EXCLUDED.state_at >= albion_guild_presence.state_at
+  `, [playerKey, playerName, playerId, online, lastSeenAt, stateAt, occurredAt, deviceId]);
+}
+
+async function getGuildPresence() {
+  const { rows } = await pool.query(`
+    SELECT player_name, player_id, online, last_seen_at, state_at, last_event_at, observer_device
+      FROM albion_guild_presence
+     ORDER BY online DESC, CASE WHEN online THEN state_at END DESC NULLS LAST,
+              last_seen_at DESC NULLS LAST, lower(player_name)
+  `);
+  const members = rows.map(r => ({
+    playerName: r.player_name,
+    playerId: r.player_id,
+    online: !!r.online,
+    lastSeenAt: r.last_seen_at,
+    stateAt: r.state_at,
+    lastEventAt: r.last_event_at,
+    observerDevice: r.observer_device
+  }));
+  return {
+    onlineCount: members.filter(m => m.online).length,
+    totalTracked: members.length,
+    generatedAt: new Date().toISOString(),
+    members
+  };
+}
+
 async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200, player = "" } = {}) {
   const safeMinutes = Math.max(1, Math.min(24 * 60, Number(minutes) || 30));
   const safeLimit = Math.max(1, Math.min(1000, Number(limit) || 200));
@@ -1036,7 +1120,14 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
             VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
             ON CONFLICT(event_id) DO NOTHING
           `, [eventId, ctaEventId, deviceId, type, occurredAt, playerName, JSON.stringify(payload || {})]);
-          if (q.rowCount) inserted++; else duplicate++;
+          if (q.rowCount) {
+            inserted++;
+            if (type === "guild_presence_probe") {
+              await applyGuildPresenceProbe({ payload, deviceId, occurredAt });
+            }
+          } else {
+            duplicate++;
+          }
         }
         await pool.query("COMMIT");
       } catch (e) {
@@ -1048,6 +1139,16 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       res.json({ ok: true, inserted, duplicate, ctaEventId });
     } catch (e) {
       console.error("/api/telemetry/ingest:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/telemetry/guild-presence", async (req, res) => {
+    try {
+      if (!requireMember || !requireMember(req, res)) return;
+      res.json(await getGuildPresence());
+    } catch (e) {
+      console.error("/api/telemetry/guild-presence:", e);
       res.status(500).json({ error: "server" });
     }
   });
@@ -1185,4 +1286,4 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 }
 
-module.exports = { initSchema, installRoutes, notifyTelemetry, getConfirm, getLoot, getCombat, getGuildPresenceProbeDiagnostics };
+module.exports = { initSchema, installRoutes, notifyTelemetry, getConfirm, getLoot, getCombat, getGuildPresence, getGuildPresenceProbeDiagnostics };
