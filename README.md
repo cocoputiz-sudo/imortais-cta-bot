@@ -34,6 +34,14 @@ Stack: **Node.js + discord.js v14 + PostgreSQL**, hospedado no Railway.
 - Sala de voz própria, contagem de presença e divisão de prata (igual roaming).
 - Reconhecimento de inscrição por botão e por texto na thread.
 
+### War Room · Guild Presence (experimental)
+
+- recebe probes limitados dos eventos Photon de guilda observados pelo IMORTAIS Combat Client;
+- armazena os probes na telemetria existente, sem inferir online/offline antes de validar o protocolo real;
+- endpoint restrito a editor em `/api/telemetry/guild-presence-probes` resume códigos, chaves, tipos e amostras recentes;
+- esta etapa serve para mapear com segurança `GuildUpdate`, `GuildPlayerUpdated`, `GuildMemberWorldUpdate` e `GuildMemberTerritoryUpdate`;
+- depois da validação, o War Room poderá cruzar presença no Albion com ping, Discord e Party real.
+
 ### Attendance & Temporadas
 - Mede presença pelo tempo real na call (não depende de ping).
 - Relatórios em HTML com drill-down: `/attendance_daily`, `/attendance_week`, `/attendance_monthly`.
