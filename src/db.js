@@ -163,6 +163,7 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS party_list TEXT DEFAULT '0';`);
   await pool.query(`ALTER TABLE cta_signups ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT false;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
@@ -262,7 +263,28 @@ async function deleteSignup(eventId, userId) {
 }
 
 async function setStatus(eventId, status) {
-  await pool.query(`UPDATE cta_events SET status=$1 WHERE id=$2`, [status, eventId]);
+  const terminal = status === "closed" || status === "cancelled";
+  await pool.query(
+    `UPDATE cta_events
+        SET status=$1,
+            closed_at=CASE WHEN $3 THEN COALESCE(closed_at, now()) ELSE closed_at END
+      WHERE id=$2`,
+    [status, eventId, terminal]
+  );
+}
+
+async function getRecentClosedEvents(guildId, days = 3) {
+  const { rows } = await pool.query(
+    `SELECT id, guild_id, time_label, status, created_at,
+            COALESCE(closed_at, created_at) AS closed_at
+       FROM cta_events
+      WHERE guild_id=$1
+        AND status='closed'
+        AND COALESCE(closed_at, created_at) >= now() - ($2::text || ' days')::interval
+      ORDER BY COALESCE(closed_at, created_at) DESC`,
+    [guildId, Math.max(1, Number(days) || 3)]
+  );
+  return rows;
 }
 
 async function setTimeLabel(eventId, timeLabel) {
@@ -553,7 +575,7 @@ module.exports = {
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange, setEventIgnored,
   getCurrentSeason, startSeason, finishSeason,
-  getOpenEvents, getOpenEventByTime, getSignupAtSlot, clearParty, moveSignupToSlot,
+  getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
