@@ -111,6 +111,14 @@ function effectiveAccepts(slot, ctx) {
   if (slot.gaDynamic && ctx && ctx.gaInParty) {
     return slot.accepts.map((a) => (U(a.weapon) === "G.A" ? { weapon: a.weapon, weight: 9 } : a));
   }
+  if (slot.exaltadoDynamic && ctx && ctx.qsInParty >= 2) {
+    // já tem 2 Queda Santa na PT: a vaga passa a preferir Exaltado sobre QS/Corrompido
+    const remap = { "EXALTADO": 1, "QUEDA SANTA": 3, "CORROMPIDO": 3 };
+    return slot.accepts.map((a) => {
+      const w = remap[U(a.weapon)];
+      return w != null ? { weapon: a.weapon, weight: w } : a;
+    });
+  }
   return slot.accepts;
 }
 
@@ -133,7 +141,7 @@ function countWeaponInParty(assignment, weapon, partyIndex) {
   return n;
 }
 
-function solve(signups, numParties = 4, partyList = null) {
+function solve(signups, numParties = 4, partyList = null, opts = {}) {
   // partyList: lista específica de índices de PT (ex castelo [4,0,1]). Se null, usa 0..numParties.
   const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
   const cells = [];
@@ -195,8 +203,12 @@ function solve(signups, numParties = 4, partyList = null) {
         if (usedCells.has(`${cell.p}:${cell.i}`)) continue;
         const scInPt1 = countWeaponInParty(assignment, "SHADOW CALLER", 0);
         const gaInParty = countWeaponInParty(assignment, "G.A", cell.p);
-        const ctx = { scInPt1, gaInParty };
+        const qsInParty = countWeaponInParty(assignment, "QUEDA SANTA", cell.p);
+        const ctx = { scInPt1, gaInParty, qsInParty };
         let best = null;
+        // privilégio do Core: nas vagas EXATAS da PT1, core confirmado ganha o
+        // desempate sobre não-core (só enquanto opts.corePrivilege estiver ligado).
+        const coreOn = !!(opts.corePrivilege && cell.p === 0 && pass === "exact" && opts.coreIds);
         for (const su of signups) {
           if (usedUsers.has(su.user_id)) continue;
           if (U(su.weapon) === "LOOTER") continue;
@@ -205,13 +217,19 @@ function solve(signups, numParties = 4, partyList = null) {
           const cap = capFor(su.weapon, numParties, parties);
           if ((weaponCount[U(su.weapon)] || 0) >= cap) continue;
 
-          if (
-            !best ||
-            sc.cost < best.cost ||
-            (sc.cost === best.cost && (su.ip || 0) > (best.su.ip || 0))
-          ) {
-            best = { su, cost: sc.cost, kind: sc.kind };
+          let take = false;
+          if (!best) take = true;
+          else if (sc.cost < best.cost) take = true;
+          else if (sc.cost === best.cost) {
+            if (coreOn) {
+              const suCore = opts.coreIds.has(String(su.user_id));
+              const bestCore = opts.coreIds.has(String(best.su.user_id));
+              take = (suCore !== bestCore) ? suCore : ((su.ip || 0) > (best.su.ip || 0));
+            } else {
+              take = (su.ip || 0) > (best.su.ip || 0);
+            }
           }
+          if (take) best = { su, cost: sc.cost, kind: sc.kind };
         }
         if (best) {
           assignment.set(best.su.user_id, {
@@ -292,8 +310,8 @@ function consolidate(signups, numParties = 4, partyList = null) {
   return base;
 }
 
-function reallocate(signups, numParties = 4, partyList = null) {
-  const { assignment } = solve(signups, numParties, partyList);
+function reallocate(signups, numParties = 4, partyList = null, opts = {}) {
+  const { assignment } = solve(signups, numParties, partyList, opts);
   return signups.map((su) => {
     const a = assignment.get(su.user_id);
     const np = a ? a.partyIndex : null;

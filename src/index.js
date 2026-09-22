@@ -51,6 +51,23 @@ function timeToTodayUTC(label) {
     parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
 }
 
+// contexto de encaixe do CTA: quem é core confirmado + se ainda falta >10min pro início
+async function ctaOpts(ev) {
+  const ping = timeToTodayUTC(ev.time_label);
+  // a batalha começa ~40min depois do ping (horário cheio seguinte). O privilégio
+  // do Core fica ligado até 10min antes da BATALHA = ping + 40 - 10 = ping + 30min.
+  const battleStart = ping ? new Date(ping.getTime() + 40 * 60000) : null;
+  const corePrivilege = battleStart ? (Date.now() < battleStart.getTime() - 10 * 60000) : false;
+  let coreIds = new Set();
+  if (corePrivilege) {
+    try {
+      const r = await db.pool.query("SELECT user_id FROM players WHERE guild_id=$1 AND core_verified=true", [ev.guild_id]);
+      coreIds = new Set(r.rows.map((x) => String(x.user_id)));
+    } catch (_) { /* players pode não existir ainda */ }
+  }
+  return { coreIds, corePrivilege };
+}
+
 // ======================  1) GATILHO  =======================================
 client.on(Events.MessageCreate, async (msg) => {
   try {
@@ -212,7 +229,7 @@ async function applyReallocationMsg(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = reallocate(signups, pl.length, pl);
+  const result = reallocate(signups, pl.length, pl, await ctaOpts(fresh));
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
@@ -679,7 +696,7 @@ async function applyReallocation(ev, guild, focusUserId) {
     return myLoc;
   }
 
-  const result = reallocate(signups, pl.length, pl);
+  const result = reallocate(signups, pl.length, pl, await ctaOpts(fresh));
 
   let focusLoc = null;
   for (const r of result) {

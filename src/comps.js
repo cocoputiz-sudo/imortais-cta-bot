@@ -134,13 +134,13 @@ const PARTY1 = [
   slot("Support", [["SILENCE", 1]]),                                            // 10
   slot("Melee",   [["QUEBRA REINOS", 1]]),                                      // 11
   slot("Melee",   [["PRISMA", 1]]),                                             // 12
-  slot("Melee",   [["CANÇÃO", 1]]),                                             // 13
+  slot("Melee",   [["CANÇÃO", 1], ["ASTRAL", 1]]),                               // 13
   slot("Melee",   [["BRAÇADEIRAS", 1], ["CANÇÃO", 1]]),                           // 14
   slot("Melee",   [["URSINAS", 1]]),                                            // 15
   slot("Melee",   [["CRAVADAS", 1]]),                                           // 16
   slot("Healer",  [["QUEDA SANTA", 1]]),                                       // 17
   slot("Healer",  F.HEALER_QS),                                               // 18
-  slot("Healer",  [["QUEDA SANTA", 1], ["CORROMPIDO", 1]]),                      // 19
+  { ...slot("Healer", [["EXALTADO", 1], ["QUEDA SANTA", 1], ["CORROMPIDO", 1]]), exaltadoDynamic: true }, // 19
   slot("Healer",  F.BRACELETE),                                               // 20
 ];
 
