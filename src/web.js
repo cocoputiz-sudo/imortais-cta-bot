@@ -476,6 +476,24 @@ const PAGE = `<!doctype html>
   .drop .ic{ font-size:24px; display:block; margin-bottom:6px; } .drop small{ color:var(--faint); } .drop img{ max-height:110px; border-radius:8px; margin-top:6px; }
   .field input{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:11px; padding:12px 14px; font-size:15px; font-family:var(--sans); margin-bottom:14px; }
   .note{ font-size:12px; color:var(--faint); margin:-4px 0 16px; }
+  .auditpt{ margin-bottom:12px; }
+  .audithead{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .audithead h3{ margin:0; }
+  .auditbad{ margin-left:auto; color:#ff9a9a; font-size:12px; font-weight:800; }
+  .auditgood{ margin-left:auto; color:#8ce5ad; font-size:12px; font-weight:800; }
+  .auditsplit{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .audittitle{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:800; margin:4px 0 7px; }
+  .auditline{ display:grid; grid-template-columns:28px minmax(120px,1fr) auto minmax(120px,1fr); align-items:center; gap:8px; min-height:34px; padding:5px 8px; border-bottom:1px solid #1a222e; }
+  .auditline:last-child{ border-bottom:0; }
+  .auditline.missing{ background:rgba(217,59,69,.035); }
+  .auditline.intruder{ background:rgba(181,118,255,.035); }
+  .auditstatus{ justify-self:start; }
+  .auditdetail{ color:var(--muted); font-size:12px; text-align:right; }
+  .auditok{ color:#8ce5ad; padding:8px 4px; font-size:12px; }
+  .auditcorrect{ margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
+  .auditcorrect summary{ color:var(--muted); cursor:pointer; font-size:12px; }
+  .auditgrid{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:8px; }
+  @media(max-width:900px){ .auditsplit,.auditgrid{ grid-template-columns:1fr; } .auditline{grid-template-columns:28px 1fr auto;} .auditdetail{grid-column:2 / -1;text-align:left;} }
   .sheet .go{ width:100%; padding:13px; font-size:15px; }
   .big{ font-family:var(--disp); font-size:42px; font-weight:900; line-height:1; margin:6px 0 4px; }
   .big small{ font-family:var(--sans); font-size:15px; color:var(--muted); font-weight:400; }
@@ -844,59 +862,65 @@ const PAGE = `<!doctype html>
         +'<div class="stat p"><div class="k">Jogo sem escala</div><div class="v">'+(r.jogoSemEscala||0)+'</div></div>'
         +'</div>';
 
-      function auditPill(x){
-        var map={
-          ok:['ok','CORRETO'],
-          wrong:['div','PT ERRADA'],
-          miss:['miss','FORA DA PARTY'],
-          extra:['extra','NÃO ESCALADO'],
-          seen:['capturado','DETECTADO'],
-          nop:['extra','NÃO PINGOU']
-        };
-        var m=map[x]||['capturado',x||'—'];
-        return '<span class="pill '+m[0]+'">'+m[1]+'</span>';
+      function pill(cls,text){ return '<span class="pill '+cls+'">'+text+'</span>'; }
+      function playerLine(x,kind){
+        var slot=x.slot?('<span class="num">'+('0'+x.slot).slice(-2)+'</span>'):'<span class="num">--</span>';
+        var status='', detail='';
+        if(kind==='missing'){
+          status=pill('miss','FALTANDO');
+          detail=x.game && x.actualPartyLabel ? ('está '+esc(x.actualPartyLabel)) : 'não detectado nesta PT';
+        } else if(kind==='intruder'){
+          status=pill('div','PT ERRADA');
+          detail=x.plannedParty ? ('deveria estar PT '+x.plannedParty) : 'não deveria estar nesta PT';
+        } else {
+          status=pill('ok','CORRETO');
+          detail='ok';
+        }
+        return '<div class="auditline '+kind+'">'+slot+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+status+'</span><span class="auditdetail">'+detail+'</span></div>';
       }
 
-      (d.pts||[]).forEach(function(pt){
-        html+='<div class="panel"><h3>'+esc(pt.pt)+'</h3>'
-          +'<table class="dtable"><thead><tr><th>Jogador</th><th>Arma</th><th>Planejado</th><th>Jogo</th><th>Discord</th><th>Status</th><th>Observação</th></tr></thead><tbody>';
-        (pt.linhas||[]).forEach(function(l){
-          html+='<tr><td><b>'+esc(l.n)+'</b></td>'
-            +'<td>'+esc(l.arma||'—')+'</td>'
-            +'<td>'+(l.plannedParty?('PT '+l.plannedParty):'Reserva')+'</td>'
-            +'<td>'+(l.game?(esc(l.actualPartyLabel||'Detectado')):'❌')+'</td>'
-            +'<td>'+(l.discord?'✅':'❌')+'</td>'
-            +'<td>'+auditPill(l.st)+'</td>'
-            +'<td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+      var groups=d.issuesByParty||[];
+      if(!groups.length){
+        html+='<div class="panel"><div class="empty-note">Ainda não há parties suficientes para comparar.</div></div>';
+      } else {
+        groups.forEach(function(g){
+          var problems=(g.missing||[]).length+(g.intruders||[]).length;
+          html+='<div class="panel auditpt"><div class="audithead"><h3>PT '+g.party+'</h3><span class="'+(problems?'auditbad':'auditgood')+'">'+(problems?(problems+' divergências'):'sem divergências')+'</span></div>';
+
+          if(problems){
+            html+='<div class="auditsplit">'
+              +'<div><div class="audittitle">Quem deveria estar e não está</div>'
+              +((g.missing||[]).length?(g.missing||[]).map(function(x){return playerLine(x,'missing');}).join(''):'<div class="auditok">Ninguém faltando</div>')
+              +'</div>'
+              +'<div><div class="audittitle">Quem está nesta PT e não deveria</div>'
+              +((g.intruders||[]).length?(g.intruders||[]).map(function(x){return playerLine(x,'intruder');}).join(''):'<div class="auditok">Nenhum intruso</div>')
+              +'</div></div>';
+          }
+
+          var correct=(g.correct||[]);
+          if(correct.length){
+            html+='<details class="auditcorrect"><summary>Corretos nesta PT · '+correct.length+'</summary><div class="auditgrid">'
+              +correct.map(function(x){return playerLine(x,'correct');}).join('')
+              +'</div></details>';
+          }
+          html+='</div>';
         });
-        html+='</tbody></table></div>';
-      });
+      }
 
       if((d.discordNoPing||[]).length){
-        html+='<div class="panel"><h3>Discord sem ping</h3>'
-          +'<table class="dtable"><thead><tr><th>Jogador</th><th>Jogo</th><th>Party real</th><th>Status</th><th>Observação</th></tr></thead><tbody>'
+        html+='<div class="panel"><h3>Discord sem ping</h3><div class="auditgrid">'
           +(d.discordNoPing||[]).map(function(l){
-            return '<tr><td><b>'+esc(l.n)+'</b></td><td>'+(l.game?'✅':'❌')+'</td><td>'+esc(l.actualPartyLabel||'—')+'</td><td>'+auditPill(l.st)+'</td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+            return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','NÃO PINGOU')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';
           }).join('')
-          +'</tbody></table></div>';
+          +'</div></div>';
       }
 
       if((d.gameNoSignup||[]).length){
-        html+='<div class="panel"><h3>No jogo sem escala</h3>'
-          +'<table class="dtable"><thead><tr><th>Jogador</th><th>Discord</th><th>Party real</th><th>Status</th><th>Observação</th></tr></thead><tbody>'
+        html+='<div class="panel"><h3>No jogo sem escala</h3><div class="auditgrid">'
           +(d.gameNoSignup||[]).map(function(l){
-            return '<tr><td><b>'+esc(l.n)+'</b></td><td>'+(l.discord?'✅':'❌')+'</td><td>'+esc(l.actualPartyLabel||'—')+'</td><td>'+auditPill(l.st)+'</td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+            return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';
           }).join('')
-          +'</tbody></table></div>';
-      }
-
-      if((d.realParties||[]).length){
-        html+='<div class="panel"><h3>Parties detectadas no Albion</h3>'
-          +'<table class="dtable"><thead><tr><th>Party detectada</th><th>Associada a</th><th>Sobreposição</th><th>Membros detectados</th><th>Clientes</th></tr></thead><tbody>'
-          +(d.realParties||[]).map(function(p){
-            return '<tr><td>#'+p.id+'</td><td>'+(p.mappedParty?('PT '+p.mappedParty):'Não identificada')+'</td><td>'+p.overlap+'</td><td>'+esc((p.members||[]).join(', '))+'</td><td>'+p.devices+'</td></tr>';
-          }).join('')
-          +'</tbody></table></div>';
+          +'</div></div>';
       }
 
       if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
