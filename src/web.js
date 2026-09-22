@@ -612,7 +612,7 @@ const PAGE = `<!doctype html>
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var lootSelectedEvent=null;
   var combatSelectedEvent=null;
-  var telemetryRefreshTimer=null, telemetryRefreshPending=false;
+  var telemetryRefreshTimer=null, telemetryRefreshPending=false, confirmPollTimer=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
   var liveText='● conectando…', liveColor='var(--amber)', liveRestoreTimer=null, streamLive=false;
@@ -764,6 +764,7 @@ const PAGE = `<!doctype html>
 
   function connect(id){
     current=id; if(es) es.close(); if(tes) tes.close();
+    if(confirmPollTimer){ clearInterval(confirmPollTimer); confirmPollTimer=null; }
     es=new EventSource('/api/stream?event='+encodeURIComponent(id));
     es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); streamLive=true; setLive('● conectado · CTA ao vivo','var(--green)'); }catch(e){} };
     es.onerror=function(){ streamLive=false; setLive('● reconectando…','var(--amber)'); };
@@ -783,6 +784,13 @@ const PAGE = `<!doctype html>
         if(v==='devices') renderDevices();
       },3000);
     };
+    // A validação também depende do estado vivo do Discord e da planilha do bot.
+    // Esses dados podem mudar sem qualquer pacote novo do Combat Client.
+    confirmPollTimer=setInterval(function(){
+      if(!current || String(current)!==String(id)) return;
+      var active=document.querySelector('.nav[data-view].on');
+      if(active&&active.getAttribute('data-view')==='confirm') renderConfirm(true);
+    },5000);
   }
 
   function renderCaller(){
@@ -859,8 +867,9 @@ const PAGE = `<!doctype html>
         var sec=Math.max(0,Math.round((Date.now()-Number(m.latestPartyAt))/1000));
         age=sec<60?(sec+'s atrás'):(Math.floor(sec/60)+'min atrás');
       }
+      var evt=d.event||{};
       var html=liveBadge((m.partyPlayers||0)+' jogadores detectados · '+(m.realParties||0)+' PTs · '+(m.discordPlayers||0)+' na call')
-        +'<div class="modhead">🎯 Validação do CTA</div>'
+        +'<div class="modhead">🎯 Validação do CTA · CTA '+esc(evt.time||'?')+' UTC <span style="font-size:11px;color:var(--muted)">#'+esc(evt.id||current)+'</span></div>'
         +'<div class="preview"><b>ESTADO DO JOGO:</b> '+(m.partyPlayers||0)+' jogadores conhecidos'+(age?' · última mudança '+age:'')+'. A ausência de novos pacotes não zera esta informação; ela só muda quando o Combat Client envia outro estado da party.</div>'
         +'<div class="statgrid">'
         +'<div class="stat g"><div class="k">Formação correta</div><div class="v">'+(r.prontidao||0)+'%</div></div>'

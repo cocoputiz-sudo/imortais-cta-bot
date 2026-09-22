@@ -517,6 +517,11 @@ async function getConfirm(db, eventId) {
     : 0;
 
   return {
+    event: {
+      id: String(ev.id),
+      time: ev.time_label,
+      status: ev.status
+    },
     resumo,
     pts: [...pts.entries()].map(([pt, linhas]) => ({ pt, linhas })),
     discordNoPing,
