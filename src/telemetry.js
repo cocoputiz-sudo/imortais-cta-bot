@@ -909,6 +909,42 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     res.json(data);
   });
 
+  app.get("/api/telemetry/loot-ctas", async (req, res) => {
+    if (!requireMember(req, res)) return;
+    try {
+      const { rows } = await pool.query(`
+        SELECT e.id, e.time_label, e.status, e.created_at,
+               COALESCE(e.closed_at, e.created_at) AS closed_at,
+               COUNT(t.event_id)::int AS loot_events
+          FROM cta_events e
+          LEFT JOIN albion_telemetry_events t
+            ON t.cta_event_id=e.id AND t.type='loot'
+         WHERE (
+           e.status='open'
+           OR (
+             e.status='closed'
+             AND COALESCE(e.closed_at, e.created_at) >= now() - interval '3 days'
+           )
+         )
+         GROUP BY e.id
+         ORDER BY CASE WHEN e.status='open' THEN 0 ELSE 1 END,
+                  COALESCE(e.closed_at, e.created_at) DESC
+         LIMIT 100
+      `);
+      res.json(rows.map(r => ({
+        id: String(r.id),
+        time: r.time_label,
+        status: r.status,
+        createdAt: r.created_at,
+        closedAt: r.closed_at,
+        lootEvents: Number(r.loot_events || 0)
+      })));
+    } catch (e) {
+      console.error("/api/telemetry/loot-ctas:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
   app.get("/api/telemetry/loot", async (req, res) => {
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
