@@ -493,6 +493,7 @@ const PAGE = `<!doctype html>
   .auditcorrect{ margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
   .auditcorrect summary{ color:var(--muted); cursor:pointer; font-size:12px; }
   .auditgrid{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:8px; }
+  .lootctas{ display:flex; gap:8px; flex-wrap:wrap; }
   @media(max-width:900px){ .auditsplit,.auditgrid{ grid-template-columns:1fr; } .auditline{grid-template-columns:28px 1fr auto;} .auditdetail{grid-column:2 / -1;text-align:left;} }
   .sheet .go{ width:100%; padding:13px; font-size:15px; }
   .big{ font-family:var(--disp); font-size:42px; font-weight:900; line-height:1; margin:6px 0 4px; }
@@ -605,6 +606,7 @@ const PAGE = `<!doctype html>
     canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,name:''
   };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
+  var lootSelectedEvent=null;
   var telemetryRefreshTimer=null, telemetryRefreshPending=false;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -931,29 +933,63 @@ const PAGE = `<!doctype html>
   }
 
   function renderLoot(silent){
-    if(!current){ noCta('view-loot','📦 Registros & Loot'); return; }
     if(!silent) loading('view-loot','📦 Registros & Loot');
-    fetchTelemetry('/api/telemetry/loot?event='+encodeURIComponent(current)).then(function(d){
-      var r=d.resumo||{};
-      var lootNote=(d.meta&&d.meta.eventosConsiderados!=null)
-        ? (d.meta.eventosConsiderados+' considerados · '+(d.meta.eventosIgnorados||0)+' ignorados')
-        : ((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'');
-      var filterBadge=(d.meta&&d.meta.filtroAtivo)
-        ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Filtro ativo: apenas participantes deste CTA da IMORTAIS entram no desempenho</div>'
-        : '';
-      var html=liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot</div>'
-        +'<div class="statgrid">'
-        +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
-        +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
-        +'<div class="stat a"><div class="k">Pendente</div><div class="v">'+fmtS(r.pendente)+'</div></div>'
-        +'<div class="stat p"><div class="k">Divergências</div><div class="v">'+fmtS(r.divergencias)+'</div></div></div>'
-        +'<div class="split"><div class="panel"><h3>Top looters</h3>'+topList(d.top||[],fmtS)+'</div>'
-        +'<div class="panel"><h3>Itens recentes</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Item</th><th>Qtd</th><th>Valor</th><th>Status</th></tr></thead><tbody>'
-        +(d.itens||[]).map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+esc(i.st)+'">'+esc(i.st)+'</span></td></tr>'; }).join('')
-        +'</tbody></table></div></div>';
-      if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
-      document.getElementById('view-loot').innerHTML=html;
-    }).catch(function(){ document.getElementById('view-loot').innerHTML='<div class="modhead">📦 Registros & Loot</div><div class="empty-note">Sem dados de loot ou erro ao carregar.</div>'; });
+
+    fetch('/api/telemetry/loot-ctas')
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(ctas){
+        ctas=ctas||[];
+        var preferred=lootSelectedEvent || current || (ctas[0]&&ctas[0].id) || null;
+        var selected=ctas.find(function(x){return String(x.id)===String(preferred);}) || ctas[0] || null;
+
+        if(!selected){
+          document.getElementById('view-loot').innerHTML='<div class="modhead">📦 Registros & Loot</div><div class="empty-note">Nenhum CTA disponível para conferência nos últimos 3 dias.</div>';
+          return;
+        }
+
+        lootSelectedEvent=String(selected.id);
+
+        fetchTelemetry('/api/telemetry/loot?event='+encodeURIComponent(lootSelectedEvent)).then(function(d){
+          var r=d.resumo||{};
+          var lootNote=(d.meta&&d.meta.eventosConsiderados!=null)
+            ? (d.meta.eventosConsiderados+' considerados · '+(d.meta.eventosIgnorados||0)+' ignorados')
+            : ((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'');
+          var filterBadge=(d.meta&&d.meta.filtroAtivo)
+            ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Filtro ativo: apenas participantes deste CTA da IMORTAIS entram no desempenho</div>'
+            : '';
+
+          var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
+            +ctas.map(function(x){
+              var on=String(x.id)===String(lootSelectedEvent);
+              var label='CTA '+esc(x.time)+(x.status==='closed'?' · encerrado':' · ao vivo');
+              return '<button class="tab loot-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+label+' <span style="color:var(--muted)">('+x.lootEvents+')</span></button>';
+            }).join('')
+            +'</div><div class="note" style="margin-top:10px">CTAs encerrados ficam disponíveis aqui por 3 dias para conferência de loot.</div></div>';
+
+          var html=picker+liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot</div>'
+            +'<div class="statgrid">'
+            +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
+            +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
+            +'<div class="stat a"><div class="k">Pendente</div><div class="v">'+fmtS(r.pendente)+'</div></div>'
+            +'<div class="stat p"><div class="k">Divergências</div><div class="v">'+fmtS(r.divergencias)+'</div></div></div>'
+            +'<div class="split"><div class="panel"><h3>Top looters</h3>'+topList(d.top||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>Itens recentes</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Item</th><th>Qtd</th><th>Valor</th><th>Status</th></tr></thead><tbody>'
+            +(d.itens||[]).map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+esc(i.st)+'">'+esc(i.st)+'</span></td></tr>'; }).join('')
+            +'</tbody></table></div></div>';
+          if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
+          document.getElementById('view-loot').innerHTML=html;
+
+          Array.prototype.forEach.call(document.querySelectorAll('.loot-cta'),function(b){
+            b.onclick=function(){
+              lootSelectedEvent=b.getAttribute('data-id');
+              renderLoot(false);
+            };
+          });
+        });
+      })
+      .catch(function(){
+        document.getElementById('view-loot').innerHTML='<div class="modhead">📦 Registros & Loot</div><div class="empty-note">Sem dados de loot ou erro ao carregar.</div>';
+      });
   }
 
   function renderCombat(){
