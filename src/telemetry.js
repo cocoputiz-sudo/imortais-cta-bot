@@ -482,7 +482,7 @@ async function getConfirm(db, eventId) {
   };
 }
 
-async function getLoot(eventId) {
+async function getLoot(db, eventId) {
   const { rows } = await pool.query(`
     SELECT event_id, occurred_at, player_name, payload
     FROM albion_telemetry_events
@@ -491,18 +491,39 @@ async function getLoot(eventId) {
     LIMIT 5000
   `, [eventId]);
 
+  // O evento de loot do Albion não informa a guild do jogador.
+  // Para não poluir o desempenho com aliados/inimigos/terceiros, o filtro
+  // operacional usa a lista oficial do CTA (cta_signups) como fonte de verdade.
+  const signups = await db.getSignups(eventId).catch(() => []);
+  const allowed = new Map();
+  for (const s of signups) {
+    const key = normName(s.username);
+    if (key) allowed.set(key, s.username);
+  }
+
   let capturado = 0;
+  let ignorados = 0;
   const byPlayer = new Map();
   const itens = [];
+
   for (const r of rows) {
     const p = r.payload || {};
+    const rawName = String(p.lootedBy || r.player_name || "?");
+    const key = normName(rawName);
+
+    if (!key || !allowed.has(key)) {
+      ignorados++;
+      continue;
+    }
+
+    const displayName = allowed.get(key) || rawName;
     const value = num(p.estimatedValue) * Math.max(1, num(p.quantity, 1));
     capturado += value;
-    const name = String(p.lootedBy || r.player_name || "?");
-    byPlayer.set(name, (byPlayer.get(name) || 0) + value);
+    byPlayer.set(displayName, (byPlayer.get(displayName) || 0) + value);
+
     if (itens.length < 100) {
       itens.push({
-        jog: name,
+        jog: displayName,
         item: String(p.item || "?"),
         qtd: Math.max(1, num(p.quantity, 1)),
         origem: String(p.lootedFrom || p.cluster || ""),
@@ -513,15 +534,23 @@ async function getLoot(eventId) {
     }
   }
 
-  const top = [...byPlayer.entries()].map(([n, v]) => ({ n, v })).sort((a, b) => b.v - a.v).slice(0, 20);
+  const top = [...byPlayer.entries()]
+    .map(([n, v]) => ({ n, v }))
+    .sort((a, b) => b.v - a.v)
+    .slice(0, 20);
+
   return {
     resumo: { capturado, entregue: null, pendente: null, divergencias: null },
     top,
     itens,
     meta: {
       totalEventos: rows.length,
+      eventosConsiderados: rows.length - ignorados,
+      eventosIgnorados: ignorados,
+      filtroAtivo: true,
+      filtro: "cta_imortais",
       comparatorReady: false,
-      note: "O client v0.3 envia loot capturado. Entrega em baú ainda precisa de um hook específico do Loot Comparator."
+      note: "Filtro ativo: somente jogadores inscritos neste CTA da IMORTAIS entram no desempenho de loot. Eventos de outros jogadores continuam armazenados, mas ficam fora desta tela. Entrega em baú ainda precisa de um hook específico do Loot Comparator."
     }
   };
 }
@@ -849,7 +878,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   app.get("/api/telemetry/loot", async (req, res) => {
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
-    res.json(await getLoot(id).catch(e => { console.error("telemetry loot:", e); return { error: "server" }; }));
+    res.json(await getLoot(db, id).catch(e => { console.error("telemetry loot:", e); return { error: "server" }; }));
   });
 
   app.get("/api/telemetry/combat", async (req, res) => {
