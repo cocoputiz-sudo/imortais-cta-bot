@@ -29,7 +29,8 @@ const CFG = {
   bombPingChannelId: process.env.BOMB_PING_CHANNEL_ID || null,
   bombRoleId: process.env.BOMB_ROLE_ID || null,
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
-  prepVoiceId: process.env.PREP_VOICE_ID || null,
+  prepVoiceIds: (process.env.PREP_VOICE_ID || "")
+    .split(",").map((x) => x.trim()).filter(Boolean),
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
   rankingChannelId: process.env.RANKING_CHANNEL_ID || "1550615824232882247",
   bombVoiceId: process.env.BOMB_VOICE_ID || null,
@@ -251,7 +252,7 @@ function buildTimePicker(selected, callerId) {
 
 // ======================  PRESENÇA EM CALL ==================================
 function voiceKind(channelId) {
-  if (channelId && channelId === CFG.prepVoiceId) return "prep";
+  if (channelId && CFG.prepVoiceIds.includes(channelId)) return "prep";
   if (channelId && channelId === CFG.bombVoiceId) return "bomb";
   return null;
 }
@@ -2271,7 +2272,7 @@ client.once(Events.ClientReady, async (c) => {
 
 async function reconcileVoice(client) {
   try {
-    for (const chId of [CFG.prepVoiceId, CFG.bombVoiceId]) {
+    for (const chId of [...CFG.prepVoiceIds, CFG.bombVoiceId]) {
       if (!chId) continue;
       await db.voiceCloseAllOpen(chId);
       const ch = await client.channels.fetch(chId).catch(() => null);
