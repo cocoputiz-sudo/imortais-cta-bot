@@ -218,19 +218,21 @@ function notifyTelemetry(eventId, info = {}) {
 async function latestPartyMembers(eventId, maxAgeSeconds = 120) {
   const { rows } = await pool.query(`
     WITH ranked AS (
-      SELECT device_id, payload, occurred_at,
+      SELECT device_id, player_name, payload, occurred_at,
              ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY occurred_at DESC) AS rn
       FROM albion_telemetry_events
       WHERE cta_event_id=$1 AND type='party_snapshot'
         AND occurred_at >= now() - ($2::text || ' seconds')::interval
     )
-    SELECT device_id, payload, occurred_at FROM ranked WHERE rn=1
+    SELECT device_id, player_name, payload, occurred_at FROM ranked WHERE rn=1
   `, [eventId, maxAgeSeconds]);
 
   const members = new Map();
   for (const row of rows) {
     const arr = row.payload && Array.isArray(row.payload.members) ? row.payload.members : [];
-    for (const name of arr) {
+    const observed = [...arr];
+    if (row.player_name) observed.push(row.player_name);
+    for (const name of observed) {
       const key = normName(name);
       if (!key) continue;
       if (!members.has(key)) members.set(key, { name: String(name), devices: [] });
@@ -257,7 +259,9 @@ async function getConfirm(db, eventId) {
   const realPartyMap = new Map();
   for (const row of snapshotRows) {
     const arr = row.payload && Array.isArray(row.payload.members) ? row.payload.members : [];
-    const clean = [...new Set(arr.map(x => String(x || "").trim()).filter(Boolean))];
+    const observed = [...arr];
+    if (row.player_name) observed.push(row.player_name);
+    const clean = [...new Set(observed.map(x => String(x || "").trim()).filter(Boolean))];
     if (!clean.length) continue;
     const signature = clean.map(normName).sort().join("|");
     const prev = realPartyMap.get(signature);
@@ -401,6 +405,7 @@ async function getConfirm(db, eventId) {
     const row = {
       n: s.username,
       arma: s.weapon,
+      slot: s.slot_index == null ? null : Number(s.slot_index) + 1,
       plannedParty: plannedDisplay,
       actualParty: actual?.party || null,
       actualPartyLabel: actual?.partyLabel || null,
@@ -454,6 +459,27 @@ async function getConfirm(db, eventId) {
     });
   }
 
+  const issuesByParty = new Map();
+  function issueGroup(display) {
+    const key = Number(display);
+    if (!issuesByParty.has(key)) {
+      issuesByParty.set(key, { party: key, missing: [], intruders: [], correct: [] });
+    }
+    return issuesByParty.get(key);
+  }
+
+  for (const row of rows) {
+    if (row.plannedParty != null) {
+      const g = issueGroup(row.plannedParty);
+      if (row.actualParty == null) g.missing.push(row);
+      else if (Number(row.actualParty) === Number(row.plannedParty)) g.correct.push(row);
+    }
+    if (row.actualParty != null && row.plannedParty != null && Number(row.actualParty) !== Number(row.plannedParty)) {
+      issueGroup(row.actualParty).intruders.push(row);
+      issueGroup(row.plannedParty).missing.push(row);
+    }
+  }
+
   const plannedCount = signups.filter(s => s.party_index != null).length;
   resumo.prontidao = plannedCount
     ? Math.round((resumo.corretos / plannedCount) * 100)
@@ -464,6 +490,14 @@ async function getConfirm(db, eventId) {
     pts: [...pts.entries()].map(([pt, linhas]) => ({ pt, linhas })),
     discordNoPing,
     gameNoSignup,
+    issuesByParty: [...issuesByParty.values()]
+      .sort((a,b) => a.party - b.party)
+      .map(g => ({
+        party: g.party,
+        missing: g.missing.sort((a,b) => (a.slot||99) - (b.slot||99)),
+        intruders: g.intruders.sort((a,b) => String(a.n).localeCompare(String(b.n))),
+        correct: g.correct.sort((a,b) => (a.slot||99) - (b.slot||99))
+      })),
     realParties: realParties.map((rp, i) => ({
       id: i + 1,
       mappedParty: rp.display || null,
