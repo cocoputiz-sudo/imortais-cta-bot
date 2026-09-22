@@ -518,25 +518,43 @@ async function getConfirm(db, eventId) {
 
 async function getLoot(db, eventId) {
   const { rows } = await pool.query(`
-    SELECT event_id, occurred_at, player_name, payload
+    SELECT event_id, device_id, occurred_at, player_name, payload
     FROM albion_telemetry_events
     WHERE cta_event_id=$1 AND type='loot'
     ORDER BY occurred_at DESC
     LIMIT 5000
   `, [eventId]);
 
-  // O evento de loot do Albion não informa a guild do jogador.
-  // Para não poluir o desempenho com aliados/inimigos/terceiros, o filtro
-  // operacional usa a lista oficial do CTA (cta_signups) como fonte de verdade.
+  // Identidades legadas: versões antigas do Combat Client não enviavam a guild
+  // de quem lootou. Para não perder o histórico desses CTAs, usamos como fallback
+  // quem foi inscrito OU apareceu em algum snapshot de party daquele CTA.
   const signups = await db.getSignups(eventId).catch(() => []);
-  const allowed = new Map();
+  const legacyAllowed = new Map();
   for (const s of signups) {
     const key = normName(s.username);
-    if (key) allowed.set(key, s.username);
+    if (key) legacyAllowed.set(key, s.username);
+  }
+
+  const partyRows = await pool.query(`
+    SELECT player_name, payload
+      FROM albion_telemetry_events
+     WHERE cta_event_id=$1 AND type='party_snapshot'
+  `, [eventId]).then(r => r.rows).catch(() => []);
+
+  for (const row of partyRows) {
+    const names = [];
+    if (row.player_name) names.push(row.player_name);
+    if (row.payload && Array.isArray(row.payload.members)) names.push(...row.payload.members);
+    for (const name of names) {
+      const key = normName(name);
+      if (key && !legacyAllowed.has(key)) legacyAllowed.set(key, String(name));
+    }
   }
 
   let capturado = 0;
   let ignorados = 0;
+  let legacyConsiderados = 0;
+  let guildConsiderados = 0;
   const byPlayer = new Map();
   const itens = [];
 
@@ -544,14 +562,35 @@ async function getLoot(db, eventId) {
     const p = r.payload || {};
     const rawName = String(p.lootedBy || r.player_name || "?");
     const key = normName(rawName);
+    const guild = String(p.lootedByGuild || p.guild || "").trim();
 
-    if (!key || !allowed.has(key)) {
+    let allowed = false;
+    let displayName = rawName;
+    let filterMode = "";
+
+    if (guild) {
+      allowed = normName(guild) === "imortais";
+      filterMode = "guild";
+      if (allowed) guildConsiderados++;
+    } else if (key && legacyAllowed.has(key)) {
+      // Compatibilidade com telemetria anterior ao campo lootedByGuild.
+      allowed = true;
+      filterMode = "legacy_party";
+      displayName = legacyAllowed.get(key) || rawName;
+      legacyConsiderados++;
+    }
+
+    if (!allowed) {
       ignorados++;
       continue;
     }
 
-    const displayName = allowed.get(key) || rawName;
-    const value = num(p.estimatedValue) * Math.max(1, num(p.quantity, 1));
+    // AverageEstMarketValue enviado pelo Combat Client é VALOR UNITÁRIO.
+    // O cálculo abaixo replica exatamente LootLoggerStats.RecordLoot do client.
+    const unitValue = Math.max(0, num(p.estimatedValue));
+    const quantity = Math.max(0, num(p.quantity, 0));
+    const value = unitValue * quantity;
+
     capturado += value;
     byPlayer.set(displayName, (byPlayer.get(displayName) || 0) + value);
 
@@ -559,8 +598,11 @@ async function getLoot(db, eventId) {
       itens.push({
         jog: displayName,
         item: String(p.item || "?"),
-        qtd: Math.max(1, num(p.quantity, 1)),
+        qtd: quantity,
+        unit: unitValue,
         origem: String(p.lootedFrom || p.cluster || ""),
+        guild: guild || null,
+        filtro: filterMode,
         v: value,
         st: "capturado",
         at: r.occurred_at,
@@ -581,10 +623,14 @@ async function getLoot(db, eventId) {
       totalEventos: rows.length,
       eventosConsiderados: rows.length - ignorados,
       eventosIgnorados: ignorados,
+      guildConsiderados,
+      legacyConsiderados,
       filtroAtivo: true,
-      filtro: "cta_imortais",
+      filtro: "guild_imortais",
       comparatorReady: false,
-      note: "Filtro ativo: somente jogadores inscritos neste CTA da IMORTAIS entram no desempenho de loot. Eventos de outros jogadores continuam armazenados, mas ficam fora desta tela. Entrega em baú ainda precisa de um hook específico do Loot Comparator."
+      note: legacyConsiderados > 0
+        ? "Filtro ativo: guild IMORTAIS quando o client informa guild. Neste CTA há eventos antigos sem guild; neles o sistema usa como compatibilidade quem apareceu na formação/party do CTA."
+        : "Filtro ativo: somente loot de jogadores cuja guild informada pelo Combat Client é IMORTAIS. Entrega em baú ainda depende do Loot Comparator."
     }
   };
 }
