@@ -183,45 +183,241 @@ async function latestPartyMembers(eventId, maxAgeSeconds = 120) {
 async function getConfirm(db, eventId) {
   const ev = await db.getEvent(eventId).catch(() => null);
   if (!ev) return null;
+
   const signups = await db.getSignups(eventId);
   const pl = db.parsePartyList(ev);
   const displayByRaw = new Map(pl.map((raw, idx) => [Number(raw), idx + 1]));
+
+  // ----- Parties reais vistas pelos Combat Clients -----
   const party = await latestPartyMembers(eventId);
+  const snapshotRows = party.snapshots || [];
+
+  // Deduplica snapshots idênticos (vários clientes dentro da mesma party enxergam
+  // essencialmente a mesma lista). Mantém o snapshot mais recente de cada assinatura.
+  const realPartyMap = new Map();
+  for (const row of snapshotRows) {
+    const arr = row.payload && Array.isArray(row.payload.members) ? row.payload.members : [];
+    const clean = [...new Set(arr.map(x => String(x || "").trim()).filter(Boolean))];
+    if (!clean.length) continue;
+    const signature = clean.map(normName).sort().join("|");
+    const prev = realPartyMap.get(signature);
+    if (!prev || new Date(row.occurred_at) > new Date(prev.occurredAt)) {
+      realPartyMap.set(signature, {
+        signature,
+        members: clean,
+        memberKeys: new Set(clean.map(normName)),
+        occurredAt: row.occurred_at,
+        devices: new Set([row.device_id])
+      });
+    } else {
+      prev.devices.add(row.device_id);
+    }
+  }
+  const realParties = [...realPartyMap.values()];
+
+  // ----- Formação planejada -----
+  const planned = new Map(); // display PT -> Set(nome normalizado)
+  for (const s of signups) {
+    if (s.party_index == null) continue;
+    const display = displayByRaw.get(Number(s.party_index)) || (Number(s.party_index) + 1);
+    if (!planned.has(display)) planned.set(display, new Set());
+    planned.get(display).add(normName(s.username));
+  }
+
+  // Associa cada party real à PT planejada com maior sobreposição.
+  // É propositalmente conservador: sem qualquer membro em comum ela fica "não identificada".
+  const candidates = [];
+  realParties.forEach((rp, realIndex) => {
+    for (const [display, names] of planned.entries()) {
+      let overlap = 0;
+      for (const key of rp.memberKeys) if (names.has(key)) overlap++;
+      if (overlap > 0) {
+        const union = new Set([...rp.memberKeys, ...names]).size || 1;
+        candidates.push({ realIndex, display, overlap, score: overlap / union });
+      }
+    }
+  });
+  candidates.sort((a,b) => b.overlap - a.overlap || b.score - a.score);
+
+  const usedReal = new Set(), usedDisplay = new Set();
+  for (const x of candidates) {
+    if (usedReal.has(x.realIndex) || usedDisplay.has(x.display)) continue;
+    realParties[x.realIndex].display = x.display;
+    realParties[x.realIndex].overlap = x.overlap;
+    usedReal.add(x.realIndex);
+    usedDisplay.add(x.display);
+  }
+
+  const actualByName = new Map();
+  for (const rp of realParties) {
+    for (const name of rp.members) {
+      const key = normName(name);
+      if (!key) continue;
+      const current = actualByName.get(key);
+      const candidate = {
+        name,
+        party: rp.display || null,
+        partyLabel: rp.display ? `PT ${rp.display}` : "Party não identificada",
+        occurredAt: rp.occurredAt,
+        devices: rp.devices.size
+      };
+      if (!current || new Date(candidate.occurredAt) > new Date(current.occurredAt)) {
+        actualByName.set(key, candidate);
+      }
+    }
+  }
+
+  // ----- Discord: presença atual na call de preparação -----
+  const voice = await db.pool.query(`
+    SELECT DISTINCT ON (user_id)
+           user_id, username, channel_id, joined_at
+      FROM voice_presence
+     WHERE guild_id=$1
+       AND channel_kind='prep'
+       AND left_at IS NULL
+     ORDER BY user_id, joined_at DESC
+  `, [ev.guild_id]).then(r => r.rows).catch(() => []);
+
+  const voiceByName = new Map();
+  for (const v of voice) {
+    const key = normName(v.username);
+    if (key) voiceByName.set(key, v);
+  }
 
   const signupByName = new Map();
+  for (const s of signups) signupByName.set(normName(s.username), s);
+
+  const rows = [];
   const pts = new Map();
-  let confirmado = 0, faltando = 0;
+  const resumo = {
+    inscritos: signups.length,
+    discord: voice.length,
+    jogo: actualByName.size,
+    corretos: 0,
+    ptErrada: 0,
+    foraParty: 0,
+    pingouForaDiscord: 0,
+    discordSemPing: 0,
+    jogoSemEscala: 0,
+    prontidao: 0
+  };
 
   for (const s of signups) {
     const key = normName(s.username);
-    if (key) signupByName.set(key, s);
-    const display = s.party_index == null ? "Reserva" : `PT ${displayByRaw.get(Number(s.party_index)) || (Number(s.party_index) + 1)}`;
-    if (!pts.has(display)) pts.set(display, []);
-    const seen = key && party.members.has(key);
-    if (seen) confirmado++; else faltando++;
-    pts.get(display).push({
+    const actual = actualByName.get(key);
+    const inDiscord = voiceByName.has(key);
+    const plannedDisplay = s.party_index == null
+      ? null
+      : (displayByRaw.get(Number(s.party_index)) || (Number(s.party_index) + 1));
+
+    let status = "ok";
+    let obs = "";
+
+    if (!actual) {
+      status = "miss";
+      resumo.foraParty++;
+      obs = "Pingou, mas não foi detectado em nenhuma party";
+    } else if (plannedDisplay == null) {
+      status = "extra";
+      resumo.jogoSemEscala++;
+      obs = `Está no jogo (${actual.partyLabel}), mas segue como reserva`;
+    } else if (actual.party != null && Number(actual.party) !== Number(plannedDisplay)) {
+      status = "wrong";
+      resumo.ptErrada++;
+      obs = `Deveria estar PT ${plannedDisplay}, está ${actual.partyLabel}`;
+    } else if (actual.party == null) {
+      status = "seen";
+      obs = "Detectado no jogo, party real ainda não identificada";
+    } else {
+      resumo.corretos++;
+      obs = `PT ${plannedDisplay} correta`;
+    }
+
+    if (!inDiscord) {
+      resumo.pingouForaDiscord++;
+      obs += (obs ? " · " : "") + "fora da call de preparação";
+    }
+
+    const row = {
       n: s.username,
       arma: s.weapon,
-      st: seen ? "ok" : "miss",
-      obs: seen ? `detectado por ${party.members.get(key).devices.length} agente(s)` : "na planilha, não detectado na party",
+      plannedParty: plannedDisplay,
+      actualParty: actual?.party || null,
+      actualPartyLabel: actual?.partyLabel || null,
+      discord: inDiscord,
+      game: !!actual,
+      ping: true,
+      st: status,
+      obs
+    };
+    rows.push(row);
+
+    const group = plannedDisplay == null ? "Reserva" : `PT ${plannedDisplay}`;
+    if (!pts.has(group)) pts.set(group, []);
+    pts.get(group).push(row);
+  }
+
+  const discordNoPing = [];
+  for (const [key, v] of voiceByName.entries()) {
+    if (signupByName.has(key)) continue;
+    const actual = actualByName.get(key);
+    resumo.discordSemPing++;
+    discordNoPing.push({
+      n: v.username,
+      discord: true,
+      ping: false,
+      game: !!actual,
+      actualParty: actual?.party || null,
+      actualPartyLabel: actual?.partyLabel || null,
+      st: "nop",
+      obs: actual
+        ? `Está na call e no jogo (${actual.partyLabel}), mas não pingou`
+        : "Está na call de preparação, mas não pingou"
     });
   }
 
-  const extras = [];
-  for (const [key, m] of party.members.entries()) {
-    if (!signupByName.has(key)) {
-      extras.push({ n: m.name, arma: "—", st: "extra", obs: `no jogo, fora da planilha · ${m.devices.length} agente(s)` });
-    }
+  const gameNoSignup = [];
+  for (const [key, a] of actualByName.entries()) {
+    if (signupByName.has(key)) continue;
+    resumo.jogoSemEscala++;
+    gameNoSignup.push({
+      n: a.name,
+      discord: voiceByName.has(key),
+      ping: false,
+      game: true,
+      actualParty: a.party || null,
+      actualPartyLabel: a.partyLabel,
+      st: "extra",
+      obs: voiceByName.has(key)
+        ? `No jogo e na call, sem ping (${a.partyLabel})`
+        : `No jogo sem escala (${a.partyLabel})`
+    });
   }
-  if (extras.length) pts.set("Não escalados", extras);
+
+  const plannedCount = signups.filter(s => s.party_index != null).length;
+  resumo.prontidao = plannedCount
+    ? Math.round((resumo.corretos / plannedCount) * 100)
+    : 0;
 
   return {
-    resumo: { confirmado, faltando, extra: extras.length, divergencia: 0 },
+    resumo,
     pts: [...pts.entries()].map(([pt, linhas]) => ({ pt, linhas })),
+    discordNoPing,
+    gameNoSignup,
+    realParties: realParties.map((rp, i) => ({
+      id: i + 1,
+      mappedParty: rp.display || null,
+      overlap: rp.overlap || 0,
+      members: rp.members,
+      devices: rp.devices.size,
+      occurredAt: rp.occurredAt
+    })),
     meta: {
-      partySnapshots: party.snapshots.length,
-      partyPlayers: party.members.size,
-      note: "Comparação de presença ativa. Divergência de arma exige telemetria de equipamento, ainda não enviada pelo client v0.3."
+      partySnapshots: snapshotRows.length,
+      realParties: realParties.length,
+      partyPlayers: actualByName.size,
+      discordPlayers: voice.length,
+      note: "Auditoria ao vivo cruza ping/formação do bot, call de preparação do Discord e parties detectadas pelos Combat Clients."
     }
   };
 }
