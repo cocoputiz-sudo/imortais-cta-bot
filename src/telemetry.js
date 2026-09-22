@@ -698,7 +698,11 @@ async function getCombat(db, eventId) {
     porPt: [...ptAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
     topDmg: list.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
     topHeal: list.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
-    meta: { totalEventos: rows.length, note: "Fight segmentation ainda não é enviada pelo client v0.3; o total de fights fica indisponível por enquanto." }
+    meta: {
+      totalEventos: rows.length,
+      retentionDays: 3,
+      note: "Ranking por CTA: dano, cura e mortes ficam disponíveis para conferência por 3 dias após o encerramento. Fight segmentation ainda não está disponível."
+    }
   };
 }
 
@@ -1002,6 +1006,43 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
     res.json(await getLoot(db, id).catch(e => { console.error("telemetry loot:", e); return { error: "server" }; }));
+  });
+
+  app.get("/api/telemetry/combat-ctas", async (req, res) => {
+    if (!requireMember(req, res)) return;
+    try {
+      const { rows } = await pool.query(`
+        SELECT e.id, e.time_label, e.status, e.created_at,
+               COALESCE(e.closed_at, e.created_at) AS closed_at,
+               COUNT(t.event_id)::int AS combat_events
+          FROM cta_events e
+          LEFT JOIN albion_telemetry_events t
+            ON t.cta_event_id=e.id
+           AND t.type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result')
+         WHERE (
+           e.status='open'
+           OR (
+             e.status='closed'
+             AND COALESCE(e.closed_at, e.created_at) >= now() - interval '3 days'
+           )
+         )
+         GROUP BY e.id
+         ORDER BY CASE WHEN e.status='open' THEN 0 ELSE 1 END,
+                  COALESCE(e.closed_at, e.created_at) DESC
+         LIMIT 100
+      `);
+      res.json(rows.map(r => ({
+        id: String(r.id),
+        time: r.time_label,
+        status: r.status,
+        createdAt: r.created_at,
+        closedAt: r.closed_at,
+        combatEvents: Number(r.combat_events || 0)
+      })));
+    } catch (e) {
+      console.error("/api/telemetry/combat-ctas:", e);
+      res.status(500).json({ error: "server" });
+    }
   });
 
   app.get("/api/telemetry/combat", async (req, res) => {
