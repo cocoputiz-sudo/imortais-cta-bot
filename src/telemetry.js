@@ -210,6 +210,8 @@ async function initSchema(dbPool) {
       ON albion_telemetry_events(cta_event_id, type, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_albion_tel_device_time
       ON albion_telemetry_events(device_id, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_albion_tel_type_time
+      ON albion_telemetry_events(type, occurred_at DESC);
   `);
 }
 
@@ -706,6 +708,91 @@ async function getCombat(db, eventId) {
   };
 }
 
+function jsonShape(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "object") return "object";
+  return typeof value;
+}
+
+function previewValue(value) {
+  if (value === null || value === undefined) return value ?? null;
+  if (typeof value === "string") return value.length <= 120 ? value : value.slice(0, 120) + "…";
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    return {
+      length: value.length,
+      sample: value.slice(0, 5).map(previewValue)
+    };
+  }
+  if (typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value).slice(0, 8)) out[k] = previewValue(v);
+    return out;
+  }
+  return String(value).slice(0, 120);
+}
+
+async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200 } = {}) {
+  const safeMinutes = Math.max(1, Math.min(24 * 60, Number(minutes) || 30));
+  const safeLimit = Math.max(1, Math.min(1000, Number(limit) || 200));
+
+  const { rows } = await pool.query(`
+    SELECT event_id, device_id, player_name, payload, occurred_at, received_at
+      FROM albion_telemetry_events
+     WHERE type='guild_presence_probe'
+       AND occurred_at >= now() - ($1::text || ' minutes')::interval
+     ORDER BY occurred_at DESC
+     LIMIT $2
+  `, [safeMinutes, safeLimit]);
+
+  const byEvent = new Map();
+  for (const row of rows) {
+    const payload = row.payload || {};
+    const eventName = String(payload.eventName || "unknown");
+    if (!byEvent.has(eventName)) {
+      byEvent.set(eventName, {
+        eventName,
+        eventCode: payload.eventCode ?? null,
+        count: 0,
+        parameterKeys: {}
+      });
+    }
+
+    const group = byEvent.get(eventName);
+    group.count++;
+    const parameters = payload.parameters && typeof payload.parameters === "object"
+      ? payload.parameters
+      : {};
+
+    for (const [key, value] of Object.entries(parameters)) {
+      if (!group.parameterKeys[key]) {
+        group.parameterKeys[key] = { types: [], sample: previewValue(value) };
+      }
+      const shape = jsonShape(value);
+      if (!group.parameterKeys[key].types.includes(shape)) {
+        group.parameterKeys[key].types.push(shape);
+      }
+    }
+  }
+
+  return {
+    windowMinutes: safeMinutes,
+    total: rows.length,
+    events: [...byEvent.values()].sort((a, b) => b.count - a.count),
+    recent: rows.slice(0, 50).map(row => ({
+      eventId: row.event_id,
+      deviceId: row.device_id,
+      observer: row.player_name,
+      eventName: row.payload?.eventName || null,
+      eventCode: row.payload?.eventCode ?? null,
+      parameters: row.payload?.parameters || {},
+      occurredAt: row.occurred_at,
+      receivedAt: row.received_at
+    }))
+  };
+}
+
 function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
@@ -958,6 +1045,20 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     }
   });
 
+  app.get("/api/telemetry/guild-presence-probes", async (req, res) => {
+    try {
+      if (requireEditor && !requireEditor(req, res)) return;
+      const data = await getGuildPresenceProbeDiagnostics({
+        minutes: req.query.minutes,
+        limit: req.query.limit
+      });
+      res.json(data);
+    } catch (e) {
+      console.error("/api/telemetry/guild-presence-probes:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
   app.get("/api/telemetry/confirm", async (req, res) => {
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
@@ -1076,4 +1177,4 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 }
 
-module.exports = { initSchema, installRoutes, notifyTelemetry, getConfirm, getLoot, getCombat };
+module.exports = { initSchema, installRoutes, notifyTelemetry, getConfirm, getLoot, getCombat, getGuildPresenceProbeDiagnostics };
