@@ -899,11 +899,39 @@ async function onSlash(interaction) {
   if (name === "cta_show") return slashShow(interaction, ev, interaction.options.getString("tipo"));
   if (name === "cta_remove") return slashRemove(interaction, ev);
   if (name === "cta_clean")  return slashClean(interaction, ev);
+  if (name === "cta_remove_pt") return slashRemovePt(interaction, ev);
   if (name === "cta_move")   return slashMoveOrAdd(interaction, ev, false);
   if (name === "cta_add")    return slashMoveOrAdd(interaction, ev, true);
   if (name === "cta_change_time") return slashChangeTime(interaction, ev);
   if (name === "cta_finish") return slashFinish(interaction, ev);
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
+}
+
+async function removePTCore(ev, visualPt, actor) {
+  const fresh = (await db.getEvent(ev.id)) || ev;
+  const pl = db.parsePartyList(fresh);
+  const v = Number(visualPt);
+  if (!Number.isInteger(v) || v < 1 || v > pl.length) return { ok: false, error: "Essa PT nao esta aberta neste CTA." };
+  if (v === 1) return { ok: false, error: "A PT1 nao pode ser removida." };
+  if (pl.length <= 1) return { ok: false, error: "Precisa sobrar ao menos uma PT." };
+  const raw = pl[v - 1];
+  const upd = await db.pool.query(
+    "UPDATE cta_signups SET party_index=NULL, slot_index=NULL, manual=false WHERE event_id=$1 AND party_index=$2",
+    [fresh.id, raw]
+  );
+  pl.splice(v - 1, 1);
+  await db.setPartyList(fresh.id, pl);
+  const guild = client.guilds.cache.get(fresh.guild_id) || null;
+  await applyReallocation(fresh, guild, null);
+  return { ok: true, movidos: upd.rowCount || 0, pt: v };
+}
+
+async function slashRemovePt(interaction, ev) {
+  const pt = interaction.options.getInteger("pt");
+  const r = await removePTCore(ev, pt, `${interaction.user}`);
+  if (!r.ok) return interaction.reply({ content: r.error, flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: `🗑️ PT${pt} removida, ${r.movidos} jogador(es) voltaram pra reserva.`, flags: MessageFlags.Ephemeral });
+  await logStaff(interaction.guild, `🗑️ ${interaction.user} removeu a PT${pt} · CTA ${ev.time_label}`);
 }
 
 async function showPTCore(ev, guild, tipo, actor) {
@@ -2412,6 +2440,11 @@ const webActions = {
     if (!ev) return { ok: false, error: "CTA não encontrado." };
     const guild = client.guilds.cache.get(ev.guild_id) || null;
     return showPTCore(ev, guild, tipo, `<@${actorId}>`);
+  },
+  removePT: async (eventId, visualPt, actorId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev) return { ok: false, error: "CTA não encontrado." };
+    return removePTCore(ev, visualPt, `<@${actorId}>`);
   },
 };
 

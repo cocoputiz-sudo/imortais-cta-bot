@@ -331,6 +331,11 @@ function startWebServer(client, opts) {
     if (!["flex", "press", "pt6teste"].includes(tipo)) return res.status(400).json({ error: "tipo" });
     res.json(_act.showPT ? await _act.showPT(event, tipo, sess.id) : { ok: false, error: "indisponível" });
   });
+  app.post("/api/cta/removept", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const { event, party } = req.body || {};
+    res.json(_act.removePT ? await _act.removePT(event, Number(party), sess.id) : { ok: false, error: "indisponível" });
+  });
 
   app.post("/api/setweapon", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
@@ -420,6 +425,8 @@ const PAGE = `<!doctype html>
   .ghost:hover{ border-color:var(--red); }
   .gold{ border:1px solid var(--gold); background:transparent; color:var(--gold); font-weight:700; }
   .danger{ border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; font-weight:700; }
+  .ptx{ margin-left:8px; border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; border-radius:6px; width:22px; height:22px; cursor:pointer; font-weight:700; line-height:1; flex:0 0 auto; }
+  .ptx:hover{ background:#2a1315; }
   /* hero */
   .hero{ display:grid; grid-template-columns:1.3fr .7fr; gap:12px; margin-bottom:14px; }
   .card{ background:linear-gradient(180deg,#121923,#0e131b); border:1px solid var(--line); border-radius:13px; padding:15px 17px; }
@@ -744,7 +751,11 @@ const PAGE = `<!doctype html>
     (data.parties||[]).forEach(function(pt){
       var sec=document.createElement('section'); sec.className='party';
       var pct=pt.total?Math.round(pt.filled/pt.total*100):0;
-      var ph=document.createElement('div'); ph.className='ph'; ph.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="ct">'+pt.filled+'/'+pt.total+'</span><div class="meter"><i style="width:'+pct+'%"></i></div>'; sec.appendChild(ph);
+      var ph=document.createElement('div'); ph.className='ph';
+      var xbtn=(authState.canEdit && pt.display>1)?'<button class="ptx" title="Remover esta PT">✕</button>':'';
+      ph.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="ct">'+pt.filled+'/'+pt.total+'</span><div class="meter"><i style="width:'+pct+'%"></i></div>'+xbtn;
+      sec.appendChild(ph);
+      if(xbtn){ var xb=ph.querySelector('.ptx'); if(xb) xb.onclick=function(){ if(current && confirm('Remover a '+pt.name+'? A galera dela volta pra reserva.')) post('/api/cta/removept',{event:current,party:pt.display}); }; }
       var slots=document.createElement('div'); slots.className='slots';
       var left=document.createElement('div'); left.className='col'; var right=document.createElement('div'); right.className='col';
       var half=Math.ceil(pt.slots.length/2);

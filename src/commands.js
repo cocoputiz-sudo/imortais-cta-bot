@@ -37,6 +37,8 @@ function commandDefs() {
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),
     new SlashCommandBuilder().setName("cta_clean").setDescription("Esvazia uma PT inteira")
       .addStringOption(ctaOpt).addIntegerOption(ptOpt),
+    new SlashCommandBuilder().setName("cta_remove_pt").setDescription("Remove uma PT aberta por engano (manda a galera dela pra reserva)")
+      .addStringOption(ctaOpt).addIntegerOption(ptOpt),
     new SlashCommandBuilder().setName("cta_change_time").setDescription("Muda o horário de um CTA já criado")
       .addStringOption(ctaOpt)
       .addStringOption((o) => o.setName("novo").setDescription("Novo horário, ex 23:00").setRequired(true)),
