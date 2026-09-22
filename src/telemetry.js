@@ -239,17 +239,24 @@ function notifyTelemetry(eventId, info = {}) {
   }
 }
 
-async function latestPartyMembers(eventId, maxAgeSeconds = 120) {
+async function latestPartyMembers(eventId) {
+  // Party é estado, não heartbeat. A última observação conhecida de cada client
+  // permanece válida até chegar um NOVO party_snapshot daquele mesmo dispositivo.
+  // Ausência de tráfego nunca transforma uma PT conhecida em PT vazia.
   const { rows } = await pool.query(`
     WITH ranked AS (
-      SELECT device_id, player_name, payload, occurred_at,
-             ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY occurred_at DESC) AS rn
+      SELECT device_id, player_name, payload, occurred_at, received_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY device_id
+               ORDER BY occurred_at DESC, received_at DESC
+             ) AS rn
       FROM albion_telemetry_events
       WHERE cta_event_id=$1 AND type='party_snapshot'
-        AND occurred_at >= now() - ($2::text || ' seconds')::interval
     )
-    SELECT device_id, player_name, payload, occurred_at FROM ranked WHERE rn=1
-  `, [eventId, maxAgeSeconds]);
+    SELECT device_id, player_name, payload, occurred_at, received_at
+      FROM ranked
+     WHERE rn=1
+  `, [eventId]);
 
   const members = new Map();
   for (const row of rows) {
@@ -535,7 +542,11 @@ async function getConfirm(db, eventId) {
       realParties: realParties.length,
       partyPlayers: actualByName.size,
       discordPlayers: voice.length,
-      note: "Auditoria ao vivo cruza ping/formação do bot, call de preparação do Discord e parties detectadas pelos Combat Clients."
+      latestPartyAt: snapshotRows.reduce((latest, row) => {
+        const t = row.occurred_at ? new Date(row.occurred_at).getTime() : 0;
+        return t > latest ? t : latest;
+      }, 0) || null,
+      note: "A party exibida é o último estado conhecido de cada Combat Client. Falta de novo snapshot não zera a PT; somente um novo snapshot altera o estado."
     }
   };
 }
