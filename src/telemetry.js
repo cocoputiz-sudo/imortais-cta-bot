@@ -1047,7 +1047,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
 
   app.get("/api/telemetry/guild-presence-probes", async (req, res) => {
     try {
-      if (requireEditor && !requireEditor(req, res)) return;
+      if (!requireEditor || !requireEditor(req, res)) return;
       const data = await getGuildPresenceProbeDiagnostics({
         minutes: req.query.minutes,
         limit: req.query.limit
