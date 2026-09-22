@@ -512,7 +512,7 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="mural">📣 Mural da guilda</div>
     <div class="nav" id="nav-stats">📊 Meu desempenho</div>
     <div class="navtitle">DADOS DO JOGO</div>
-    <div class="nav" data-view="confirm">🎯 Confirmação pelo jogo</div>
+    <div class="nav" data-view="confirm">🎯 Validação do CTA</div>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
       <div class="nav" data-view="devices">🖥️ Dispositivos</div>
@@ -779,27 +779,85 @@ const PAGE = `<!doctype html>
     return '<div class="toplist">'+arr.map(function(r,i){ return '<div class="toprow"><span class="rk">'+(i+1)+'</span><span class="nm">'+esc(r.n)+'</span><span class="bar"><i style="width:'+Math.round((r.v||0)/mx*100)+'%"></i></span><span class="val">'+fmt(r.v||0)+'</span></div>'; }).join('')+'</div>'; }
 
   function renderConfirm(){
-    if(!current){ noCta('view-confirm','🎯 Confirmação pelo jogo'); return; }
-    loading('view-confirm','🎯 Confirmação pelo jogo');
+    if(!current){ noCta('view-confirm','🎯 Validação do CTA'); return; }
+    loading('view-confirm','🎯 Validação do CTA');
     fetchTelemetry('/api/telemetry/confirm?event='+encodeURIComponent(current)).then(function(d){
       var r=d.resumo||{};
-      var html=liveBadge((d.meta&&d.meta.partySnapshots!=null)?(d.meta.partySnapshots+' agente(s)/snapshot(s) ativos'):'')+'<div class="modhead">🎯 Confirmação pelo jogo</div>'
+      var html=liveBadge((d.meta&&d.meta.partySnapshots!=null)?(d.meta.partySnapshots+' snapshots · '+(d.meta.discordPlayers||0)+' na call'):'')
+        +'<div class="modhead">🎯 Validação do CTA</div>'
         +'<div class="statgrid">'
-        +'<div class="stat g"><div class="k">Confirmado</div><div class="v">'+(r.confirmado||0)+'</div></div>'
-        +'<div class="stat r"><div class="k">Faltando no jogo</div><div class="v">'+(r.faltando||0)+'</div></div>'
-        +'<div class="stat a"><div class="k">Presente não escalado</div><div class="v">'+(r.extra||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">Divergência</div><div class="v">'+(r.divergencia||0)+'</div></div></div>';
+        +'<div class="stat g"><div class="k">Prontidão</div><div class="v">'+(r.prontidao||0)+'%</div></div>'
+        +'<div class="stat b"><div class="k">Na PT correta</div><div class="v">'+(r.corretos||0)+'</div></div>'
+        +'<div class="stat p"><div class="k">PT errada</div><div class="v">'+(r.ptErrada||0)+'</div></div>'
+        +'<div class="stat r"><div class="k">Fora da party</div><div class="v">'+(r.foraParty||0)+'</div></div>'
+        +'</div>'
+        +'<div class="statgrid">'
+        +'<div class="stat a"><div class="k">Na call</div><div class="v">'+(r.discord||0)+'</div></div>'
+        +'<div class="stat b"><div class="k">No jogo</div><div class="v">'+(r.jogo||0)+'</div></div>'
+        +'<div class="stat a"><div class="k">Call sem ping</div><div class="v">'+(r.discordSemPing||0)+'</div></div>'
+        +'<div class="stat p"><div class="k">Jogo sem escala</div><div class="v">'+(r.jogoSemEscala||0)+'</div></div>'
+        +'</div>';
+
+      function auditPill(x){
+        var map={
+          ok:['ok','CORRETO'],
+          wrong:['div','PT ERRADA'],
+          miss:['miss','FORA DA PARTY'],
+          extra:['extra','NÃO ESCALADO'],
+          seen:['capturado','DETECTADO'],
+          nop:['extra','NÃO PINGOU']
+        };
+        var m=map[x]||['capturado',x||'—'];
+        return '<span class="pill '+m[0]+'">'+m[1]+'</span>';
+      }
+
       (d.pts||[]).forEach(function(pt){
-        html+='<div class="panel"><h3>'+esc(pt.pt)+'</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Arma escalada</th><th>Status</th><th>Observação</th></tr></thead><tbody>';
+        html+='<div class="panel"><h3>'+esc(pt.pt)+'</h3>'
+          +'<table class="dtable"><thead><tr><th>Jogador</th><th>Arma</th><th>Planejado</th><th>Jogo</th><th>Discord</th><th>Status</th><th>Observação</th></tr></thead><tbody>';
         (pt.linhas||[]).forEach(function(l){
-          var lbl={ok:'Confirmado',miss:'Faltando no jogo',extra:'Presente não escalado',div:'Divergência'}[l.st]||l.st;
-          html+='<tr><td><b>'+esc(l.n)+'</b></td><td>'+esc(l.arma)+'</td><td><span class="pill '+esc(l.st)+'">'+esc(lbl)+'</span></td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+          html+='<tr><td><b>'+esc(l.n)+'</b></td>'
+            +'<td>'+esc(l.arma||'—')+'</td>'
+            +'<td>'+(l.plannedParty?('PT '+l.plannedParty):'Reserva')+'</td>'
+            +'<td>'+(l.game?(esc(l.actualPartyLabel||'Detectado')):'❌')+'</td>'
+            +'<td>'+(l.discord?'✅':'❌')+'</td>'
+            +'<td>'+auditPill(l.st)+'</td>'
+            +'<td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
         });
         html+='</tbody></table></div>';
       });
+
+      if((d.discordNoPing||[]).length){
+        html+='<div class="panel"><h3>Discord sem ping</h3>'
+          +'<table class="dtable"><thead><tr><th>Jogador</th><th>Jogo</th><th>Party real</th><th>Status</th><th>Observação</th></tr></thead><tbody>'
+          +(d.discordNoPing||[]).map(function(l){
+            return '<tr><td><b>'+esc(l.n)+'</b></td><td>'+(l.game?'✅':'❌')+'</td><td>'+esc(l.actualPartyLabel||'—')+'</td><td>'+auditPill(l.st)+'</td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+          }).join('')
+          +'</tbody></table></div>';
+      }
+
+      if((d.gameNoSignup||[]).length){
+        html+='<div class="panel"><h3>No jogo sem escala</h3>'
+          +'<table class="dtable"><thead><tr><th>Jogador</th><th>Discord</th><th>Party real</th><th>Status</th><th>Observação</th></tr></thead><tbody>'
+          +(d.gameNoSignup||[]).map(function(l){
+            return '<tr><td><b>'+esc(l.n)+'</b></td><td>'+(l.discord?'✅':'❌')+'</td><td>'+esc(l.actualPartyLabel||'—')+'</td><td>'+auditPill(l.st)+'</td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+          }).join('')
+          +'</tbody></table></div>';
+      }
+
+      if((d.realParties||[]).length){
+        html+='<div class="panel"><h3>Parties detectadas no Albion</h3>'
+          +'<table class="dtable"><thead><tr><th>Party detectada</th><th>Associada a</th><th>Sobreposição</th><th>Membros detectados</th><th>Clientes</th></tr></thead><tbody>'
+          +(d.realParties||[]).map(function(p){
+            return '<tr><td>#'+p.id+'</td><td>'+(p.mappedParty?('PT '+p.mappedParty):'Não identificada')+'</td><td>'+p.overlap+'</td><td>'+esc((p.members||[]).join(', '))+'</td><td>'+p.devices+'</td></tr>';
+          }).join('')
+          +'</tbody></table></div>';
+      }
+
       if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
       document.getElementById('view-confirm').innerHTML=html;
-    }).catch(function(){ document.getElementById('view-confirm').innerHTML='<div class="modhead">🎯 Confirmação pelo jogo</div><div class="empty-note">Sem telemetria disponível ou erro ao carregar.</div>'; });
+    }).catch(function(e){
+      document.getElementById('view-confirm').innerHTML='<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>';
+    });
   }
 
   function renderLoot(){
