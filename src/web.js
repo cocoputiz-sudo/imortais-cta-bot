@@ -587,6 +587,7 @@ const PAGE = `<!doctype html>
     canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,name:''
   };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
+  var telemetryRefreshTimer=null, telemetryRefreshPending=false;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
   var liveText='● conectando…', liveColor='var(--amber)', liveRestoreTimer=null, streamLive=false;
@@ -743,12 +744,19 @@ const PAGE = `<!doctype html>
     es.onerror=function(){ streamLive=false; setLive('● reconectando…','var(--amber)'); };
     tes=new EventSource('/api/telemetry/stream?event='+encodeURIComponent(id));
     tes.onmessage=function(){
-      var active=document.querySelector('.nav[data-view].on');
-      var v=active&&active.getAttribute('data-view');
-      if(v==='confirm') renderConfirm();
-      if(v==='loot') renderLoot();
-      if(v==='combat') renderCombat();
-      if(v==='devices') renderDevices();
+      telemetryRefreshPending=true;
+      if(telemetryRefreshTimer) return;
+      telemetryRefreshTimer=setTimeout(function(){
+        telemetryRefreshTimer=null;
+        if(!telemetryRefreshPending) return;
+        telemetryRefreshPending=false;
+        var active=document.querySelector('.nav[data-view].on');
+        var v=active&&active.getAttribute('data-view');
+        if(v==='confirm') renderConfirm(true);
+        if(v==='loot') renderLoot();
+        if(v==='combat') renderCombat();
+        if(v==='devices') renderDevices();
+      },3000);
     };
   }
 
@@ -816,9 +824,9 @@ const PAGE = `<!doctype html>
     if(!arr.length) return '<div class="empty-note">Sem dados ainda.</div>';
     return '<div class="toplist">'+arr.map(function(r,i){ return '<div class="toprow"><span class="rk">'+(i+1)+'</span><span class="nm">'+esc(r.n)+'</span><span class="bar"><i style="width:'+Math.round((r.v||0)/mx*100)+'%"></i></span><span class="val">'+fmt(r.v||0)+'</span></div>'; }).join('')+'</div>'; }
 
-  function renderConfirm(){
+  function renderConfirm(silent){
     if(!current){ noCta('view-confirm','🎯 Validação do CTA'); return; }
-    loading('view-confirm','🎯 Validação do CTA');
+    if(!silent) loading('view-confirm','🎯 Validação do CTA');
     fetchTelemetry('/api/telemetry/confirm?event='+encodeURIComponent(current)).then(function(d){
       var r=d.resumo||{};
       var html=liveBadge((d.meta&&d.meta.partySnapshots!=null)?(d.meta.partySnapshots+' snapshots · '+(d.meta.discordPlayers||0)+' na call'):'')
