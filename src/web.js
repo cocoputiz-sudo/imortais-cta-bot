@@ -354,6 +354,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>IMORTAIS · War Room</title>
+<link rel="icon" type="image/png" href="/assets/imortais-war-room-logo.png?v=3">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -535,7 +536,7 @@ const PAGE = `<!doctype html>
 </head>
 <body>
 <header>
-  <img class="crest" src="/assets/imortais-war-room-logo.png?v=2" alt="IMORTAIS" onerror="this.style.display='none'">
+  <img class="crest" src="/assets/imortais-war-room-logo.png?v=3" alt="IMORTAIS" onerror="this.style.display='none'">
   <div class="brand"><h1>IMORTAIS</h1><small>CTA WAR ROOM</small></div>
   <span id="live">conectando…</span>
   <span id="auth"></span>
