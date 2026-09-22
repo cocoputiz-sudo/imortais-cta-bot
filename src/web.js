@@ -853,84 +853,70 @@ const PAGE = `<!doctype html>
     if(!current){ noCta('view-confirm','🎯 Validação do CTA'); return; }
     if(!silent) loading('view-confirm','🎯 Validação do CTA');
     fetchTelemetry('/api/telemetry/confirm?event='+encodeURIComponent(current)).then(function(d){
-      var r=d.resumo||{};
-      var html=liveBadge((d.meta&&d.meta.partySnapshots!=null)?(d.meta.partySnapshots+' snapshots · '+(d.meta.discordPlayers||0)+' na call'):'')
+      var r=d.resumo||{}, m=d.meta||{};
+      var age='';
+      if(m.latestPartyAt){
+        var sec=Math.max(0,Math.round((Date.now()-Number(m.latestPartyAt))/1000));
+        age=sec<60?(sec+'s atrás'):(Math.floor(sec/60)+'min atrás');
+      }
+      var html=liveBadge((m.partyPlayers||0)+' jogadores detectados · '+(m.realParties||0)+' PTs · '+(m.discordPlayers||0)+' na call')
         +'<div class="modhead">🎯 Validação do CTA</div>'
+        +'<div class="preview"><b>ESTADO DO JOGO:</b> '+(m.partyPlayers||0)+' jogadores conhecidos'+(age?' · última mudança '+age:'')+'. A ausência de novos pacotes não zera esta informação; ela só muda quando o Combat Client envia outro estado da party.</div>'
         +'<div class="statgrid">'
-        +'<div class="stat g"><div class="k">Prontidão</div><div class="v">'+(r.prontidao||0)+'%</div></div>'
-        +'<div class="stat b"><div class="k">Na PT correta</div><div class="v">'+(r.corretos||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">PT errada</div><div class="v">'+(r.ptErrada||0)+'</div></div>'
-        +'<div class="stat r"><div class="k">Fora da party</div><div class="v">'+(r.foraParty||0)+'</div></div>'
+        +'<div class="stat g"><div class="k">Formação correta</div><div class="v">'+(r.prontidao||0)+'%</div></div>'
+        +'<div class="stat b"><div class="k">Na PT certa</div><div class="v">'+(r.corretos||0)+'</div></div>'
+        +'<div class="stat p"><div class="k">Na PT errada</div><div class="v">'+(r.ptErrada||0)+'</div></div>'
+        +'<div class="stat r"><div class="k">Não visto em PT</div><div class="v">'+(r.foraParty||0)+'</div></div>'
         +'</div>'
         +'<div class="statgrid">'
-        +'<div class="stat a"><div class="k">Na call</div><div class="v">'+(r.discord||0)+'</div></div>'
-        +'<div class="stat b"><div class="k">No jogo</div><div class="v">'+(r.jogo||0)+'</div></div>'
-        +'<div class="stat a"><div class="k">Call sem ping</div><div class="v">'+(r.discordSemPing||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">Jogo sem escala</div><div class="v">'+(r.jogoSemEscala||0)+'</div></div>'
+        +'<div class="stat a"><div class="k">Na call Discord</div><div class="v">'+(r.discord||0)+'</div></div>'
+        +'<div class="stat b"><div class="k">Detectados nas PTs</div><div class="v">'+(r.jogo||0)+'</div></div>'
+        +'<div class="stat a"><div class="k">Na call sem inscrição</div><div class="v">'+(r.discordSemPing||0)+'</div></div>'
+        +'<div class="stat p"><div class="k">Na PT sem escala</div><div class="v">'+(r.jogoSemEscala||0)+'</div></div>'
         +'</div>';
 
       function pill(cls,text){ return '<span class="pill '+cls+'">'+text+'</span>'; }
       function playerLine(x,kind){
         var slot=x.slot?('<span class="num">'+('0'+x.slot).slice(-2)+'</span>'):'<span class="num">--</span>';
         var status='', detail='';
-        if(kind==='missing'){
-          status=pill('miss','FALTANDO');
-          detail=x.game && x.actualPartyLabel ? ('está '+esc(x.actualPartyLabel)) : 'não detectado nesta PT';
-        } else if(kind==='intruder'){
-          status=pill('div','PT ERRADA');
-          detail=x.plannedParty ? ('deveria estar PT '+x.plannedParty) : 'não deveria estar nesta PT';
-        } else {
-          status=pill('ok','CORRETO');
-          detail='ok';
-        }
+        if(kind==='missing'){ status=pill('miss','NÃO VISTO'); detail=x.game&&x.actualPartyLabel?('visto '+esc(x.actualPartyLabel)):'não consta no último estado conhecido'; }
+        else if(kind==='intruder'){ status=pill('div','PT ERRADA'); detail=x.plannedParty?('deveria estar PT '+x.plannedParty):'não deveria estar nesta PT'; }
+        else { status=pill('ok','CORRETO'); detail='posição confirmada'; }
         return '<div class="auditline '+kind+'">'+slot+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+status+'</span><span class="auditdetail">'+detail+'</span></div>';
+      }
+      function partyColumn(title,arr,kind,empty){
+        return '<div><div class="audittitle">'+title+'</div>'+((arr||[]).length?(arr||[]).map(function(x){return playerLine(x,kind);}).join(''):'<div class="auditok">'+empty+'</div>')+'</div>';
       }
 
       var groups=d.issuesByParty||[];
       if(!groups.length){
-        html+='<div class="panel"><div class="empty-note">Ainda não há parties suficientes para comparar.</div></div>';
+        html+='<div class="panel"><div class="empty-note">Ainda não há uma party observada para comparar com a escala.</div></div>';
       } else {
         groups.forEach(function(g){
-          var problems=(g.missing||[]).length+(g.intruders||[]).length;
-          html+='<div class="panel auditpt"><div class="audithead"><h3>PT '+g.party+'</h3><span class="'+(problems?'auditbad':'auditgood')+'">'+(problems?(problems+' divergências'):'sem divergências')+'</span></div>';
-
+          var missing=g.missing||[], wrong=g.intruders||[], correct=g.correct||[];
+          var problems=missing.length+wrong.length;
+          html+='<div class="panel auditpt"><div class="audithead"><h3>PT '+g.party+'</h3><span class="'+(problems?'auditbad':'auditgood')+'">'+correct.length+' corretos · '+problems+' divergências</span></div>'
+            +'<div class="auditsplit">'
+            +partyColumn('Slots 01–10',correct.filter(function(x){return (x.slot||99)<=10;}),'correct','Nenhum confirmado')
+            +partyColumn('Slots 11–20',correct.filter(function(x){return (x.slot||99)>10;}),'correct','Nenhum confirmado')
+            +'</div>';
           if(problems){
             html+='<div class="auditsplit">'
-              +'<div><div class="audittitle">Quem deveria estar e não está</div>'
-              +((g.missing||[]).length?(g.missing||[]).map(function(x){return playerLine(x,'missing');}).join(''):'<div class="auditok">Ninguém faltando</div>')
-              +'</div>'
-              +'<div><div class="audittitle">Quem está nesta PT e não deveria</div>'
-              +((g.intruders||[]).length?(g.intruders||[]).map(function(x){return playerLine(x,'intruder');}).join(''):'<div class="auditok">Nenhum intruso</div>')
-              +'</div></div>';
-          }
-
-          var correct=(g.correct||[]);
-          if(correct.length){
-            html+='<details class="auditcorrect"><summary>Corretos nesta PT · '+correct.length+'</summary><div class="auditgrid">'
-              +correct.map(function(x){return playerLine(x,'correct');}).join('')
-              +'</div></details>';
+              +partyColumn('Não vistos na PT',missing,'missing','Ninguém')
+              +partyColumn('Jogadores na PT errada',wrong,'intruder','Ninguém')
+              +'</div>';
           }
           html+='</div>';
         });
       }
 
       if((d.discordNoPing||[]).length){
-        html+='<div class="panel"><h3>Discord sem ping</h3><div class="auditgrid">'
-          +(d.discordNoPing||[]).map(function(l){
-            return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','NÃO PINGOU')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';
-          }).join('')
-          +'</div></div>';
+        html+='<div class="panel"><h3>Na call sem inscrição</h3><div class="auditgrid">'+(d.discordNoPing||[]).map(function(l){return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM PING')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';}).join('')+'</div></div>';
       }
-
       if((d.gameNoSignup||[]).length){
-        html+='<div class="panel"><h3>No jogo sem escala</h3><div class="auditgrid">'
-          +(d.gameNoSignup||[]).map(function(l){
-            return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';
-          }).join('')
-          +'</div></div>';
+        html+='<div class="panel"><h3>Na PT sem escala</h3><div class="auditgrid">'+(d.gameNoSignup||[]).map(function(l){return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';}).join('')+'</div></div>';
       }
-
-      if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
+      if(m.note) html+='<div class="note">'+esc(m.note)+'</div>';
       document.getElementById('view-confirm').innerHTML=html;
     }).catch(function(e){
       document.getElementById('view-confirm').innerHTML='<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>';
