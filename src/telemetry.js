@@ -7,7 +7,11 @@ const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
 
 function normName(v) {
-  return String(v || "").trim().toLowerCase();
+  return String(v || "")
+    .trim()
+    .replace(/^\[[^\]]{1,16}\]\s*/i, "")
+    .trim()
+    .toLowerCase();
 }
 
 function num(v, fallback = 0) {
@@ -77,19 +81,75 @@ async function authenticateTelemetry(req, { deviceId = "", playerName = "", allo
 }
 
 async function resolveActiveCtaForPlayer(playerName) {
-  const name = String(playerName || "").trim();
-  if (!name) return null;
+  const key = normName(playerName);
+  if (!key) return null;
+
   const { rows } = await pool.query(
-    `SELECT e.id, e.time_label, e.status, e.created_at
+    `SELECT e.id, e.time_label, e.status, e.created_at, s.username
        FROM cta_events e
        JOIN cta_signups s ON s.event_id=e.id
       WHERE e.status='open'
-        AND lower(s.username)=lower($1)
-      ORDER BY e.created_at DESC
+      ORDER BY e.created_at DESC`
+  );
+
+  for (const row of rows) {
+    if (normName(row.username) === key) return row;
+  }
+  return null;
+}
+
+async function resolveActiveCtaForDevice(deviceId) {
+  const id = String(deviceId || "").trim();
+  if (!id) return null;
+  const { rows } = await pool.query(
+    `SELECT e.id, e.time_label, e.status, e.created_at
+       FROM albion_telemetry_events t
+       JOIN cta_events e ON e.id=t.cta_event_id
+      WHERE t.device_id=$1
+        AND e.status='open'
+        AND t.cta_event_id IS NOT NULL
+        AND t.received_at >= now() - interval '10 minutes'
+      ORDER BY t.received_at DESC
       LIMIT 1`,
-    [name]
+    [id]
   );
   return rows[0] || null;
+}
+
+async function resolveActiveCtaFromParty(members) {
+  const keys = new Set(
+    (Array.isArray(members) ? members : [])
+      .map(normName)
+      .filter(Boolean)
+  );
+  if (!keys.size) return null;
+
+  const { rows } = await pool.query(
+    `SELECT e.id, e.time_label, e.status, e.created_at, s.username
+       FROM cta_events e
+       JOIN cta_signups s ON s.event_id=e.id
+      WHERE e.status='open'
+      ORDER BY e.created_at DESC`
+  );
+
+  const byEvent = new Map();
+  for (const row of rows) {
+    const id = String(row.id);
+    if (!byEvent.has(id)) {
+      byEvent.set(id, {
+        id: row.id,
+        time_label: row.time_label,
+        status: row.status,
+        created_at: row.created_at,
+        overlap: 0
+      });
+    }
+    if (keys.has(normName(row.username))) byEvent.get(id).overlap++;
+  }
+
+  return [...byEvent.values()]
+    .filter(x => x.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap || new Date(b.created_at) - new Date(a.created_at))[0] || null;
 }
 
 async function initSchema(dbPool) {
@@ -693,7 +753,8 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       if (!auth) return res.status(401).json({ error: "unauthorized" });
 
       const playerName = requestedPlayer || String(auth.agent?.player_name || "").trim();
-      const cta = await resolveActiveCtaForPlayer(playerName);
+      let cta = await resolveActiveCtaForPlayer(playerName);
+      if (!cta) cta = await resolveActiveCtaForDevice(deviceId);
       res.json({
         ok: true,
         playerName: playerName || null,
@@ -721,7 +782,18 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
 
       let ctaEventId = body.ctaEventId != null && String(body.ctaEventId).trim() !== "" ? String(body.ctaEventId).trim() : null;
       if (!ctaEventId) {
-        const active = await resolveActiveCtaForPlayer(detectedPlayer);
+        let active = await resolveActiveCtaForPlayer(detectedPlayer);
+
+        if (!active) {
+          const partyEvent = events
+            .filter(e => String(e.type || e.Type || "").trim() === "party_snapshot")
+            .map(e => e.payload ?? e.Payload ?? {})
+            .find(p => Array.isArray(p.members) && p.members.length);
+
+          if (partyEvent) active = await resolveActiveCtaFromParty(partyEvent.members);
+        }
+
+        if (!active) active = await resolveActiveCtaForDevice(deviceId);
         ctaEventId = active ? String(active.id) : null;
       }
       if (ctaEventId) {
