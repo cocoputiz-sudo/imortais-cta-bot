@@ -753,7 +753,7 @@ const PAGE = `<!doctype html>
         var active=document.querySelector('.nav[data-view].on');
         var v=active&&active.getAttribute('data-view');
         if(v==='confirm') renderConfirm(true);
-        if(v==='loot') renderLoot();
+        if(v==='loot') renderLoot(true);
         if(v==='combat') renderCombat();
         if(v==='devices') renderDevices();
       },3000);
@@ -906,12 +906,18 @@ const PAGE = `<!doctype html>
     });
   }
 
-  function renderLoot(){
+  function renderLoot(silent){
     if(!current){ noCta('view-loot','📦 Registros & Loot'); return; }
-    loading('view-loot','📦 Registros & Loot');
+    if(!silent) loading('view-loot','📦 Registros & Loot');
     fetchTelemetry('/api/telemetry/loot?event='+encodeURIComponent(current)).then(function(d){
       var r=d.resumo||{};
-      var html=liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'')+'<div class="modhead">📦 Registros &amp; Loot</div>'
+      var lootNote=(d.meta&&d.meta.eventosConsiderados!=null)
+        ? (d.meta.eventosConsiderados+' considerados · '+(d.meta.eventosIgnorados||0)+' ignorados')
+        : ((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'');
+      var filterBadge=(d.meta&&d.meta.filtroAtivo)
+        ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Filtro ativo: apenas participantes deste CTA da IMORTAIS entram no desempenho</div>'
+        : '';
+      var html=liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot</div>'
         +'<div class="statgrid">'
         +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
         +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
