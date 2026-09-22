@@ -23,7 +23,26 @@ const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
 const BOMB_LEADER_ROLE_ID = process.env.BOMB_LEADER_ROLE_ID || null;
 const SITE_ADMIN_IDS = new Set(String(process.env.SITE_ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean));
 
-const sessions = new Map(); // sid -> { id, name, canEdit, roles }
+// Sessao stateless: cookie assinado (HMAC). Sobrevive a deploy/restart sem estado em memoria.
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+if (!process.env.SESSION_SECRET) console.warn("SESSION_SECRET nao definido: sessoes serao perdidas a cada deploy. Defina no Railway para mante-las.");
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+function signSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const mac = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
+  return body + "." + mac;
+}
+function verifySession(token) {
+  if (!token || token.indexOf(".") < 0) return null;
+  const i = token.lastIndexOf(".");
+  const body = token.slice(0, i), mac = token.slice(i + 1);
+  const expect = crypto.createHmac("sha256", SESSION_SECRET).update(body).digest("base64url");
+  const a = Buffer.from(mac), b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let data; try { data = JSON.parse(Buffer.from(body, "base64url").toString("utf8")); } catch (_) { return null; }
+  if (!data || typeof data.exp !== "number" || Date.now() > data.exp) return null;
+  return data;
+}
 const states = new Map();   // state -> timestamp (CSRF)
 setInterval(() => { const now = Date.now(); for (const [st, t] of states) { if (now - t > 10 * 60 * 1000) states.delete(st); } }, 5 * 60 * 1000);
 
@@ -32,7 +51,7 @@ function parseCookies(req) {
   h.split(";").forEach(function (p) { const i = p.indexOf("="); if (i > 0) o[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); });
   return o;
 }
-function sessionOf(req) { const sid = parseCookies(req).sid; return sid ? sessions.get(sid) : null; }
+function sessionOf(req) { const sid = parseCookies(req).sid; return sid ? verifySession(sid) : null; }
 function requireMember(req, res) {
   const sess = sessionOf(req);
   if (!sess) { res.status(401).json({ error: "login" }); return null; }
@@ -214,8 +233,7 @@ function startWebServer(client, opts) {
         .then((r) => (r.ok ? r.json() : null)).catch(() => null);
       const roles = (member && member.roles) || [];
       const name = me.global_name || me.username || "?";
-      const sid = crypto.randomUUID();
-      sessions.set(sid, {
+      const sess = {
         id: me.id,
         name,
         canEdit: canEditRoles(roles, me.id),
@@ -224,8 +242,9 @@ function startWebServer(client, opts) {
         canManageCastleRoaming: canManageCastleRoaming(roles, me.id, name),
         isSiteAdmin: isSiteAdmin(roles, me.id, name),
         isMember: !!member,
-        roles
-      });
+        exp: Date.now() + SESSION_TTL_MS
+      };
+      const sid = signSession(sess);
       res.setHeader("Set-Cookie", `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`);
       res.redirect("/");
     } catch (e) { console.error("oauth:", e); res.status(500).send("Erro no login. <a href='/'>Voltar</a>"); }
@@ -246,7 +265,6 @@ function startWebServer(client, opts) {
   });
 
   app.get("/auth/logout", (req, res) => {
-    const sid = parseCookies(req).sid; if (sid) sessions.delete(sid);
     res.setHeader("Set-Cookie", "sid=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0");
     res.redirect("/");
   });
@@ -553,6 +571,7 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="confirm">🎯 Validação do CTA</div>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
+    <div class="nav" data-view="guild">🟢 Guilda online</div>
       <div class="nav" data-view="devices">🖥️ Dispositivos</div>
     <div class="navtitle">EM BREVE</div>
     <div class="nav soon" id="nav-bomb">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
@@ -589,6 +608,7 @@ const PAGE = `<!doctype html>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
     <div id="view-devices" style="display:none"></div>
+    <div id="view-guild" style="display:none"></div>
   </main>
 </div>
 
@@ -649,13 +669,14 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices'};
+    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices',guild:'view-guild'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='confirm') renderConfirm();
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
     if(v==='devices') renderDevices();
+    if(v==='guild') renderGuild();
   }
 
   function renderAuthHeader(){
@@ -1049,6 +1070,35 @@ const PAGE = `<!doctype html>
       });
   }
 
+
+  var guildRefreshTimer=null;
+  function renderGuild(silent){
+    if(!silent) loading('view-guild','🟢 Guilda online');
+    fetch('/api/telemetry/guild-presence').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
+      var members=d.members||[];
+      var online=d.onlineCount||0, total=d.totalTracked||0;
+      function ago(ts){ if(!ts) return '—'; var s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000)); if(s<60) return s+'s'; if(s<3600) return Math.floor(s/60)+'min'; if(s<86400) return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
+      var rows=members.map(function(m){
+        var badge=m.online?'<span class="pill ok">ONLINE</span>':'<span class="pill miss">OFFLINE</span>';
+        var visto=m.online?'agora':ago(m.lastSeenAt)+' atras';
+        return '<tr><td><b>'+esc(m.playerName||'?')+'</b></td><td>'+badge+'</td><td>'+esc(visto)+'</td><td>'+ago(m.stateAt)+' atras</td><td style="color:var(--faint)">'+esc(m.observerDevice||'—')+'</td></tr>';
+      }).join('');
+      var fresh=d.generatedAt?ago(d.generatedAt)+' atras':'agora';
+      var html=liveBadge('atualizado '+fresh)
+        +'<div class="modhead">🟢 Guilda online</div>'
+        +'<div class="statgrid"><div class="stat g"><div class="k">Online agora</div><div class="v">'+online+'</div></div>'
+        +'<div class="stat b"><div class="k">Rastreados</div><div class="v">'+total+'</div></div></div>'
+        +'<div class="panel"><table class="dtable"><thead><tr><th>Jogador</th><th>Status</th><th>Ultimo visto</th><th>Atualizado</th><th>Observer</th></tr></thead><tbody>'
+        +(rows||'<tr><td colspan="5" style="color:var(--faint)">Nenhum jogador rastreado ainda.</td></tr>')
+        +'</tbody></table></div>'
+        +'<div class="note">Presenca captada pelos Combat Clients via evento do Albion. Dado antigo aparece com o tempo desde a ultima atualizacao; ausencia de novos eventos nao zera o estado.</div>';
+      setView('view-guild',html);
+    }).catch(function(e){
+      setView('view-guild','<div class="modhead">🟢 Guilda online</div><div class="empty-note">Erro ao carregar presenca: '+esc(e.message)+'</div>');
+    });
+    if(guildRefreshTimer) clearTimeout(guildRefreshTimer);
+    guildRefreshTimer=setTimeout(function(){ var a=document.querySelector('.nav[data-view].on'); if(a&&a.getAttribute('data-view')==='guild') renderGuild(true); },20000);
+  }
 
   function renderDevices(){
     var el=document.getElementById('view-devices');
