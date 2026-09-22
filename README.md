@@ -38,7 +38,7 @@ Stack: **Node.js + discord.js v14 + PostgreSQL**, hospedado no Railway.
 
 - recebe probes limitados dos eventos Photon de guilda observados pelo IMORTAIS Combat Client;
 - armazena os probes na telemetria existente, sem inferir online/offline antes de validar o protocolo real;
-- endpoint restrito a editor em `/api/telemetry/guild-presence-probes` resume códigos, chaves, tipos e amostras recentes;
+- endpoint restrito a editor em `/api/telemetry/guild-presence-probes` resume códigos, chaves, tipos e amostras recentes; aceita `?player=NomeExato` para isolar o histórico de um membro e, nesse modo, devolve até o `limit` solicitado (máximo 1000) em `recent`;
 - esta etapa serve para mapear com segurança `GuildUpdate`, `GuildPlayerUpdated`, `GuildMemberWorldUpdate` e `GuildMemberTerritoryUpdate`;
 - depois da validação, o War Room poderá cruzar presença no Albion com ping, Discord e Party real.
 

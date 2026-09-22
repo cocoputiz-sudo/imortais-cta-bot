@@ -733,18 +733,23 @@ function previewValue(value) {
   return String(value).slice(0, 120);
 }
 
-async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200 } = {}) {
+async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200, player = "" } = {}) {
   const safeMinutes = Math.max(1, Math.min(24 * 60, Number(minutes) || 30));
   const safeLimit = Math.max(1, Math.min(1000, Number(limit) || 200));
+  const safePlayer = String(player || "").trim().slice(0, 120) || null;
 
   const { rows } = await pool.query(`
     SELECT event_id, device_id, player_name, payload, occurred_at, received_at
       FROM albion_telemetry_events
      WHERE type='guild_presence_probe'
        AND occurred_at >= now() - ($1::text || ' minutes')::interval
+       AND (
+         $3::text IS NULL
+         OR lower(COALESCE(payload->'parameters'->>'1', '')) = lower($3)
+       )
      ORDER BY occurred_at DESC
      LIMIT $2
-  `, [safeMinutes, safeLimit]);
+  `, [safeMinutes, safeLimit, safePlayer]);
 
   const byEvent = new Map();
   for (const row of rows) {
@@ -776,11 +781,13 @@ async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200 } = 
     }
   }
 
+  const recentLimit = safePlayer ? safeLimit : Math.min(50, safeLimit);
   return {
     windowMinutes: safeMinutes,
+    player: safePlayer,
     total: rows.length,
     events: [...byEvent.values()].sort((a, b) => b.count - a.count),
-    recent: rows.slice(0, 50).map(row => ({
+    recent: rows.slice(0, recentLimit).map(row => ({
       eventId: row.event_id,
       deviceId: row.device_id,
       observer: row.player_name,
@@ -1050,7 +1057,8 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       if (!requireEditor || !requireEditor(req, res)) return;
       const data = await getGuildPresenceProbeDiagnostics({
         minutes: req.query.minutes,
-        limit: req.query.limit
+        limit: req.query.limit,
+        player: req.query.player
       });
       res.json(data);
     } catch (e) {
