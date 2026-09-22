@@ -5,8 +5,6 @@ const crypto = require("crypto");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
-const _confirmCache = new Map(); // eventId -> { at, payload }
-const CONFIRM_TTL_MS = 2000;
 
 function normName(v) {
   return String(v || "")
@@ -1189,14 +1187,9 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   app.get("/api/telemetry/confirm", async (req, res) => {
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
-    let cached = _confirmCache.get(id);
-    if (!cached || (Date.now() - cached.at) >= CONFIRM_TTL_MS) {
-      const fresh = await getConfirm(db, id).catch(e => { console.error("telemetry confirm:", e); return null; });
-      cached = fresh ? { at: Date.now(), payload: fresh } : null;
-      if (cached) _confirmCache.set(id, cached);
-    }
-    if (!cached) return res.status(404).json({ error: "event" });
-    res.json(cached.payload);
+    const data = await getConfirm(db, id).catch(e => { console.error("telemetry confirm:", e); return null; });
+    if (!data) return res.status(404).json({ error: "event" });
+    res.json(data);
   });
 
   app.get("/api/telemetry/loot-ctas", async (req, res) => {

@@ -2290,23 +2290,6 @@ async function reconcileVoice(client) {
 client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
-let _shuttingDown = false;
-async function gracefulShutdown(sig) {
-  if (_shuttingDown) return;
-  _shuttingDown = true;
-  console.log("↩️  " + sig + " recebido, encerrando com calma...");
-  try { await client.destroy(); } catch (_) {}
-  try { await db.pool.end(); } catch (_) {}
-  process.exit(0);
-}
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-setInterval(async () => {
-  try {
-    await db.pool.query("DELETE FROM albion_telemetry_events WHERE received_at < now() - interval '3 days'");
-    await db.pool.query("DELETE FROM voice_presence WHERE left_at IS NOT NULL AND left_at < now() - interval '30 days'");
-  } catch (e) { console.error("retention:", e); }
-}, 6 * 60 * 60 * 1000);
 
 function renderDiscordMd(raw, guild) {
   let t = String(raw || "");
@@ -2415,15 +2398,4 @@ const webActions = {
   },
 };
 
-(async () => {
-  try {
-    await db.init();
-    await perfil.initSchema(db.pool);
-    await telemetry.initSchema(db.pool);
-    web.startWebServer(client, webActions);
-    await client.login(CFG.token);
-  } catch (e) {
-    console.error("❌ Falha fatal no boot:", e);
-    process.exit(1);
-  }
-})();
+(async () => { await db.init(); await perfil.initSchema(db.pool); await telemetry.initSchema(db.pool); web.startWebServer(client, webActions); await client.login(CFG.token); })();

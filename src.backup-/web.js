@@ -21,11 +21,9 @@ const REDIRECT      = process.env.OAUTH_REDIRECT || "https://cta-imortais.up.rai
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
 const BOMB_LEADER_ROLE_ID = process.env.BOMB_LEADER_ROLE_ID || null;
-const SITE_ADMIN_IDS = new Set(String(process.env.SITE_ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean));
 
 const sessions = new Map(); // sid -> { id, name, canEdit, roles }
 const states = new Map();   // state -> timestamp (CSRF)
-setInterval(() => { const now = Date.now(); for (const [st, t] of states) { if (now - t > 10 * 60 * 1000) states.delete(st); } }, 5 * 60 * 1000);
 
 function parseCookies(req) {
   const h = req.headers.cookie || ""; const o = {};
@@ -53,9 +51,9 @@ function canEditRoles(roles, userId) {
 function canManageDevices(roles, userId, name) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
-  const isAdminId = SITE_ADMIN_IDS.has(String(userId));
+  const isMackna = String(name || "").trim().toLowerCase() === "mackna";
   const hasWarMasterRole = !!(STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID));
-  return !!(isOwner || isAdminId || hasWarMasterRole);
+  return !!(isOwner || isMackna || hasWarMasterRole);
 }
 function requireDeviceManager(req, res) {
   const sess = requireMember(req, res);
@@ -66,9 +64,9 @@ function requireDeviceManager(req, res) {
 function isSiteAdmin(roles, userId, name) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
-  const isAdminId = SITE_ADMIN_IDS.has(String(userId));
+  const isMackna = String(name || "").trim().toLowerCase() === "mackna";
   const isWarMaster = !!(STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID));
-  return !!(isOwner || isAdminId || isWarMaster);
+  return !!(isOwner || isMackna || isWarMaster);
 }
 function canManageBomb(roles, userId, name) {
   return !!(isSiteAdmin(roles, userId, name) || (BOMB_LEADER_ROLE_ID && roles.includes(BOMB_LEADER_ROLE_ID)));
@@ -613,8 +611,6 @@ const PAGE = `<!doctype html>
   };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var lootSelectedEvent=null;
-  var _viewCache={};
-  function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
   var combatSelectedEvent=null;
   var telemetryRefreshTimer=null, telemetryRefreshPending=false, confirmPollTimer=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
@@ -784,7 +780,7 @@ const PAGE = `<!doctype html>
         var v=active&&active.getAttribute('data-view');
         if(v==='confirm') renderConfirm(true);
         if(v==='loot') renderLoot(true);
-        if(v==='combat') renderCombat(true);
+        if(v==='combat') renderCombat();
         if(v==='devices') renderDevices();
       },3000);
     };
@@ -930,7 +926,7 @@ const PAGE = `<!doctype html>
         html+='<div class="panel"><h3>Na PT sem escala</h3><div class="auditgrid">'+(d.gameNoSignup||[]).map(function(l){return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';}).join('')+'</div></div>';
       }
       if(m.note) html+='<div class="note">'+esc(m.note)+'</div>';
-      setView('view-confirm',html);
+      document.getElementById('view-confirm').innerHTML=html;
     }).catch(function(e){
       document.getElementById('view-confirm').innerHTML='<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>';
     });
@@ -981,7 +977,7 @@ const PAGE = `<!doctype html>
             +(d.itens||[]).map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+esc(i.st)+'">'+esc(i.st)+'</span></td></tr>'; }).join('')
             +'</tbody></table></div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
-          setView('view-loot',html);
+          document.getElementById('view-loot').innerHTML=html;
 
           Array.prototype.forEach.call(document.querySelectorAll('.loot-cta'),function(b){
             b.onclick=function(){
@@ -996,8 +992,8 @@ const PAGE = `<!doctype html>
       });
   }
 
-  function renderCombat(silent){
-    if(!silent) loading('view-combat','⚔️ Combate');
+  function renderCombat(){
+    loading('view-combat','⚔️ Combate');
     fetch('/api/telemetry/combat-ctas')
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(ctas){
@@ -1034,7 +1030,7 @@ const PAGE = `<!doctype html>
             +'<div class="split"><div class="panel"><h3>🏆 Top DPS</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
             +'<div class="panel"><h3>💚 Top Heal</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
-          setView('view-combat',html);
+          document.getElementById('view-combat').innerHTML=html;
 
           Array.prototype.forEach.call(document.querySelectorAll('.combat-cta'),function(b){
             b.onclick=function(){

@@ -10,8 +10,6 @@ const express = require("express");
 const db = require("./db");
 const { PARTIES, WEAPONS } = require("./comps");
 const crypto = require("crypto");
-const telemetry = require("./telemetry");
-const path = require("path");
 
 // ---- config do login (OAuth2 Discord) ----
 const CLIENT_ID     = process.env.DISCORD_CLIENT_ID || "1541617852056862801";
@@ -20,12 +18,9 @@ const GUILD_ID      = process.env.GUILD_ID || "683411304408416285";
 const REDIRECT      = process.env.OAUTH_REDIRECT || "https://cta-imortais.up.railway.app/auth/callback";
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
-const BOMB_LEADER_ROLE_ID = process.env.BOMB_LEADER_ROLE_ID || null;
-const SITE_ADMIN_IDS = new Set(String(process.env.SITE_ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean));
 
 const sessions = new Map(); // sid -> { id, name, canEdit, roles }
 const states = new Map();   // state -> timestamp (CSRF)
-setInterval(() => { const now = Date.now(); for (const [st, t] of states) { if (now - t > 10 * 60 * 1000) states.delete(st); } }, 5 * 60 * 1000);
 
 function parseCookies(req) {
   const h = req.headers.cookie || ""; const o = {};
@@ -49,36 +44,6 @@ function canEditRoles(roles, userId) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
   const isOwner = g && g.ownerId === userId;
   return !!(isOwner || (STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID)) || (CALLER_TAG_ID && roles.includes(CALLER_TAG_ID)));
-}
-function canManageDevices(roles, userId, name) {
-  const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
-  const isOwner = g && g.ownerId === userId;
-  const isAdminId = SITE_ADMIN_IDS.has(String(userId));
-  const hasWarMasterRole = !!(STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID));
-  return !!(isOwner || isAdminId || hasWarMasterRole);
-}
-function requireDeviceManager(req, res) {
-  const sess = requireMember(req, res);
-  if (!sess) return null;
-  if (!sess.canManageDevices) { res.status(403).json({ error: "no_device_admin" }); return null; }
-  return sess;
-}
-function isSiteAdmin(roles, userId, name) {
-  const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
-  const isOwner = g && g.ownerId === userId;
-  const isAdminId = SITE_ADMIN_IDS.has(String(userId));
-  const isWarMaster = !!(STAFF_ROLE_ID && roles.includes(STAFF_ROLE_ID));
-  return !!(isOwner || isAdminId || isWarMaster);
-}
-function canManageBomb(roles, userId, name) {
-  return !!(isSiteAdmin(roles, userId, name) || (BOMB_LEADER_ROLE_ID && roles.includes(BOMB_LEADER_ROLE_ID)));
-}
-function canManageCastleRoaming(roles, userId, name) {
-  return !!(
-    isSiteAdmin(roles, userId, name) ||
-    (BOMB_LEADER_ROLE_ID && roles.includes(BOMB_LEADER_ROLE_ID)) ||
-    (CALLER_TAG_ID && roles.includes(CALLER_TAG_ID))
-  );
 }
 
 let _client = null;
@@ -146,18 +111,6 @@ function startWebServer(client, opts) {
   _act = opts || {};
   const app = express();
   app.use(express.json({ limit: "12mb" }));
-  telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager });
-
-  app.get("/api/health", async (_req, res) => {
-    let database = false;
-    try {
-      await db.pool.query("SELECT 1");
-      database = true;
-    } catch (_) {}
-    const discord = !!(_client && typeof _client.isReady === "function" && _client.isReady());
-    const ok = database && discord;
-    res.status(ok ? 200 : 503).json({ ok, database, discord, at: new Date().toISOString() });
-  });
 
   app.get("/api/events", async (req, res) => {
     if (!requireMember(req, res)) return;
@@ -215,17 +168,7 @@ function startWebServer(client, opts) {
       const roles = (member && member.roles) || [];
       const name = me.global_name || me.username || "?";
       const sid = crypto.randomUUID();
-      sessions.set(sid, {
-        id: me.id,
-        name,
-        canEdit: canEditRoles(roles, me.id),
-        canManageDevices: canManageDevices(roles, me.id, name),
-        canManageBomb: canManageBomb(roles, me.id, name),
-        canManageCastleRoaming: canManageCastleRoaming(roles, me.id, name),
-        isSiteAdmin: isSiteAdmin(roles, me.id, name),
-        isMember: !!member,
-        roles
-      });
+      sessions.set(sid, { id: me.id, name, canEdit: canEditRoles(roles, me.id), isMember: !!member, roles });
       res.setHeader("Set-Cookie", `sid=${sid}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`);
       res.redirect("/");
     } catch (e) { console.error("oauth:", e); res.status(500).send("Erro no login. <a href='/'>Voltar</a>"); }
@@ -233,16 +176,7 @@ function startWebServer(client, opts) {
 
   app.get("/auth/me", (req, res) => {
     const s = sessionOf(req);
-    res.json(s ? {
-      logged: true,
-      name: s.name,
-      canEdit: s.canEdit,
-      canManageDevices: !!s.canManageDevices,
-      canManageBomb: !!s.canManageBomb,
-      canManageCastleRoaming: !!s.canManageCastleRoaming,
-      isSiteAdmin: !!s.isSiteAdmin,
-      member: !!s.isMember
-    } : { logged: false });
+    res.json(s ? { logged: true, name: s.name, canEdit: s.canEdit, member: !!s.isMember } : { logged: false });
   });
 
   app.get("/auth/logout", (req, res) => {
@@ -335,10 +269,6 @@ function startWebServer(client, opts) {
     const r = _act.myStats ? await _act.myStats(sess.id, GUILD_ID) : null;
     res.json(r || { error: "indisponível" });
   });
-  app.use("/assets", express.static(path.join(__dirname, "..", "assets"), {
-    maxAge: "1d",
-    immutable: false
-  }));
 
   app.get("/", (_req, res) => res.type("html").send(PAGE));
 
@@ -356,7 +286,6 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>IMORTAIS · War Room</title>
-<link rel="icon" type="image/png" href="/assets/imortais-war-room-logo.png?v=3">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -375,7 +304,7 @@ const PAGE = `<!doctype html>
     padding-top:env(safe-area-inset-top,0); }
   a{color:inherit;}
   header{ height:64px; padding:0 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--line); background:rgba(8,11,16,.92); position:sticky; top:0; z-index:20; backdrop-filter:blur(10px); }
-  .crest{ width:44px; height:44px; flex:0 0 44px; object-fit:contain; border-radius:50%; filter:drop-shadow(0 2px 8px rgba(0,220,235,.18)); display:block; }
+  .crest{ width:34px; height:36px; flex:0 0 auto; filter:drop-shadow(0 2px 6px rgba(217,59,69,.3)); }
   .brand h1{ font-family:var(--disp); font-weight:900; font-size:19px; letter-spacing:2px; margin:0; line-height:1; }
   .brand small{ display:block; margin-top:3px; font-size:10px; letter-spacing:3px; color:var(--gold); font-weight:700; }
   #live{ margin-left:22px; color:var(--green); font-size:12px; }
@@ -482,25 +411,6 @@ const PAGE = `<!doctype html>
   .drop .ic{ font-size:24px; display:block; margin-bottom:6px; } .drop small{ color:var(--faint); } .drop img{ max-height:110px; border-radius:8px; margin-top:6px; }
   .field input{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:11px; padding:12px 14px; font-size:15px; font-family:var(--sans); margin-bottom:14px; }
   .note{ font-size:12px; color:var(--faint); margin:-4px 0 16px; }
-  .auditpt{ margin-bottom:12px; }
-  .audithead{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-  .audithead h3{ margin:0; }
-  .auditbad{ margin-left:auto; color:#ff9a9a; font-size:12px; font-weight:800; }
-  .auditgood{ margin-left:auto; color:#8ce5ad; font-size:12px; font-weight:800; }
-  .auditsplit{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-  .audittitle{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; font-weight:800; margin:4px 0 7px; }
-  .auditline{ display:grid; grid-template-columns:28px minmax(120px,1fr) auto minmax(120px,1fr); align-items:center; gap:8px; min-height:34px; padding:5px 8px; border-bottom:1px solid #1a222e; }
-  .auditline:last-child{ border-bottom:0; }
-  .auditline.missing{ background:rgba(217,59,69,.035); }
-  .auditline.intruder{ background:rgba(181,118,255,.035); }
-  .auditstatus{ justify-self:start; }
-  .auditdetail{ color:var(--muted); font-size:12px; text-align:right; }
-  .auditok{ color:#8ce5ad; padding:8px 4px; font-size:12px; }
-  .auditcorrect{ margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
-  .auditcorrect summary{ color:var(--muted); cursor:pointer; font-size:12px; }
-  .auditgrid{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:8px; }
-  .lootctas{ display:flex; gap:8px; flex-wrap:wrap; }
-  @media(max-width:900px){ .auditsplit,.auditgrid{ grid-template-columns:1fr; } .auditline{grid-template-columns:28px 1fr auto;} .auditdetail{grid-column:2 / -1;text-align:left;} }
   .sheet .go{ width:100%; padding:13px; font-size:15px; }
   .big{ font-family:var(--disp); font-size:42px; font-weight:900; line-height:1; margin:6px 0 4px; }
   .big small{ font-family:var(--sans); font-size:15px; color:var(--muted); font-weight:400; }
@@ -517,16 +427,13 @@ const PAGE = `<!doctype html>
   .stat.g .v{ color:var(--green);} .stat.r .v{ color:var(--dps);} .stat.a .v{ color:var(--amber);} .stat.p .v{ color:var(--support);} .stat.b .v{ color:var(--tank);}
   .panel{ background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:14px 16px; margin-bottom:14px; }
   .panel h3{ margin:0 0 10px; font-size:12px; color:var(--muted); letter-spacing:.1em; font-weight:800; text-transform:uppercase; }
-  .input{ width:100%; margin-top:5px; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:9px; padding:10px 11px; font:inherit; outline:none; }
-  .input:focus{ border-color:#7fb0ff; }
-  label{ color:var(--muted); font-size:12px; }
   .dtable{ width:100%; border-collapse:collapse; font-size:13px; }
   .dtable th{ text-align:left; color:var(--muted); font-weight:700; font-size:11px; letter-spacing:.06em; padding:6px 8px; border-bottom:1px solid var(--line); }
   .dtable td{ padding:7px 8px; border-bottom:1px solid #1a222e; }
   .dtable tr:hover td{ background:#141c26; }
   .pill{ display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; }
   .pill.ok{ color:#8ce5ad; background:#10241a; } .pill.miss{ color:#ffb0b0; background:#2a1315; } .pill.extra{ color:#eccf8a; background:#2a230f; } .pill.div{ color:#d6b8ff; background:#231a30; }
-  .pill.capturado{ color:#9bc7ff; background:#102033; } .pill.entregue{ color:#8ce5ad; background:#10241a; } .pill.pendente{ color:#eccf8a; background:#2a230f; } .pill.divergencia{ color:#d6b8ff; background:#231a30; }
+  .pill.entregue{ color:#8ce5ad; background:#10241a; } .pill.pendente{ color:#eccf8a; background:#2a230f; } .pill.divergencia{ color:#d6b8ff; background:#231a30; }
   .toplist{ display:flex; flex-direction:column; gap:6px; }
   .toprow{ display:flex; align-items:center; gap:10px; padding:7px 10px; background:var(--bg); border-radius:9px; }
   .toprow .rk{ width:22px; color:var(--muted); font-weight:800; text-align:center; }
@@ -538,7 +445,7 @@ const PAGE = `<!doctype html>
 </head>
 <body>
 <header>
-  <img class="crest" src="/assets/imortais-war-room-logo.png?v=3" alt="IMORTAIS" onerror="this.style.display='none'">
+  <svg class="crest" viewBox="0 0 34 38" fill="none"><path d="M17 1 33 6v13c0 9-7 15-16 18C8 34 1 28 1 19V6L17 1Z" fill="#12161e" stroke="#d93b45" stroke-width="1.5"/><path d="M17 8v22M9 14h16" stroke="#d9aa52" stroke-width="1.6" stroke-linecap="round"/></svg>
   <div class="brand"><h1>IMORTAIS</h1><small>CTA WAR ROOM</small></div>
   <span id="live">conectando…</span>
   <span id="auth"></span>
@@ -550,14 +457,13 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="mural">📣 Mural da guilda</div>
     <div class="nav" id="nav-stats">📊 Meu desempenho</div>
     <div class="navtitle">DADOS DO JOGO</div>
-    <div class="nav" data-view="confirm">🎯 Validação do CTA</div>
-    <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
-    <div class="nav" data-view="combat">⚔️ Combate</div>
-      <div class="nav" data-view="devices">🖥️ Dispositivos</div>
+    <div class="nav" data-view="confirm">🎯 Confirmação pelo jogo <span class="tagsoon">PRÉVIA</span></div>
+    <div class="nav" data-view="loot">📦 Registros &amp; Loot <span class="tagsoon">PRÉVIA</span></div>
+    <div class="nav" data-view="combat">⚔️ Combate <span class="tagsoon">PRÉVIA</span></div>
     <div class="navtitle">EM BREVE</div>
-    <div class="nav soon" id="nav-bomb">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
-    <div class="nav soon" id="nav-castelo">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
-    <div class="nav soon" id="nav-roaming">🧭 Roaming <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
+    <div class="nav soon">🧭 Roaming <span class="tagsoon">EM BREVE</span></div>
   </aside>
   <main id="main">
     <div id="gate"></div>
@@ -588,7 +494,6 @@ const PAGE = `<!doctype html>
     <div id="view-confirm" style="display:none"></div>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
-    <div id="view-devices" style="display:none"></div>
   </main>
 </div>
 
@@ -607,55 +512,21 @@ const PAGE = `<!doctype html>
 <div class="modal" id="m-stats"><div class="sheet"><button class="x" onclick="mclose('m-stats')">✕</button><div id="stats-body"></div></div></div>
 
 <script>
-  var authState={
-    logged:false,member:false,canEdit:false,canManageDevices:false,
-    canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,name:''
-  };
-  var current=null, es=null, tes=null, selTime=null, selImg=null;
-  var lootSelectedEvent=null;
-  var _viewCache={};
-  function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
-  var combatSelectedEvent=null;
-  var telemetryRefreshTimer=null, telemetryRefreshPending=false, confirmPollTimer=null;
+  var authState={logged:false,member:false,canEdit:false,name:''};
+  var current=null, es=null, selTime=null, selImg=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
-  var liveText='● conectando…', liveColor='var(--amber)', liveRestoreTimer=null, streamLive=false;
-  function paintLive(){ var l=document.getElementById('live'); if(!l)return; l.textContent=liveText; l.style.color=liveColor; }
-  function setLive(text,color){ liveText=text; liveColor=color; paintLive(); }
-  function flash(m,c){
-    var l=document.getElementById('live'); if(!l)return;
-    l.textContent=m; l.style.color=c||'var(--muted)';
-    if(liveRestoreTimer) clearTimeout(liveRestoreTimer);
-    liveRestoreTimer=setTimeout(paintLive,2500);
-  }
-  function checkConnection(){
-    if(liveText.indexOf('desconectado')>=0 || liveText.indexOf('erro')>=0) setLive('● reconectando…','var(--amber)');
-    fetch('/api/health',{cache:'no-store'})
-      .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ return {ok:r.ok,j:j}; }); })
-      .then(function(x){
-        if(x.ok && x.j && x.j.ok){
-          setLive(streamLive?'● conectado · CTA ao vivo':'● conectado','var(--green)');
-        } else if(x.j && !x.j.discord){
-          setLive('● Discord desconectado','var(--red)');
-        } else if(x.j && !x.j.database){
-          setLive('● banco indisponível','var(--red)');
-        } else {
-          setLive('● erro de conexão','var(--red)');
-        }
-      })
-      .catch(function(){ setLive('● desconectado','var(--red)'); });
-  }
+  function flash(m,c){ var l=document.getElementById('live'); l.textContent=m; l.style.color=c||'var(--muted)'; }
   function mopen(id){ document.getElementById(id).classList.add('open'); }
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices'};
+    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='confirm') renderConfirm();
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
-    if(v==='devices') renderDevices();
   }
 
   function renderAuthHeader(){
@@ -767,34 +638,10 @@ const PAGE = `<!doctype html>
   }
 
   function connect(id){
-    current=id; if(es) es.close(); if(tes) tes.close();
-    if(confirmPollTimer){ clearInterval(confirmPollTimer); confirmPollTimer=null; }
+    current=id; if(es) es.close();
     es=new EventSource('/api/stream?event='+encodeURIComponent(id));
-    es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); streamLive=true; setLive('● conectado · CTA ao vivo','var(--green)'); }catch(e){} };
-    es.onerror=function(){ streamLive=false; setLive('● reconectando…','var(--amber)'); };
-    tes=new EventSource('/api/telemetry/stream?event='+encodeURIComponent(id));
-    tes.onmessage=function(){
-      telemetryRefreshPending=true;
-      if(telemetryRefreshTimer) return;
-      telemetryRefreshTimer=setTimeout(function(){
-        telemetryRefreshTimer=null;
-        if(!telemetryRefreshPending) return;
-        telemetryRefreshPending=false;
-        var active=document.querySelector('.nav[data-view].on');
-        var v=active&&active.getAttribute('data-view');
-        if(v==='confirm') renderConfirm(true);
-        if(v==='loot') renderLoot(true);
-        if(v==='combat') renderCombat(true);
-        if(v==='devices') renderDevices();
-      },3000);
-    };
-    // A validação também depende do estado vivo do Discord e da planilha do bot.
-    // Esses dados podem mudar sem qualquer pacote novo do Combat Client.
-    confirmPollTimer=setInterval(function(){
-      if(!current || String(current)!==String(id)) return;
-      var active=document.querySelector('.nav[data-view].on');
-      if(active&&active.getAttribute('data-view')==='confirm') renderConfirm(true);
-    },5000);
+    es.onmessage=function(ev){ try{ render(JSON.parse(ev.data)); flash('● ao vivo · sincronizado com Discord','var(--green)'); }catch(e){} };
+    es.onerror=function(){ flash('● reconectando…','var(--gold)'); };
   }
 
   function renderCaller(){
@@ -833,7 +680,7 @@ const PAGE = `<!doctype html>
   function loadEvents(){
     fetch('/api/events').then(function(r){return r.json();}).then(function(list){
       var bar=document.getElementById('ctas'); bar.innerHTML='';
-      if(!list.length){ bar.innerHTML='<span style="color:var(--muted)">Nenhum CTA aberto.</span>'; document.getElementById('board').innerHTML='<div class="empty-note">Nenhum CTA aberto agora.</div>'; document.getElementById('reserves').innerHTML=''; document.getElementById('status').innerHTML='<h2>Sem CTA</h2><p>Abra um CTA pra começar.</p>'; current=null; streamLive=false; if(es){es.close();es=null;} if(tes){tes.close();tes=null;} checkConnection(); renderCaller(); return; }
+      if(!list.length){ bar.innerHTML='<span style="color:var(--muted)">Nenhum CTA aberto.</span>'; document.getElementById('board').innerHTML='<div class="empty-note">Nenhum CTA aberto agora.</div>'; document.getElementById('reserves').innerHTML=''; document.getElementById('status').innerHTML='<h2>Sem CTA</h2><p>Abra um CTA pra começar.</p>'; current=null; if(es){es.close();es=null;} renderCaller(); return; }
       var stillOpen=false;
       list.forEach(function(e){
         if(e.id===current) stillOpen=true;
@@ -850,281 +697,98 @@ const PAGE = `<!doctype html>
   document.getElementById('nav-stats').onclick=openStats;
   Array.prototype.forEach.call(document.querySelectorAll('.modal'),function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
 
-  // ===================== DADOS DO JOGO — TELEMETRIA REAL =====================
-  function fmtS(v){ if(v==null) return '—'; if(v>=1e6) return (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+'M'; if(v>=1e3) return Math.round(v/1e3)+'K'; return String(v); }
-  function liveBadge(note){ return '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">● Telemetria conectada'+(note?' · '+esc(note):'')+'</div>'; }
-  function loading(id,title){ document.getElementById(id).innerHTML='<div class="modhead">'+title+'</div><div class="empty-note">Carregando telemetria…</div>'; }
-  function noCta(id,title){ document.getElementById(id).innerHTML='<div class="modhead">'+title+'</div><div class="empty-note">Selecione/abra um CTA para visualizar estes dados.</div>'; }
-  function fetchTelemetry(path){ return fetch(path).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }); }
+  // ===================== DADOS DO JOGO — telas de prévia (MOCK) =====================
+  // ATENÇÃO: os dados abaixo são de EXEMPLO. Cada mock* deve virar um fetch real
+  // quando o backend de telemetria existir (ver "dados que o backend precisa fornecer").
+  function fmtS(v){ if(v>=1e6) return (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+'M'; if(v>=1e3) return Math.round(v/1e3)+'K'; return String(v); }
+  function previewBadge(){ return '<div class="preview">⚠ Prévia · dados de exemplo (aguardando telemetria do jogo)</div>'; }
 
-  function topList(arr, fmt){ arr=arr||[]; var mx=arr.reduce(function(a,b){return Math.max(a,b.v||0);},1);
-    if(!arr.length) return '<div class="empty-note">Sem dados ainda.</div>';
-    return '<div class="toplist">'+arr.map(function(r,i){ return '<div class="toprow"><span class="rk">'+(i+1)+'</span><span class="nm">'+esc(r.n)+'</span><span class="bar"><i style="width:'+Math.round((r.v||0)/mx*100)+'%"></i></span><span class="val">'+fmt(r.v||0)+'</span></div>'; }).join('')+'</div>'; }
+  // TODO backend: GET /api/telemetry/confirm?event=<id>
+  function mockConfirm(){ return {
+    resumo:{ confirmado:74, faltando:6, extra:3, divergencia:2 },
+    pts:[
+      { pt:'PT 1', linhas:[
+        {n:'BadMack', arma:'Galatinas', st:'ok'},
+        {n:'Mitrius', arma:'Braçadeiras', st:'ok'},
+        {n:'Isahel', arma:'Queda Santa', st:'miss', obs:'na planilha, não detectado no jogo'},
+        {n:'ThorXIII', arma:'Quebra Reinos', st:'div', obs:'no jogo com Cravadas'} ]},
+      { pt:'PT 2', linhas:[
+        {n:'LordErmac', arma:'Braçadeiras', st:'ok'},
+        {n:'Tarzan05', arma:'Galatinas', st:'extra', obs:'no jogo, fora da planilha'} ]} ] }; }
 
-  function renderConfirm(silent){
-    if(!current){ noCta('view-confirm','🎯 Validação do CTA'); return; }
-    if(!silent) loading('view-confirm','🎯 Validação do CTA');
-    fetchTelemetry('/api/telemetry/confirm?event='+encodeURIComponent(current)).then(function(d){
-      var r=d.resumo||{}, m=d.meta||{};
-      var age='';
-      if(m.latestPartyAt){
-        var sec=Math.max(0,Math.round((Date.now()-Number(m.latestPartyAt))/1000));
-        age=sec<60?(sec+'s atrás'):(Math.floor(sec/60)+'min atrás');
-      }
-      var evt=d.event||{};
-      var html=liveBadge((m.partyPlayers||0)+' jogadores detectados · '+(m.realParties||0)+' PTs · '+(m.discordPlayers||0)+' na call')
-        +'<div class="modhead">🎯 Validação do CTA · CTA '+esc(evt.time||'?')+' UTC <span style="font-size:11px;color:var(--muted)">#'+esc(evt.id||current)+'</span></div>'
-        +'<div class="preview"><b>ESTADO DO JOGO:</b> '+(m.partyPlayers||0)+' jogadores conhecidos'+(age?' · última mudança '+age:'')+'. A ausência de novos pacotes não zera esta informação; ela só muda quando o Combat Client envia outro estado da party.</div>'
-        +'<div class="statgrid">'
-        +'<div class="stat g"><div class="k">Formação correta</div><div class="v">'+(r.prontidao||0)+'%</div></div>'
-        +'<div class="stat b"><div class="k">Na PT certa</div><div class="v">'+(r.corretos||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">Na PT errada</div><div class="v">'+(r.ptErrada||0)+'</div></div>'
-        +'<div class="stat r"><div class="k">Não visto em PT</div><div class="v">'+(r.foraParty||0)+'</div></div>'
-        +'</div>'
-        +'<div class="statgrid">'
-        +'<div class="stat a"><div class="k">Na call Discord</div><div class="v">'+(r.discord||0)+'</div></div>'
-        +'<div class="stat b"><div class="k">Detectados nas PTs</div><div class="v">'+(r.jogo||0)+'</div></div>'
-        +'<div class="stat a"><div class="k">Na call sem inscrição</div><div class="v">'+(r.discordSemPing||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">Na PT sem escala</div><div class="v">'+(r.jogoSemEscala||0)+'</div></div>'
-        +'</div>';
+  // TODO backend: GET /api/telemetry/loot?event=<id>
+  function mockLoot(){ return {
+    resumo:{ capturado:412000000, entregue:301000000, pendente:96000000, divergencias:5 },
+    top:[ {n:'NegaumBlack', v:82000000},{n:'BadMack', v:64000000},{n:'Mitrius', v:51000000},{n:'Isahel', v:38000000},{n:'LordErmac', v:29000000} ],
+    itens:[
+      {jog:'NegaumBlack', item:'T8 Espadas Duplas', qtd:1, origem:'corpo inimigo', v:1240000, st:'entregue'},
+      {jog:'BadMack', item:'T8 Galatinas', qtd:1, origem:'corpo inimigo', v:980000, st:'pendente'},
+      {jog:'Mitrius', item:'T7 Braçadeiras', qtd:2, origem:'baú', v:410000, st:'divergencia'} ] }; }
 
-      function pill(cls,text){ return '<span class="pill '+cls+'">'+text+'</span>'; }
-      function playerLine(x,kind){
-        var slot=x.slot?('<span class="num">'+('0'+x.slot).slice(-2)+'</span>'):'<span class="num">--</span>';
-        var status='', detail='';
-        if(kind==='missing'){ status=pill('miss','NÃO VISTO'); detail=x.game&&x.actualPartyLabel?('visto '+esc(x.actualPartyLabel)):'não consta no último estado conhecido'; }
-        else if(kind==='intruder'){ status=pill('div','PT ERRADA'); detail=x.plannedParty?('deveria estar PT '+x.plannedParty):'não deveria estar nesta PT'; }
-        else { status=pill('ok','CORRETO'); detail='posição confirmada'; }
-        return '<div class="auditline '+kind+'">'+slot+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+status+'</span><span class="auditdetail">'+detail+'</span></div>';
-      }
-      function partyColumn(title,arr,kind,empty){
-        return '<div><div class="audittitle">'+title+'</div>'+((arr||[]).length?(arr||[]).map(function(x){return playerLine(x,kind);}).join(''):'<div class="auditok">'+empty+'</div>')+'</div>';
-      }
+  // TODO backend: GET /api/telemetry/combat?event=<id>
+  function mockCombat(){ return {
+    resumo:{ damage:18400000, healing:7200000, mortes:14, fights:6 },
+    porPt:[ {pt:'PT 1', dmg:7100000, heal:2600000, mortes:3},{pt:'PT 2', dmg:5900000, heal:2100000, mortes:5},{pt:'PT 3', dmg:5400000, heal:2500000, mortes:6} ],
+    topDmg:[ {n:'Pvpkabuloso', v:1420000},{n:'BadMack', v:1180000},{n:'Flagelo01', v:990000} ],
+    topHeal:[ {n:'Vxnxq', v:1310000},{n:'Liliflor', v:1120000},{n:'Lasuerte', v:870000} ] }; }
 
-      var groups=d.issuesByParty||[];
-      if(!groups.length){
-        html+='<div class="panel"><div class="empty-note">Ainda não há uma party observada para comparar com a escala.</div></div>';
-      } else {
-        groups.forEach(function(g){
-          var missing=g.missing||[], wrong=g.intruders||[], correct=g.correct||[];
-          var problems=missing.length+wrong.length;
-          html+='<div class="panel auditpt"><div class="audithead"><h3>PT '+g.party+'</h3><span class="'+(problems?'auditbad':'auditgood')+'">'+correct.length+' corretos · '+problems+' divergências</span></div>'
-            +'<div class="auditsplit">'
-            +partyColumn('Slots 01–10',correct.filter(function(x){return (x.slot||99)<=10;}),'correct','Nenhum confirmado')
-            +partyColumn('Slots 11–20',correct.filter(function(x){return (x.slot||99)>10;}),'correct','Nenhum confirmado')
-            +'</div>';
-          if(problems){
-            html+='<div class="auditsplit">'
-              +partyColumn('Não vistos na PT',missing,'missing','Ninguém')
-              +partyColumn('Jogadores na PT errada',wrong,'intruder','Ninguém')
-              +'</div>';
-          }
-          html+='</div>';
-        });
-      }
+  function topList(arr, fmt){ var mx=arr.reduce(function(a,b){return Math.max(a,b.v);},1);
+    return '<div class="toplist">'+arr.map(function(r,i){ return '<div class="toprow"><span class="rk">'+(i+1)+'</span><span class="nm">'+esc(r.n)+'</span><span class="bar"><i style="width:'+Math.round(r.v/mx*100)+'%"></i></span><span class="val">'+fmt(r.v)+'</span></div>'; }).join('')+'</div>'; }
 
-      if((d.discordNoPing||[]).length){
-        html+='<div class="panel"><h3>Na call sem inscrição</h3><div class="auditgrid">'+(d.discordNoPing||[]).map(function(l){return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM PING')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';}).join('')+'</div></div>';
-      }
-      if((d.gameNoSignup||[]).length){
-        html+='<div class="panel"><h3>Na PT sem escala</h3><div class="auditgrid">'+(d.gameNoSignup||[]).map(function(l){return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';}).join('')+'</div></div>';
-      }
-      if(m.note) html+='<div class="note">'+esc(m.note)+'</div>';
-      setView('view-confirm',html);
-    }).catch(function(e){
-      document.getElementById('view-confirm').innerHTML='<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>';
+  function renderConfirm(){
+    var d=mockConfirm(); var r=d.resumo;
+    var html=previewBadge()+'<div class="modhead">🎯 Confirmação pelo jogo</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat g"><div class="k">Confirmado</div><div class="v">'+r.confirmado+'</div></div>'
+      +'<div class="stat r"><div class="k">Faltando no jogo</div><div class="v">'+r.faltando+'</div></div>'
+      +'<div class="stat a"><div class="k">Presente não escalado</div><div class="v">'+r.extra+'</div></div>'
+      +'<div class="stat p"><div class="k">Divergência</div><div class="v">'+r.divergencia+'</div></div></div>';
+    d.pts.forEach(function(pt){
+      html+='<div class="panel"><h3>'+esc(pt.pt)+'</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Arma escalada</th><th>Status</th><th>Observação</th></tr></thead><tbody>';
+      pt.linhas.forEach(function(l){
+        var lbl={ok:'Confirmado',miss:'Faltando no jogo',extra:'Presente não escalado',div:'Divergência'}[l.st]||l.st;
+        html+='<tr><td><b>'+esc(l.n)+'</b></td><td>'+esc(l.arma)+'</td><td><span class="pill '+l.st+'">'+lbl+'</span></td><td style="color:var(--muted)">'+esc(l.obs||'')+'</td></tr>';
+      });
+      html+='</tbody></table></div>';
     });
+    document.getElementById('view-confirm').innerHTML=html;
   }
 
-  function renderLoot(silent){
-    if(!silent) loading('view-loot','📦 Registros & Loot');
-
-    fetch('/api/telemetry/loot-ctas')
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-      .then(function(ctas){
-        ctas=ctas||[];
-        var preferred=lootSelectedEvent || current || (ctas[0]&&ctas[0].id) || null;
-        var selected=ctas.find(function(x){return String(x.id)===String(preferred);}) || ctas[0] || null;
-
-        if(!selected){
-          document.getElementById('view-loot').innerHTML='<div class="modhead">📦 Registros & Loot</div><div class="empty-note">Nenhum CTA disponível para conferência nos últimos 3 dias.</div>';
-          return;
-        }
-
-        lootSelectedEvent=String(selected.id);
-
-        fetchTelemetry('/api/telemetry/loot?event='+encodeURIComponent(lootSelectedEvent)).then(function(d){
-          var r=d.resumo||{};
-          var lootNote=(d.meta&&d.meta.eventosConsiderados!=null)
-            ? (d.meta.eventosConsiderados+' considerados · '+(d.meta.eventosIgnorados||0)+' ignorados')
-            : ((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'');
-          var filterBadge=(d.meta&&d.meta.filtroAtivo)
-            ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Filtro ativo: apenas participantes deste CTA da IMORTAIS entram no desempenho</div>'
-            : '';
-
-          var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
-            +ctas.map(function(x){
-              var on=String(x.id)===String(lootSelectedEvent);
-              var label='CTA '+esc(x.time)+(x.status==='closed'?' · encerrado':' · ao vivo');
-              return '<button class="tab loot-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+label+' <span style="color:var(--muted)">('+x.lootEvents+')</span></button>';
-            }).join('')
-            +'</div><div class="note" style="margin-top:10px">CTAs encerrados ficam disponíveis aqui por 3 dias para conferência de loot.</div></div>';
-
-          var html=picker+liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot</div>'
-            +'<div class="statgrid">'
-            +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
-            +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
-            +'<div class="stat a"><div class="k">Pendente</div><div class="v">'+fmtS(r.pendente)+'</div></div>'
-            +'<div class="stat p"><div class="k">Divergências</div><div class="v">'+fmtS(r.divergencias)+'</div></div></div>'
-            +'<div class="split"><div class="panel"><h3>Top looters</h3>'+topList(d.top||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>Itens recentes</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Item</th><th>Qtd</th><th>Valor</th><th>Status</th></tr></thead><tbody>'
-            +(d.itens||[]).map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+esc(i.st)+'">'+esc(i.st)+'</span></td></tr>'; }).join('')
-            +'</tbody></table></div></div>';
-          if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
-          setView('view-loot',html);
-
-          Array.prototype.forEach.call(document.querySelectorAll('.loot-cta'),function(b){
-            b.onclick=function(){
-              lootSelectedEvent=b.getAttribute('data-id');
-              renderLoot(false);
-            };
-          });
-        });
-      })
-      .catch(function(){
-        document.getElementById('view-loot').innerHTML='<div class="modhead">📦 Registros & Loot</div><div class="empty-note">Sem dados de loot ou erro ao carregar.</div>';
-      });
+  function renderLoot(){
+    var d=mockLoot(); var r=d.resumo;
+    var html=previewBadge()+'<div class="modhead">📦 Registros &amp; Loot</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
+      +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
+      +'<div class="stat a"><div class="k">Pendente</div><div class="v">'+fmtS(r.pendente)+'</div></div>'
+      +'<div class="stat p"><div class="k">Divergências</div><div class="v">'+r.divergencias+'</div></div></div>'
+      +'<div class="split"><div class="panel"><h3>Top looters</h3>'+topList(d.top,fmtS)+'</div>'
+      +'<div class="panel"><h3>Itens recentes</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Item</th><th>Qtd</th><th>Valor</th><th>Status</th></tr></thead><tbody>'
+      +d.itens.map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+i.st+'">'+i.st+'</span></td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+    document.getElementById('view-loot').innerHTML=html;
   }
 
-  function renderCombat(silent){
-    if(!silent) loading('view-combat','⚔️ Combate');
-    fetch('/api/telemetry/combat-ctas')
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-      .then(function(ctas){
-        ctas=ctas||[];
-        var preferred=combatSelectedEvent || current || (ctas[0]&&ctas[0].id) || null;
-        var selected=ctas.find(function(x){return String(x.id)===String(preferred);}) || ctas[0] || null;
-
-        if(!selected){
-          document.getElementById('view-combat').innerHTML='<div class="modhead">⚔️ Combate</div><div class="empty-note">Nenhum CTA com dados de combate disponível nos últimos 3 dias.</div>';
-          return;
-        }
-
-        combatSelectedEvent=String(selected.id);
-
-        fetchTelemetry('/api/telemetry/combat?event='+encodeURIComponent(combatSelectedEvent)).then(function(d){
-          var r=d.resumo||{};
-          var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
-            +ctas.map(function(x){
-              var on=String(x.id)===String(combatSelectedEvent);
-              var label='CTA '+esc(x.time)+(x.status==='closed'?' · encerrado':' · ao vivo');
-              return '<button class="tab combat-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+label+' <span style="color:var(--muted)">('+x.combatEvents+')</span></button>';
-            }).join('')
-            +'</div><div class="note" style="margin-top:10px">Os rankings detalhados de combate ficam disponíveis por 3 dias após o encerramento do CTA.</div></div>';
-
-          var html=picker+liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate</div>'
-            +'<div class="statgrid">'
-            +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
-            +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
-            +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
-            +'<div class="stat b"><div class="k">Fights</div><div class="v">'+fmtS(r.fights)+'</div></div></div>'
-            +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
-            +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
-            +'</tbody></table></div>'
-            +'<div class="split"><div class="panel"><h3>🏆 Top DPS</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>💚 Top Heal</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>';
-          if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
-          setView('view-combat',html);
-
-          Array.prototype.forEach.call(document.querySelectorAll('.combat-cta'),function(b){
-            b.onclick=function(){
-              combatSelectedEvent=b.getAttribute('data-id');
-              renderCombat();
-            };
-          });
-        });
-      })
-      .catch(function(){
-        document.getElementById('view-combat').innerHTML='<div class="modhead">⚔️ Combate</div><div class="empty-note">Sem dados de combate ou erro ao carregar.</div>';
-      });
-  }
-
-
-  function renderDevices(){
-    var el=document.getElementById('view-devices');
-    if(!el) return;
-    el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Carregando…</div>';
-    Promise.all([
-      fetch('/auth/me').then(function(r){return r.json();}),
-      fetch('/api/telemetry/agents').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    ]).then(function(all){
-      var me=all[0], agents=all[1]||[];
-      if(!me.canManageDevices){
-        el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Acesso restrito ao Mackna, dono da guilda e Mestre de Guerra.</div>';
-        return;
-      }
-      var html='<div class="modhead">🖥️ Dispositivos · Combat Client</div>'
-        +'<div class="panel"><h3>Vincular novo PC</h3>'
-        +'<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">'
-        +'<label>Nome do dispositivo<input id="pair-label" class="input" placeholder="Ex: BadMack-PC"></label>'
-        +'<label>Personagem (opcional)<input id="pair-player" class="input" placeholder="Ex: BadMack"></label>'
-        +'<button class="btn primary" id="pair-generate">Gerar código</button>'
-        +'</div><div id="pair-result" style="margin-top:14px"></div></div>'
-        +'<div class="panel"><h3>Dispositivos vinculados</h3>'
-        +'<table class="dtable"><thead><tr><th>Dispositivo</th><th>Personagem</th><th>Último contato</th><th>Status</th><th></th></tr></thead><tbody>'
-        +agents.map(function(a){
-          var revoked=!!a.revokedAt;
-          var last=a.lastSeen?new Date(a.lastSeen).toLocaleString('pt-BR'):'—';
-          return '<tr><td><b>'+esc(a.label||a.deviceId||'Sem nome')+'</b><br><span style="color:var(--muted)">'+esc(a.deviceId||'não vinculado')+'</span></td>'
-            +'<td>'+esc(a.playerName||'—')+'</td><td>'+esc(last)+'</td>'
-            +'<td><span class="pill '+(revoked?'miss':'ok')+'">'+(revoked?'Revogado':'Ativo')+'</span></td>'
-            +'<td>'+(revoked?'':'<button class="btn danger agent-revoke" data-id="'+esc(a.id)+'">Revogar</button>')+'</td></tr>';
-        }).join('')
-        +'</tbody></table></div>';
-      el.innerHTML=html;
-
-      var gen=document.getElementById('pair-generate');
-      if(gen) gen.onclick=function(){
-        var body={label:(document.getElementById('pair-label').value||'').trim(),playerName:(document.getElementById('pair-player').value||'').trim()};
-        fetch('/api/telemetry/pairing/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-          .then(function(r){return r.json().then(function(j){if(!r.ok) throw new Error(j.error||'erro');return j;});})
-          .then(function(j){
-            document.getElementById('pair-result').innerHTML='<div class="preview" style="font-size:18px;color:#fff">Código de pareamento: <b style="font-size:28px;letter-spacing:.12em">'+esc(j.code)+'</b><br><span style="font-size:12px;color:var(--muted)">Válido por 10 minutos e uso único.</span></div>';
-          }).catch(function(e){ document.getElementById('pair-result').textContent='Erro: '+e.message; });
-      };
-      Array.prototype.forEach.call(document.querySelectorAll('.agent-revoke'),function(b){
-        b.onclick=function(){
-          if(!confirm('Revogar este dispositivo?')) return;
-          fetch('/api/telemetry/agents/revoke-id',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.getAttribute('data-id')})})
-            .then(function(){ renderDevices(); });
-        };
-      });
-    }).catch(function(e){
-      el.innerHTML='<div class="modhead">🖥️ Dispositivos · Combat Client</div><div class="empty-note">Erro ao carregar dispositivos: '+esc(e.message)+'</div>';
-    });
+  function renderCombat(){
+    var d=mockCombat(); var r=d.resumo;
+    var html=previewBadge()+'<div class="modhead">⚔️ Combate</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
+      +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
+      +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+r.mortes+'</div></div>'
+      +'<div class="stat b"><div class="k">Fights</div><div class="v">'+r.fights+'</div></div></div>'
+      +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
+      +d.porPt.map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+x.mortes+'</td></tr>'; }).join('')
+      +'</tbody></table></div>'
+      +'<div class="split"><div class="panel"><h3>Top dano</h3>'+topList(d.topDmg,fmtS)+'</div>'
+      +'<div class="panel"><h3>Top cura</h3>'+topList(d.topHeal,fmtS)+'</div></div>';
+    document.getElementById('view-combat').innerHTML=html;
   }
 
   function boot(){
     fetch('/auth/me').then(function(r){return r.json();}).then(function(a){
-      authState={
-        logged:!!a.logged,
-        member:!!a.member,
-        canEdit:!!a.canEdit,
-        canManageDevices:!!a.canManageDevices,
-        canManageBomb:!!a.canManageBomb,
-        canManageCastleRoaming:!!a.canManageCastleRoaming,
-        isSiteAdmin:!!a.isSiteAdmin,
-        name:a.name||''
-      };
+      authState={logged:!!a.logged,member:!!a.member,canEdit:!!a.canEdit,name:a.name||''};
       renderAuthHeader();
-      var devicesNav=document.querySelector('.nav[data-view="devices"]');
-      if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
-      var navBomb=document.getElementById('nav-bomb');
-      var navCastelo=document.getElementById('nav-castelo');
-      var navRoaming=document.getElementById('nav-roaming');
-      if(navBomb) navBomb.style.display=authState.canManageBomb?'':'none';
-      if(navCastelo) navCastelo.style.display=authState.canManageCastleRoaming?'':'none';
-      if(navRoaming) navRoaming.style.display=authState.canManageCastleRoaming?'':'none';
       if(authState.logged && authState.member){
         document.getElementById('gate').innerHTML='';
         document.getElementById('side').style.visibility='visible';
@@ -1140,9 +804,7 @@ const PAGE = `<!doctype html>
       }
     }).catch(function(){ document.getElementById('gate').innerHTML='<div class="gate">Erro ao carregar.</div>'; });
   }
-  checkConnection();
   boot();
-  setInterval(checkConnection,10000);
   setInterval(function(){ if(authState.member){ loadEvents(); loadNews(); } }, 20000);
 </script>
 </body>

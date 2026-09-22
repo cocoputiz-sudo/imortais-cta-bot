@@ -13,9 +13,6 @@ const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = requir
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
-const perfil = require("./perfil");
-const web = require("./web");
-const telemetry = require("./telemetry");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
@@ -29,10 +26,8 @@ const CFG = {
   bombPingChannelId: process.env.BOMB_PING_CHANNEL_ID || null,
   bombRoleId: process.env.BOMB_ROLE_ID || null,
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
-  prepVoiceIds: (process.env.PREP_VOICE_ID || "")
-    .split(",").map((x) => x.trim()).filter(Boolean),
+  prepVoiceId: process.env.PREP_VOICE_ID || null,
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
-  rankingChannelId: process.env.RANKING_CHANNEL_ID || "1550615824232882247",
   bombVoiceId: process.env.BOMB_VOICE_ID || null,
   presetTimes: (process.env.PRESET_TIMES || "15:20,17:20,19:20,21:20,00:00,01:20").split(","),
 };
@@ -50,23 +45,6 @@ function timeToTodayUTC(label) {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
     parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
-}
-
-// contexto de encaixe do CTA: quem é core confirmado + se ainda falta >10min pro início
-async function ctaOpts(ev) {
-  const ping = timeToTodayUTC(ev.time_label);
-  // a batalha começa ~40min depois do ping (horário cheio seguinte). O privilégio
-  // do Core fica ligado até 10min antes da BATALHA = ping + 40 - 10 = ping + 30min.
-  const battleStart = ping ? new Date(ping.getTime() + 40 * 60000) : null;
-  const corePrivilege = battleStart ? (Date.now() < battleStart.getTime() - 10 * 60000) : false;
-  let coreIds = new Set();
-  if (corePrivilege) {
-    try {
-      const r = await db.pool.query("SELECT user_id FROM players WHERE guild_id=$1 AND core_verified=true", [ev.guild_id]);
-      coreIds = new Set(r.rows.map((x) => String(x.user_id)));
-    } catch (_) { /* players pode não existir ainda */ }
-  }
-  return { coreIds, corePrivilege };
 }
 
 // ======================  1) GATILHO  =======================================
@@ -230,7 +208,7 @@ async function applyReallocationMsg(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = reallocate(signups, pl.length, pl, await ctaOpts(fresh));
+  const result = reallocate(signups, pl.length, pl);
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
@@ -252,7 +230,7 @@ function buildTimePicker(selected, callerId) {
 
 // ======================  PRESENÇA EM CALL ==================================
 function voiceKind(channelId) {
-  if (channelId && CFG.prepVoiceIds.includes(channelId)) return "prep";
+  if (channelId && channelId === CFG.prepVoiceId) return "prep";
   if (channelId && channelId === CFG.bombVoiceId) return "bomb";
   return null;
 }
@@ -292,9 +270,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isAutocomplete()) return cmds.handleAutocomplete(interaction);
     if (interaction.isChatInputCommand()) return onSlash(interaction);
-    if ((interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit())
-        && interaction.customId?.startsWith("perfil"))
-      return perfil.handleComponent(interaction);
     if (interaction.isButton()) {
       const [bk] = interaction.customId.split("|");
       if (bk === "occ") return onOccupantChoice(interaction);
@@ -356,76 +331,6 @@ async function onTimeToggle(interaction) {
   await interaction.update({ components: buildTimePicker(sel, callerId) });
 }
 
-// cria um CTA (evento + thread + PT1 + role picker + pings + bomb ping) e devolve a thread.
-// Usada pelo fluxo normal (onTimeConfirm) e pelo /cta_flashmass — mesma engrenagem.
-async function criarCTA(channel, guild, guildId, callerId, time, opts = {}) {
-  const target = timeToTodayUTC(time);
-  let r30 = null, r10 = null;
-  if (target) {
-    r30 = new Date(target.getTime() - 30 * 60000);
-    r10 = new Date(target.getTime() - 10 * 60000);
-  }
-  const ev = await db.createEvent({
-    guildId, channelId: channel.id, callerId, timeLabel: time, remind30: r30, remind10: r10,
-  });
-  const thread = await channel.threads.create({
-    name: `Planilha CTA ${time}`, type: ChannelType.PublicThread, autoArchiveDuration: 1440,
-  });
-  await db.setThread(ev.id, thread.id);
-
-  const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-  const header = opts.flashmass
-    ? `${mention} ⚡🚨 **FLASHMASS ${time} UTC** — massa relâmpago, loga AGORA e escolhe tua arma 👇`
-    : `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`;
-  await thread.send({ content: header, components: buildRolePicker(ev.id) });
-
-  const chunks = rosterChunks([], 1, [0]); // começa só com a PT1
-  const ids = [];
-  for (const c of chunks) { const m = await thread.send({ content: c }); ids.push(m.id); }
-  await db.setRosterMsg(ev.id, ids.join(","));
-
-  await logStaff(guild, `🆕 ${opts.flashmass ? "FLASHMASS" : "CTA"} **${time} UTC** criado por <@${callerId}>.`);
-  if (CFG.contentPingChannelId) {
-    const cch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
-    if (cch) {
-      const link = `https://discord.com/channels/${guildId}/${thread.id}`;
-      const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-      const txt = opts.flashmass
-        ? `${mention} ⚡ **FLASHMASS — ${time} UTC!** Loga e pinga tua função AGORA.\n👉 ${link}`
-        : `${mention} 🗡️ **Saiu CTA — ${time} UTC!** Loga e pinga tua função.\n👉 ${link}`;
-      await cch.send({ content: txt, ...allow }).catch(() => {});
-    }
-  }
-  await postBombPing(guild, ev, time);
-  return thread;
-}
-
-// /cta_flashmass — dispara um flashmass por comando (não conflita com o gatilho de
-// texto do canal), com imagem de chamada e ping do @imortal, e cria o CTA normal.
-async function slashFlashmass(interaction) {
-  const time = (interaction.options.getString("horario") || "").trim();
-  if (!/^\d{1,2}:\d{2}$/.test(time))
-    return interaction.reply({ content: "Horário inválido. Usa HH:MM, ex: 21:20.", flags: MessageFlags.Ephemeral });
-  if (CFG.ctaChannelId && interaction.channelId !== CFG.ctaChannelId)
-    return interaction.reply({ content: "Roda o /cta_flashmass no canal do CTA (#cta-mandatório).", flags: MessageFlags.Ephemeral });
-
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-  // banner de atenção no canal: imagem + @imortal (com fallback se a imagem não existir)
-  const fs = require("fs"); const path = require("path");
-  const imgPath = path.join(__dirname, "..", "assets", "flashmass.png");
-  const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "flashmass.png" }] : [];
-  const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-  const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-  await interaction.channel.send({
-    content: `${mention} ⚡🚨 **FLASHMASS ${time} UTC!** 🚨⚡\nMassa relâmpago — todos pra call, loga e pinga tua função na thread abaixo 👇`,
-    files, ...allow,
-  }).catch(() => {});
-
-  const thread = await criarCTA(interaction.channel, interaction.guild, interaction.guildId, interaction.user.id, time, { flashmass: true });
-  return interaction.editReply({ content: `✅ Flashmass **${time} UTC** criado → ${thread}` });
-}
-
 async function onTimeConfirm(interaction) {
   const [, callerId, csv] = interaction.customId.split("|");
   if (interaction.user.id !== callerId)
@@ -443,8 +348,41 @@ async function onTimeConfirm(interaction) {
 
   const created = [];
   for (const time of times) {
-    const thread = await criarCTA(interaction.channel, interaction.guild, interaction.guildId, callerId, time);
+    const target = timeToTodayUTC(time);
+    let r30 = null, r10 = null;
+    if (target) {
+      r30 = new Date(target.getTime() - 30 * 60000);
+      r10 = new Date(target.getTime() - 10 * 60000);
+    }
+    const ev = await db.createEvent({
+      guildId: interaction.guildId, channelId: interaction.channelId,
+      callerId, timeLabel: time, remind30: r30, remind10: r10,
+    });
+    const thread = await interaction.channel.threads.create({
+      name: `Planilha CTA ${time}`, type: ChannelType.PublicThread, autoArchiveDuration: 1440,
+    });
+    await db.setThread(ev.id, thread.id);
+
+    const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+    await thread.send({
+      content: `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`,
+      components: buildRolePicker(ev.id),
+    });
+    const chunks = rosterChunks([], 1, [0]); // começa só com a PT1
+    const ids = [];
+    for (const c of chunks) { const m = await thread.send({ content: c }); ids.push(m.id); }
+    await db.setRosterMsg(ev.id, ids.join(","));
     created.push(`• **${time}** → ${thread}`);
+    await logStaff(interaction.guild, `🆕 CTA **${time} UTC** criado por <@${callerId}>.`);
+    if (CFG.contentPingChannelId) {
+      const cch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
+      if (cch) {
+        const link = `https://discord.com/channels/${interaction.guildId}/${thread.id}`;
+        const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+        await cch.send({ content: `${mention} 🗡️ **Saiu CTA — ${time} UTC!** Loga e pinga tua função.\n👉 ${link}`, ...allow }).catch(() => {});
+      }
+    }
+    await postBombPing(interaction.guild, ev, time);
     await new Promise((r) => setTimeout(r, 1200));
   }
   await interaction.editReply({ content: `✅ Planilha(s):\n${created.join("\n")}`, components: [] });
@@ -697,7 +635,7 @@ async function applyReallocation(ev, guild, focusUserId) {
     return myLoc;
   }
 
-  const result = reallocate(signups, pl.length, pl, await ctaOpts(fresh));
+  const result = reallocate(signups, pl.length, pl);
 
   let focusLoc = null;
   for (const r of result) {
@@ -866,9 +804,6 @@ async function onSlash(interaction) {
   if (name === "cta_rank")    return slashRank(interaction, false);
   if (name === "cta_meurank") return slashRank(interaction, true);
 
-  if (name === "perfil") return perfil.openWizard(interaction);
-  if (name === "meu_perfil") return perfil.viewOwn(interaction);
-
   if (name.startsWith("roaming")) return onRoamingCommand(interaction);
 
   if (name.startsWith("castelo")) return onCasteloCommand(interaction);
@@ -876,21 +811,12 @@ async function onSlash(interaction) {
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
-  if (name === "perfil_painel") return perfil.postPanelCmd(interaction);
-  if (name === "perfis")        return perfil.listCmd(interaction);
-  if (name === "perfil_de")     return perfil.viewOf(interaction);
-  if (name === "core_pendentes") return perfil.corePending(interaction);
-  if (name === "attendance_audit") return slashAudit(interaction);
-  if (name === "cta_ignore") return slashIgnore(interaction);
-
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
 
   if (name === "attendance_daily")   return slashAttendance(interaction, 1, "hoje");
   if (name === "attendance_week")    return slashAttendance(interaction, 7, "últimos 7 dias");
   if (name === "attendance_monthly") return slashAttendance(interaction, 30, "últimos 30 dias");
-
-  if (name === "cta_flashmass") return slashFlashmass(interaction);
 
   const timeLabel = interaction.options.getString("cta");
   const ev = await db.getOpenEventByTime(interaction.guildId, timeLabel);
@@ -906,23 +832,26 @@ async function onSlash(interaction) {
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
 }
 
-async function showPTCore(ev, guild, tipo, actor) {
+async function slashShow(interaction, ev, tipo) {
+  // tipo: "flex" (índice 1, 2, 3), "press" (índice 4) ou "pt6teste" (índice 5)
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const fresh = (await db.getEvent(ev.id)) || ev;
-  if (!fresh.thread_id) return { ok: false, error: "Thread deste CTA não encontrada." };
+  if (!fresh.thread_id) return interaction.editReply({ content: "⚠️ Thread deste CTA não encontrada." });
   const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
-  if (!thread) return { ok: false, error: "Não foi possível acessar a thread do CTA." };
+  if (!thread) return interaction.editReply({ content: "⚠️ Não foi possível acessar a thread do CTA." });
 
   const pl = db.parsePartyList(fresh);
   let idx;
   if (tipo === "press") {
     idx = 4;
-    if (pl.includes(4)) return { ok: false, error: "A press comp já está aberta neste CTA." };
+    if (pl.includes(4)) return interaction.editReply({ content: `⚠️ A **press comp** já está aberta neste CTA.` });
   } else if (tipo === "pt6teste") {
     idx = 5;
-    if (pl.includes(5)) return { ok: false, error: "A pt6teste já está aberta neste CTA." };
+    if (pl.includes(5)) return interaction.editReply({ content: `⚠️ A **pt6teste** já está aberta neste CTA.` });
   } else {
+    // flex: acha a próxima das PTs flex (1, 2, 3) que ainda não está aberta
     idx = [1, 2, 3].find((i) => !pl.includes(i));
-    if (idx == null) return { ok: false, error: "Todas as PTs flex já estão abertas (máximo 3). Use a press ou pt6teste." };
+    if (idx == null) return interaction.editReply({ content: `⚠️ Todas as PTs flex já estão abertas (máximo 3). Use a press ou pt6teste se precisar de mais.` });
   }
 
   pl.push(idx);
@@ -950,16 +879,9 @@ async function showPTCore(ev, guild, tipo, actor) {
     ...allow,
   });
 
-  await applyReallocation(fresh, guild, null);
-  await logStaff(guild, `🚀 ${actor} liberou a **${nomeTipo}** · CTA ${fresh.time_label}`);
-  return { ok: true, nomeTipo };
-}
-
-async function slashShow(interaction, ev, tipo) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const r = await showPTCore(ev, interaction.guild, tipo, `${interaction.user}`);
-  if (!r.ok) return interaction.editReply({ content: `⚠️ ${r.error}` });
-  return interaction.editReply({ content: `✅ **${r.nomeTipo}** aberta! Quem estava aguardando PT foi realocado.` });
+  await applyReallocation(fresh, interaction.guild, null);
+  await logStaff(interaction.guild, `🚀 ${interaction.user} liberou a **${nomeTipo}** · CTA ${fresh.time_label}`);
+  await interaction.editReply({ content: `✅ **${nomeTipo}** aberta! Quem estava aguardando PT foi realocado.` });
 }
 
 async function applyConsolidation(ev, guild) {
@@ -1474,20 +1396,12 @@ async function slashChangeTime(interaction, ev) {
   await logStaff(interaction.guild, `🕐 ${interaction.user} mudou horário do CTA **${antigo} → ${novo}**`);
 }
 
-async function finishCTACore(ev, actor, guild) {
-  const fresh = (await db.getEvent(ev.id)) || ev;
-  if (fresh.status !== "open") return { ok: false, error: `CTA ${fresh.time_label} já está encerrado.` };
-  await db.setStatus(fresh.id, "closed");
-  await logStaff(guild, `🏁 ${actor} encerrou o CTA **${fresh.time_label} UTC**`);
-  refreshRankingBoard(fresh.guild_id).catch(() => {});
-  web.notifyRosterChange(fresh.id).catch(() => {});
-  return { ok: true, time: fresh.time_label, thread_id: fresh.thread_id };
-}
-
 async function slashFinish(interaction, ev) {
-  const r = await finishCTACore(ev, `${interaction.user}`, interaction.guild);
-  if (!r.ok) return interaction.reply({ content: r.error, flags: MessageFlags.Ephemeral });
-  return interaction.reply({ content: `🏁 **CTA ${r.time} ENCERRADO** por staff — inscrições travadas.` });
+  if (ev.status !== "open")
+    return interaction.reply({ content: `CTA ${ev.time_label} já está encerrado.`, flags: MessageFlags.Ephemeral });
+  await db.setStatus(ev.id, "closed");
+  await interaction.reply({ content: `🏁 **CTA ${ev.time_label} ENCERRADO** por staff — inscrições travadas.` });
+  await logStaff(interaction.guild, `🏁 ${interaction.user} encerrou o CTA **${ev.time_label} UTC** (via /cta_finish)`);
 }
 
 async function slashAttendance(interaction, dias, rotulo) {
@@ -1515,7 +1429,6 @@ async function slashStartSeason(interaction) {
   await db.startSeason(interaction.guildId, numero);
   await interaction.reply({ content: `🏁 **Temporada ${numero} iniciada!** A contagem de presença começa agora. Boa sorte, IMORTAIS! ⚔️` });
   await logStaff(interaction.guild, `🏁 ${interaction.user} iniciou a **Temporada ${numero}**`);
-  refreshRankingBoard(interaction.guildId).catch(() => {});
 }
 
 async function slashFinishSeason(interaction) {
@@ -1523,117 +1436,10 @@ async function slashFinishSeason(interaction) {
   if (!s) return interaction.reply({ content: "Não há temporada aberta pra encerrar.", flags: MessageFlags.Ephemeral });
   await interaction.reply({ content: `🔒 **Temporada ${s.number} encerrada.** O placar final está congelado — rode /cta_rank pra ver o resultado.` });
   await logStaff(interaction.guild, `🔒 ${interaction.user} encerrou a **Temporada ${s.number}**`);
-  refreshRankingBoard(interaction.guildId, s).catch(() => {});
-}
-
-// ---- Placar fixo no canal ┇📊ranking ----
-// Mantém o placar completo (todos os pontuantes) no canal, sem .txt. A cada
-// atualização apaga as mensagens anteriores do próprio bot ali e reposta, então
-// o canal sempre mostra o placar atual e nunca acumula (zero spam no canal).
-let _boardBusy = false;
-
-function rankBoardBlocks(rows, report, season) {
-  const linhas = rows.map((r, i) =>
-    `\`${String(i + 1).padStart(3)}\` **${r.username}** · ${r.score} pts · ${r.integral + r.parcial}/${report.ctaCount} · ${r.cat}`
-  );
-  const header = `🏆 **PLACAR — TEMPORADA ${season.number}**\n${report.ctaCount} CTAs · ${rows.length} jogadores pontuando · atualizado <t:${Math.floor(Date.now() / 1000)}:R>\n`;
-  const blocks = [];
-  let cur = header;
-  for (const l of linhas) {
-    if ((cur + "\n" + l).length > 1900) { blocks.push(cur); cur = ""; }
-    cur += (cur ? "\n" : "") + l;
-  }
-  if (cur.trim()) blocks.push(cur);
-  return blocks.length ? blocks : [header + "\n_(ninguém pontuou ainda nesta temporada)_"];
-}
-
-async function refreshRankingBoard(guildId, seasonOverride) {
-  if (!CFG.rankingChannelId) return;
-  if (_boardBusy) return;               // evita corrida em cliques concorrentes
-  _boardBusy = true;
-  try {
-    const ch = await client.channels.fetch(CFG.rankingChannelId).catch(() => null);
-    if (!ch) return;
-    const season = seasonOverride || (await db.getCurrentSeason(guildId));
-
-    let blocks;
-    if (!season) {
-      blocks = ["🏆 **PLACAR**\n\n_Nenhuma temporada ativa. Um Mestre de Guerra inicia com **/cta_start_temporada**._"];
-    } else {
-      const end = season.ended_at ? new Date(season.ended_at) : new Date();
-      const report = await attendance.buildReport(guildId, new Date(season.started_at), end);
-      const rows = report.rows.filter((r) => r.integral + r.parcial + r.rapida > 0 || r.fantasma > 0);
-      blocks = rankBoardBlocks(rows, report, season);
-    }
-
-    // apaga o placar anterior (só mensagens do próprio bot neste canal)
-    const recent = await ch.messages.fetch({ limit: 50 }).catch(() => null);
-    if (recent) {
-      for (const m of recent.values()) {
-        if (m.author.id === client.user.id) await m.delete().catch(() => {});
-      }
-    }
-    for (const b of blocks) await ch.send({ content: b, allowedMentions: { parse: [] } });
-  } catch (e) {
-    console.error("refreshRankingBoard:", e?.message || e);
-  } finally {
-    _boardBusy = false;
-  }
-}
-
-async function slashIgnore(interaction) {
-  const id = interaction.options.getInteger("id");
-  const desfazer = interaction.options.getBoolean("desfazer") || false;
-  const ev = await db.getEvent(id).catch(() => null);
-  if (!ev) return interaction.reply({ content: `CTA id ${id} não encontrado.`, flags: MessageFlags.Ephemeral });
-  await db.setEventIgnored(id, !desfazer);
-  await interaction.reply({
-    content: desfazer
-      ? `✅ CTA **${ev.time_label}** (id ${id}) voltou pra contagem de attendance/rank.`
-      : `🚫 CTA **${ev.time_label}** (id ${id}) removido da contagem de attendance/rank.`,
-    flags: MessageFlags.Ephemeral,
-  });
-  refreshRankingBoard(interaction.guildId).catch(() => {});
-}
-
-async function slashAudit(interaction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const dias = interaction.options.getInteger("dias") || 7;
-  const user = interaction.options.getUser("usuario");
-  const end = new Date();
-  const start = new Date(end.getTime() - dias * 86400000);
-
-  if (user) {
-    const report = await attendance.buildReport(interaction.guildId, start, end);
-    const row = report.rows.find((r) => r.user_id === user.id);
-    if (!row) return interaction.editReply({ content: `Sem registro de **${user.username}** nos últimos ${dias} dias.` });
-    const linhas = [];
-    for (const d of Object.keys(row.detail || {}).sort())
-      for (const c of row.detail[d])
-        linhas.push(`${d} ${String(c.cta).padStart(5)} · ${String(c.level).padEnd(8)}${c.pingou ? " · pingou" : ""} · ${c.prepMin || 0}min · ${c.prepIn || "?"}→${c.prepOut || "?"}`);
-    const head = `🔎 Auditoria — ${user.username} (últimos ${dias} dias)\nScore ${row.score} · INTEGRAL ${row.integral} · PARCIAL ${row.parcial} · RÁPIDA ${row.rapida} · FANTASMA ${row.fantasma} · presença ${row.integral + row.parcial}/${report.ctaCount} · ${row.cat}`;
-    const buf = Buffer.from(head + "\n\n" + (linhas.join("\n") || "(sem detalhe)") + "\n", "utf-8");
-    return interaction.editReply({ content: head + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${user.username}.txt` }] });
-  }
-
-  const a = await attendance.auditEvents(interaction.guildId, start, end);
-  const alerts = [];
-  const low = a.counted.filter((c) => c.lowPresence);
-  if (low.length) alerts.push(`⚠️ ${low.length} CTA(s) com presença baixa (<5) — pode ser bot fora do ar ou canal errado: ${low.map((c) => c.date + " " + c.time).join(", ")}`);
-  const mid = a.counted.filter((c) => c.midnight);
-  if (mid.length) alerts.push(`🕛 ${mid.length} CTA(s) em virada de dia (00:/01:) — confira a janela: ${mid.map((c) => c.date + " " + c.time).join(", ")}`);
-  if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesmo dia+horário).`);
-  const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas`);
-  const head = `🔎 Auditoria de attendance — últimos ${dias} dias\nCTAs contados: ${a.counted.length} (de ${a.rawCount} eventos brutos)`;
-  const body = head + "\n\n" + (alerts.length ? alerts.join("\n") + "\n\n" : "") + lines.join("\n") + "\n";
-  const buf = Buffer.from(body, "utf-8");
-  return interaction.editReply({ content: head + (alerts.length ? "\n\n" + alerts.join("\n") : "") + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${dias}d.txt` }] });
 }
 
 async function slashRank(interaction, meu) {
-  // Ephemeral SEMPRE: tanto /cta_meurank quanto /cta_rank. O placar é consulta,
-  // não anúncio — assim, por mais gente que rode, nada é postado no canal (zero spam).
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({ flags: meu ? MessageFlags.Ephemeral : undefined });
   const season = await db.getCurrentSeason(interaction.guildId);
   if (!season)
     return interaction.editReply({ content: "Nenhuma temporada ativa ainda. Peça a um Mestre de Guerra pra iniciar com **/cta_start_temporada**." });
@@ -1664,11 +1470,13 @@ async function slashRank(interaction, meu) {
     return;
   }
 
-  // /cta_rank atualiza o placar público no ┇📊ranking (todos os pontuantes, sem .txt)
-  // e confirma em privado. Nada é postado no canal de onde o comando foi chamado.
-  await refreshRankingBoard(interaction.guildId, season);
-  const link = CFG.rankingChannelId ? `<#${CFG.rankingChannelId}>` : "o canal de ranking";
-  return interaction.editReply({ content: `✅ Placar da **Temporada ${season.number}** atualizado em ${link}.` });
+  const linhas = rows.map((r, i) => `\`${String(i + 1).padStart(2)}\` **${r.username}** · ${r.score} pts · ${r.integral + r.parcial}/${report.ctaCount}`);
+  const header = `🏆 **Placar — Temporada ${season.number}** (${report.ctaCount} CTAs)\n`;
+  const chunks = [];
+  for (let i = 0; i < linhas.length; i += 25) chunks.push(linhas.slice(i, i + 25).join("\n"));
+  if (!chunks.length) return interaction.editReply({ content: header + "\n_(ninguém pontuou ainda nesta temporada)_" });
+  await interaction.editReply({ content: header + "\n" + chunks[0] });
+  for (let i = 1; i < chunks.length; i++) await interaction.followUp({ content: chunks[i] });
 }
 
 function renderAttendanceHTML(report, rotulo, start, end) {
@@ -2146,9 +1954,8 @@ function refreshRoster(ev) {
 }
 
 async function doRefreshRoster(ev) {
+  if (!ev.thread_id || !ev.roster_msg) return;
   const fresh = (await db.getEvent(ev.id)) || ev;
-  web.notifyRosterChange(fresh.id).catch(() => {});
-  if (!fresh.thread_id || !fresh.roster_msg) return;
   const thread = await client.channels.fetch(fresh.thread_id).catch(() => null);
   if (!thread) return;
 
@@ -2272,7 +2079,7 @@ client.once(Events.ClientReady, async (c) => {
 
 async function reconcileVoice(client) {
   try {
-    for (const chId of [...CFG.prepVoiceIds, CFG.bombVoiceId]) {
+    for (const chId of [CFG.prepVoiceId, CFG.bombVoiceId]) {
       if (!chId) continue;
       await db.voiceCloseAllOpen(chId);
       const ch = await client.channels.fetch(chId).catch(() => null);
@@ -2290,140 +2097,5 @@ async function reconcileVoice(client) {
 client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
-let _shuttingDown = false;
-async function gracefulShutdown(sig) {
-  if (_shuttingDown) return;
-  _shuttingDown = true;
-  console.log("↩️  " + sig + " recebido, encerrando com calma...");
-  try { await client.destroy(); } catch (_) {}
-  try { await db.pool.end(); } catch (_) {}
-  process.exit(0);
-}
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-setInterval(async () => {
-  try {
-    await db.pool.query("DELETE FROM albion_telemetry_events WHERE received_at < now() - interval '3 days'");
-    await db.pool.query("DELETE FROM voice_presence WHERE left_at IS NOT NULL AND left_at < now() - interval '30 days'");
-  } catch (e) { console.error("retention:", e); }
-}, 6 * 60 * 60 * 1000);
 
-function renderDiscordMd(raw, guild) {
-  let t = String(raw || "");
-  t = t.replace(/<@!?(\d+)>/g, (m, id) => { const mem = guild && guild.members.cache.get(id); return "@" + (mem ? mem.displayName : "membro"); });
-  t = t.replace(/<@&(\d+)>/g, (m, id) => { const r = guild && guild.roles.cache.get(id); return "@" + (r ? r.name : "cargo"); });
-  t = t.replace(/<#(\d+)>/g, (m, id) => { const c = guild && guild.channels.cache.get(id); return "#" + (c ? c.name : "canal"); });
-  t = t.replace(/<a?:(\w+):\d+>/g, ":$1:");
-  t = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const inline = (x) => x
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
-  const lines = t.split("\n");
-  let html = "", quote = [];
-  const flush = () => { if (quote.length) { html += "<blockquote>" + quote.map(inline).join("<br>") + "</blockquote>"; quote = []; } };
-  for (const line of lines) {
-    const q = /^&gt;\s?(.*)$/.exec(line);
-    if (q) { quote.push(q[1]); continue; }
-    flush();
-    let m;
-    if ((m = /^###\s+(.*)$/.exec(line))) html += "<h4>" + inline(m[1]) + "</h4>";
-    else if ((m = /^##\s+(.*)$/.exec(line))) html += "<h3>" + inline(m[1]) + "</h3>";
-    else if ((m = /^#\s+(.*)$/.exec(line))) html += "<h2>" + inline(m[1]) + "</h2>";
-    else if (line.trim() === "") html += "";
-    else html += "<p>" + inline(line) + "</p>";
-  }
-  flush();
-  return html;
-}
-
-const webActions = {
-  presetTimes: () => CFG.presetTimes,
-  fetchNews: async () => {
-    const NEWS = process.env.NEWS_CHANNEL_ID;
-    if (!NEWS) return [];
-    const ch = await client.channels.fetch(NEWS).catch(() => null);
-    if (!ch || !ch.messages) return [];
-    const msgs = await ch.messages.fetch({ limit: 8 }).catch(() => null);
-    if (!msgs) return [];
-    const out = [];
-    for (const m of msgs.values()) {
-      if (!m.content || !m.content.trim()) continue;
-      out.push({ author: (m.member && m.member.displayName) || m.author.username, time: m.createdTimestamp, html: renderDiscordMd(m.content, ch.guild) });
-    }
-    return out;
-  },
-  myStats: async (userId, guildId) => {
-    const season = await db.getCurrentSeason(guildId);
-    if (!season) return { season: false };
-    const report = await attendance.buildReport(guildId, new Date(season.started_at), new Date());
-    const rows = report.rows;
-    const idx = rows.findIndex((r) => r.user_id === userId);
-    if (idx < 0) return { season: season.number, ctaCount: report.ctaCount, found: false };
-    const r = rows[idx];
-    return {
-      season: season.number, ctaCount: report.ctaCount, found: true,
-      rank: idx + 1, total: rows.length, score: r.score, cat: r.cat,
-      came: r.integral + r.parcial + r.rapida, integral: r.integral, parcial: r.parcial, rapida: r.rapida,
-      pinged: r.pingou, fantasma: r.fantasma,
-    };
-  },
-  applyEdit: async (eventId) => {
-    const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return;
-    const guild = client.guilds.cache.get(ev.guild_id) || null;
-    await applyReallocation(ev, guild, null);
-  },
-  openCTA: async (time, actorId, imageBase64) => {
-    const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
-    if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
-    if (imageBase64) {
-      try {
-        const b = Buffer.from(String(imageBase64).replace(/^data:[^;]+;base64,/, ""), "base64");
-        const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-        const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-        await ch.send({ content: `${mention} 🛡️ **CTA ${time} UTC** — chamado! Loga e pinga tua função na thread 👇`, files: [{ attachment: b, name: "cta.png" }], ...allow }).catch(() => {});
-      } catch (_) { /* ignora imagem inválida */ }
-    }
-    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time);
-    return { ok: true };
-  },
-  flashmass: async (time, actorId) => {
-    const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
-    if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
-    const fs = require("fs"); const path = require("path");
-    const imgPath = path.join(__dirname, "..", "assets", "flashmass.png");
-    const files = fs.existsSync(imgPath) ? [{ attachment: imgPath, name: "flashmass.png" }] : [];
-    const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-    const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-    await ch.send({ content: `${mention} ⚡🚨 **FLASHMASS ${time} UTC!** 🚨⚡\nMassa relâmpago — todos pra call, loga e pinga tua função na thread 👇`, files, ...allow }).catch(() => {});
-    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time, { flashmass: true });
-    return { ok: true };
-  },
-  finishCTA: async (eventId, actorId) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev) return { ok: false, error: "CTA não encontrado." };
-    const guild = client.guilds.cache.get(ev.guild_id) || null;
-    const r = await finishCTACore(ev, `<@${actorId}>`, guild);
-    if (r.ok && r.thread_id) { const th = await client.channels.fetch(r.thread_id).catch(() => null); if (th) await th.send({ content: `🏁 **CTA ${r.time} ENCERRADO** — inscrições travadas.` }).catch(() => {}); }
-    return r;
-  },
-  showPT: async (eventId, tipo, actorId) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev) return { ok: false, error: "CTA não encontrado." };
-    const guild = client.guilds.cache.get(ev.guild_id) || null;
-    return showPTCore(ev, guild, tipo, `<@${actorId}>`);
-  },
-};
-
-(async () => {
-  try {
-    await db.init();
-    await perfil.initSchema(db.pool);
-    await telemetry.initSchema(db.pool);
-    web.startWebServer(client, webActions);
-    await client.login(CFG.token);
-  } catch (e) {
-    console.error("❌ Falha fatal no boot:", e);
-    process.exit(1);
-  }
-})();
+(async () => { await db.init(); await client.login(CFG.token); })();

@@ -15,7 +15,6 @@ const cmds = require("./commands");
 const attendance = require("./attendance");
 const perfil = require("./perfil");
 const web = require("./web");
-const telemetry = require("./telemetry");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
@@ -29,8 +28,7 @@ const CFG = {
   bombPingChannelId: process.env.BOMB_PING_CHANNEL_ID || null,
   bombRoleId: process.env.BOMB_ROLE_ID || null,
   bombLeaderRoleId: process.env.BOMB_LEADER_ROLE_ID || null,
-  prepVoiceIds: (process.env.PREP_VOICE_ID || "")
-    .split(",").map((x) => x.trim()).filter(Boolean),
+  prepVoiceId: process.env.PREP_VOICE_ID || null,
   contentPingChannelId: process.env.CONTENT_PING_CHANNEL_ID || "1045114655128944640",
   rankingChannelId: process.env.RANKING_CHANNEL_ID || "1550615824232882247",
   bombVoiceId: process.env.BOMB_VOICE_ID || null,
@@ -50,23 +48,6 @@ function timeToTodayUTC(label) {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
     parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
-}
-
-// contexto de encaixe do CTA: quem é core confirmado + se ainda falta >10min pro início
-async function ctaOpts(ev) {
-  const ping = timeToTodayUTC(ev.time_label);
-  // a batalha começa ~40min depois do ping (horário cheio seguinte). O privilégio
-  // do Core fica ligado até 10min antes da BATALHA = ping + 40 - 10 = ping + 30min.
-  const battleStart = ping ? new Date(ping.getTime() + 40 * 60000) : null;
-  const corePrivilege = battleStart ? (Date.now() < battleStart.getTime() - 10 * 60000) : false;
-  let coreIds = new Set();
-  if (corePrivilege) {
-    try {
-      const r = await db.pool.query("SELECT user_id FROM players WHERE guild_id=$1 AND core_verified=true", [ev.guild_id]);
-      coreIds = new Set(r.rows.map((x) => String(x.user_id)));
-    } catch (_) { /* players pode não existir ainda */ }
-  }
-  return { coreIds, corePrivilege };
 }
 
 // ======================  1) GATILHO  =======================================
@@ -230,7 +211,7 @@ async function applyReallocationMsg(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = reallocate(signups, pl.length, pl, await ctaOpts(fresh));
+  const result = reallocate(signups, pl.length, pl);
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
@@ -252,7 +233,7 @@ function buildTimePicker(selected, callerId) {
 
 // ======================  PRESENÇA EM CALL ==================================
 function voiceKind(channelId) {
-  if (channelId && CFG.prepVoiceIds.includes(channelId)) return "prep";
+  if (channelId && channelId === CFG.prepVoiceId) return "prep";
   if (channelId && channelId === CFG.bombVoiceId) return "bomb";
   return null;
 }
@@ -697,7 +678,7 @@ async function applyReallocation(ev, guild, focusUserId) {
     return myLoc;
   }
 
-  const result = reallocate(signups, pl.length, pl, await ctaOpts(fresh));
+  const result = reallocate(signups, pl.length, pl);
 
   let focusLoc = null;
   for (const r of result) {
@@ -2272,7 +2253,7 @@ client.once(Events.ClientReady, async (c) => {
 
 async function reconcileVoice(client) {
   try {
-    for (const chId of [...CFG.prepVoiceIds, CFG.bombVoiceId]) {
+    for (const chId of [CFG.prepVoiceId, CFG.bombVoiceId]) {
       if (!chId) continue;
       await db.voiceCloseAllOpen(chId);
       const ch = await client.channels.fetch(chId).catch(() => null);
@@ -2290,23 +2271,6 @@ async function reconcileVoice(client) {
 client.on("error", (e) => console.error("client error:", e));
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
-let _shuttingDown = false;
-async function gracefulShutdown(sig) {
-  if (_shuttingDown) return;
-  _shuttingDown = true;
-  console.log("↩️  " + sig + " recebido, encerrando com calma...");
-  try { await client.destroy(); } catch (_) {}
-  try { await db.pool.end(); } catch (_) {}
-  process.exit(0);
-}
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-setInterval(async () => {
-  try {
-    await db.pool.query("DELETE FROM albion_telemetry_events WHERE received_at < now() - interval '3 days'");
-    await db.pool.query("DELETE FROM voice_presence WHERE left_at IS NOT NULL AND left_at < now() - interval '30 days'");
-  } catch (e) { console.error("retention:", e); }
-}, 6 * 60 * 60 * 1000);
 
 function renderDiscordMd(raw, guild) {
   let t = String(raw || "");
@@ -2415,15 +2379,4 @@ const webActions = {
   },
 };
 
-(async () => {
-  try {
-    await db.init();
-    await perfil.initSchema(db.pool);
-    await telemetry.initSchema(db.pool);
-    web.startWebServer(client, webActions);
-    await client.login(CFG.token);
-  } catch (e) {
-    console.error("❌ Falha fatal no boot:", e);
-    process.exit(1);
-  }
-})();
+(async () => { await db.init(); await perfil.initSchema(db.pool); web.startWebServer(client, webActions); await client.login(CFG.token); })();
