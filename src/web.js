@@ -611,6 +611,7 @@ const PAGE = `<!doctype html>
   };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var lootSelectedEvent=null;
+  var combatSelectedEvent=null;
   var telemetryRefreshTimer=null, telemetryRefreshPending=false;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -997,24 +998,56 @@ const PAGE = `<!doctype html>
   }
 
   function renderCombat(){
-    if(!current){ noCta('view-combat','⚔️ Combate'); return; }
     loading('view-combat','⚔️ Combate');
-    fetchTelemetry('/api/telemetry/combat?event='+encodeURIComponent(current)).then(function(d){
-      var r=d.resumo||{};
-      var html=liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate</div>'
-        +'<div class="statgrid">'
-        +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
-        +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
-        +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
-        +'<div class="stat b"><div class="k">Fights</div><div class="v">'+fmtS(r.fights)+'</div></div></div>'
-        +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
-        +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
-        +'</tbody></table></div>'
-        +'<div class="split"><div class="panel"><h3>Top dano</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
-        +'<div class="panel"><h3>Top cura</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>';
-      if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
-      document.getElementById('view-combat').innerHTML=html;
-    }).catch(function(){ document.getElementById('view-combat').innerHTML='<div class="modhead">⚔️ Combate</div><div class="empty-note">Sem dados de combate ou erro ao carregar.</div>'; });
+    fetch('/api/telemetry/combat-ctas')
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(ctas){
+        ctas=ctas||[];
+        var preferred=combatSelectedEvent || current || (ctas[0]&&ctas[0].id) || null;
+        var selected=ctas.find(function(x){return String(x.id)===String(preferred);}) || ctas[0] || null;
+
+        if(!selected){
+          document.getElementById('view-combat').innerHTML='<div class="modhead">⚔️ Combate</div><div class="empty-note">Nenhum CTA com dados de combate disponível nos últimos 3 dias.</div>';
+          return;
+        }
+
+        combatSelectedEvent=String(selected.id);
+
+        fetchTelemetry('/api/telemetry/combat?event='+encodeURIComponent(combatSelectedEvent)).then(function(d){
+          var r=d.resumo||{};
+          var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
+            +ctas.map(function(x){
+              var on=String(x.id)===String(combatSelectedEvent);
+              var label='CTA '+esc(x.time)+(x.status==='closed'?' · encerrado':' · ao vivo');
+              return '<button class="tab combat-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+label+' <span style="color:var(--muted)">('+x.combatEvents+')</span></button>';
+            }).join('')
+            +'</div><div class="note" style="margin-top:10px">Os rankings detalhados de combate ficam disponíveis por 3 dias após o encerramento do CTA.</div></div>';
+
+          var html=picker+liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate</div>'
+            +'<div class="statgrid">'
+            +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
+            +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
+            +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
+            +'<div class="stat b"><div class="k">Fights</div><div class="v">'+fmtS(r.fights)+'</div></div></div>'
+            +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
+            +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
+            +'</tbody></table></div>'
+            +'<div class="split"><div class="panel"><h3>🏆 Top DPS</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>💚 Top Heal</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>';
+          if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
+          document.getElementById('view-combat').innerHTML=html;
+
+          Array.prototype.forEach.call(document.querySelectorAll('.combat-cta'),function(b){
+            b.onclick=function(){
+              combatSelectedEvent=b.getAttribute('data-id');
+              renderCombat();
+            };
+          });
+        });
+      })
+      .catch(function(){
+        document.getElementById('view-combat').innerHTML='<div class="modhead">⚔️ Combate</div><div class="empty-note">Sem dados de combate ou erro ao carregar.</div>';
+      });
   }
 
 
