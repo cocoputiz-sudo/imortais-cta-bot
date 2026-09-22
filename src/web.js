@@ -333,6 +333,16 @@ function startWebServer(client, opts) {
     res.json(r || { error: "indisponível" });
   });
 
+  app.get("/assets/imortais-war-room-logo.png", (_req, res) => {
+    const raw = String(WAR_ROOM_LOGO || "").replace(/^data:image\/png;base64,/, "");
+    const buf = Buffer.from(raw, "base64");
+    res.set({
+      "Content-Type": "image/png",
+      "Cache-Control": "public, max-age=86400"
+    });
+    res.send(buf);
+  });
+
   app.get("/", (_req, res) => res.type("html").send(PAGE));
 
   const port = process.env.PORT || 3000;
@@ -369,7 +379,7 @@ const PAGE = `<!doctype html>
     padding-top:env(safe-area-inset-top,0); }
   a{color:inherit;}
   header{ height:64px; padding:0 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--line); background:rgba(8,11,16,.92); position:sticky; top:0; z-index:20; backdrop-filter:blur(10px); }
-  .crest{ width:42px; height:42px; flex:0 0 auto; object-fit:contain; border-radius:50%; filter:drop-shadow(0 2px 8px rgba(0,220,235,.18)); }
+  .crest{ width:44px; height:44px; flex:0 0 44px; object-fit:contain; border-radius:50%; filter:drop-shadow(0 2px 8px rgba(0,220,235,.18)); display:block; }
   .brand h1{ font-family:var(--disp); font-weight:900; font-size:19px; letter-spacing:2px; margin:0; line-height:1; }
   .brand small{ display:block; margin-top:3px; font-size:10px; letter-spacing:3px; color:var(--gold); font-weight:700; }
   #live{ margin-left:22px; color:var(--green); font-size:12px; }
@@ -532,7 +542,7 @@ const PAGE = `<!doctype html>
 </head>
 <body>
 <header>
-  <img class="crest" src="${WAR_ROOM_LOGO}" alt="IMORTAIS">
+  <img class="crest" src="/assets/imortais-war-room-logo.png?v=2" alt="IMORTAIS" onerror="this.style.display='none'">
   <div class="brand"><h1>IMORTAIS</h1><small>CTA WAR ROOM</small></div>
   <span id="live">conectando…</span>
   <span id="auth"></span>
