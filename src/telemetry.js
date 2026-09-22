@@ -14,6 +14,13 @@ function normName(v) {
     .toLowerCase();
 }
 
+function normGuild(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -569,7 +576,7 @@ async function getLoot(db, eventId) {
     let filterMode = "";
 
     if (guild) {
-      allowed = normName(guild) === "imortais";
+      allowed = normGuild(guild) === "imortais";
       filterMode = "guild";
       if (allowed) guildConsiderados++;
     } else if (key && legacyAllowed.has(key)) {
