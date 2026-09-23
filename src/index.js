@@ -48,8 +48,14 @@ function timeToTodayUTC(label) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(label.trim());
   if (!m) return null;
   const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+  let target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
     parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
+  // Se o horario ja passou hoje (ex.: CTA 01:20 aberto as 22:00 UTC), o alvo e amanha.
+  // Margem de 2h para nao empurrar um CTA que acabou de comecar para o dia seguinte.
+  if (target.getTime() < now.getTime() - 2 * 60 * 60000) {
+    target = new Date(target.getTime() + 24 * 60 * 60000);
+  }
+  return target;
 }
 
 // contexto de encaixe do CTA: quem é core confirmado + se ainda falta >10min pro início
