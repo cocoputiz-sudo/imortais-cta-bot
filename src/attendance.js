@@ -33,7 +33,8 @@ function presenceInWindow(sessions, win) {
   let totalMs = 0, firstJoin = null, lastLeave = null;
   for (const s of sessions) {
     const j = new Date(s.joined_at);
-    const l = s.left_at ? new Date(s.left_at) : win.end; // ainda na call = conta até o fim da janela
+    const now = new Date();
+    const l = s.left_at ? new Date(s.left_at) : (now < win.end ? now : win.end); // ainda na call = conta só até AGORA, nunca projeta pro futuro
     const from = j > win.start ? j : win.start;          // recorta início na janela
     const to = l < win.end ? l : win.end;                // recorta fim na janela
     if (to <= from) continue;                             // sessão fora da janela
