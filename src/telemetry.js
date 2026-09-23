@@ -637,7 +637,8 @@ async function getLoot(db, eventId) {
     let filterMode = "";
 
     if (guild) {
-      allowed = normGuild(guild) === "imortais";
+      const allowedGuilds = new Set(["imortais", "imortaisacademy", "imortais2"]);
+      allowed = allowedGuilds.has(normGuild(guild));
       filterMode = "guild";
       if (allowed) guildConsiderados++;
     } else if (key && legacyAllowed.has(key)) {
@@ -694,11 +695,11 @@ async function getLoot(db, eventId) {
       guildConsiderados,
       legacyConsiderados,
       filtroAtivo: true,
-      filtro: "guild_imortais",
+      filtro: "guild_imortais_family",
       comparatorReady: false,
       note: legacyConsiderados > 0
-        ? "Filtro ativo: guild IMORTAIS quando o client informa guild. Neste CTA há eventos antigos sem guild; neles o sistema usa como compatibilidade quem apareceu na formação/party do CTA."
-        : "Filtro ativo: somente loot de jogadores cuja guild informada pelo Combat Client é IMORTAIS. Entrega em baú ainda depende do Loot Comparator."
+        ? "Filtro ativo: guilds IMORTAIS, IMORTAIS ACADEMY e IMORTAIS 2 quando o client informa guild. Neste CTA há eventos antigos sem guild; neles o sistema usa como compatibilidade quem apareceu na formação/party do CTA."
+        : "Filtro ativo: somente loot de jogadores cuja guild informada pelo Combat Client é IMORTAIS, IMORTAIS ACADEMY ou IMORTAIS 2. Entrega em baú ainda depende do Loot Comparator."
     }
   };
 }
