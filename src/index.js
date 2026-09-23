@@ -1654,20 +1654,33 @@ async function slashIgnore(interaction) {
 
 async function slashAudit(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const dias = interaction.options.getInteger("dias") || 7;
   const user = interaction.options.getUser("usuario");
-  const end = new Date();
-  const start = new Date(end.getTime() - dias * 86400000);
+  const usarTemporada = interaction.options.getBoolean("temporada") || false;
+  let start, end, rotulo, slug;
+  if (usarTemporada) {
+    const season = await db.getCurrentSeason(interaction.guildId);
+    if (!season) return interaction.editReply({ content: "Nenhuma temporada ativa. Um Mestre de Guerra inicia com /cta_start_temporada." });
+    start = new Date(season.started_at);
+    end = season.ended_at ? new Date(season.ended_at) : new Date();
+    rotulo = `Temporada ${season.number}`;
+    slug = `temporada-${season.number}`;
+  } else {
+    const dias = interaction.options.getInteger("dias") || 7;
+    end = new Date();
+    start = new Date(end.getTime() - dias * 86400000);
+    rotulo = `últimos ${dias} dias`;
+    slug = `${dias}d`;
+  }
 
   if (user) {
     const report = await attendance.buildReport(interaction.guildId, start, end);
     const row = report.rows.find((r) => r.user_id === user.id);
-    if (!row) return interaction.editReply({ content: `Sem registro de **${user.username}** nos últimos ${dias} dias.` });
+    if (!row) return interaction.editReply({ content: `Sem registro de **${user.username}** (${rotulo}).` });
     const linhas = [];
     for (const d of Object.keys(row.detail || {}).sort())
       for (const c of row.detail[d])
         linhas.push(`${d} ${String(c.cta).padStart(5)} · ${String(c.level).padEnd(8)}${c.pingou ? " · pingou" : ""} · ${c.prepMin || 0}min · ${c.prepIn || "?"}→${c.prepOut || "?"}`);
-    const head = `🔎 Auditoria — ${user.username} (últimos ${dias} dias)\nScore ${row.score} · INTEGRAL ${row.integral} · PARCIAL ${row.parcial} · RÁPIDA ${row.rapida} · FANTASMA ${row.fantasma} · presença ${row.integral + row.parcial}/${report.ctaCount} · ${row.cat}`;
+    const head = `🔎 Auditoria — ${user.username} (${rotulo})\nScore ${row.score} · INTEGRAL ${row.integral} · PARCIAL ${row.parcial} · RÁPIDA ${row.rapida} · FANTASMA ${row.fantasma} · presença ${row.integral + row.parcial}/${report.ctaCount} · ${row.cat}`;
     const buf = Buffer.from(head + "\n\n" + (linhas.join("\n") || "(sem detalhe)") + "\n", "utf-8");
     return interaction.editReply({ content: head + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${user.username}.txt` }] });
   }
@@ -1680,10 +1693,10 @@ async function slashAudit(interaction) {
   if (mid.length) alerts.push(`🕛 ${mid.length} CTA(s) em virada de dia (00:/01:) — confira a janela: ${mid.map((c) => c.date + " " + c.time).join(", ")}`);
   if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesmo dia+horário).`);
   const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas`);
-  const head = `🔎 Auditoria de attendance — últimos ${dias} dias\nCTAs contados: ${a.counted.length} (de ${a.rawCount} eventos brutos)`;
+  const head = `🔎 Auditoria de attendance — ${rotulo}\nCTAs contados: ${a.counted.length} (de ${a.rawCount} eventos brutos)`;
   const body = head + "\n\n" + (alerts.length ? alerts.join("\n") + "\n\n" : "") + lines.join("\n") + "\n";
   const buf = Buffer.from(body, "utf-8");
-  return interaction.editReply({ content: head + (alerts.length ? "\n\n" + alerts.join("\n") : "") + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${dias}d.txt` }] });
+  return interaction.editReply({ content: head + (alerts.length ? "\n\n" + alerts.join("\n") : "") + "\n\nDetalhe por CTA no anexo 👇", files: [{ attachment: buf, name: `audit-${slug}.txt` }] });
 }
 
 async function slashRank(interaction, meu) {

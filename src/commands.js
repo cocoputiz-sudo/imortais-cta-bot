@@ -2,7 +2,7 @@
 // SLASH COMMANDS de gestão do CTA
 // ============================================================================
 const {
-  REST, Routes, SlashCommandBuilder,
+  REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
 } = require("discord.js");
 const db = require("./db");
 const { PARTIES, WEAPONS } = require("./comps");
@@ -54,7 +54,8 @@ function commandDefs() {
     new SlashCommandBuilder().setName("attendance_temporada").setDescription("Relatório de presença — temporada atual (do início até agora)"),
     new SlashCommandBuilder().setName("attendance_audit").setDescription("(staff) Auditoria dos CTAs contados / de um jogador")
       .addIntegerOption((o) => o.setName("dias").setDescription("Período").addChoices({ name: "7 dias", value: 7 }, { name: "30 dias", value: 30 }))
-      .addUserOption((o) => o.setName("usuario").setDescription("Auditar um jogador específico")),
+      .addUserOption((o) => o.setName("usuario").setDescription("Auditar um jogador específico"))
+      .addBooleanOption((o) => o.setName("temporada").setDescription("Auditar a temporada atual inteira (ignora dias)")),
     new SlashCommandBuilder().setName("cta_ignore").setDescription("(staff) Remove um CTA da contagem de attendance/rank (ou desfaz)")
       .addIntegerOption((o) => o.setName("id").setDescription("id do CTA (veja no /attendance_audit)").setRequired(true))
       .addBooleanOption((o) => o.setName("desfazer").setDescription("Marque pra VOLTAR o CTA pra contagem")),
@@ -134,6 +135,10 @@ async function registerCommands(clientId, guildId) {
 }
 
 function isStaff(interaction) {
+  // GM/admin do Discord, dono da guilda, ou Mestre de Guerra (cargo)
+  if (interaction.guild && interaction.guild.ownerId === interaction.user?.id) return true;
+  const perms = interaction.member?.permissions;
+  if (perms && (perms.has(PermissionFlagsBits.Administrator) || perms.has(PermissionFlagsBits.ManageGuild))) return true;
   if (!STAFF_ROLE_ID) return true;
   return interaction.member?.roles?.cache?.has(STAFF_ROLE_ID);
 }
