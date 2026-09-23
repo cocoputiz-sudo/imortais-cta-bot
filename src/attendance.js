@@ -12,9 +12,14 @@ const db = require("./db");
 function windowFor(event) {
   const m = /^(\d{1,2}):(\d{2})$/.exec((event.time_label || "").trim());
   if (!m) return null;
-  const base = new Date(event.created_at); // dia do CTA
-  const start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(),
+  const base = new Date(event.created_at); // dia em que o CTA foi criado
+  let start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(),
     parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
+  // CTA de madrugada aberto a noite: o horario do label cai no dia SEGUINTE.
+  // Margem de 2h para nao empurrar um CTA criado pouco depois da hora cheia.
+  if (start.getTime() < base.getTime() - 2 * 60 * 60000) {
+    start = new Date(start.getTime() + 24 * 60 * 60000);
+  }
   // janela: começa no ping, batalha começa +40min, termina +1h40 do ping
   const end = new Date(start.getTime() + 100 * 60000);          // +1h40 (ex 17:20 -> 19:00)
   const arrivalLimit = new Date(start.getTime() + 40 * 60000);  // chegar até +40min (ex 18:00)
