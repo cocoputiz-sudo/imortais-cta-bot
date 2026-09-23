@@ -11,6 +11,7 @@ const CONFIRM_TTL_MS = 2000;
 function normName(v) {
   return String(v || "")
     .trim()
+    .replace(/^[!\s]+/, "")
     .replace(/^\[[^\]]{1,16}\]\s*/i, "")
     .trim()
     .toLowerCase();
@@ -381,6 +382,20 @@ async function getConfirm(db, eventId) {
     if (key) voiceByName.set(key, v);
   }
 
+  // ----- Albion: presenca da guild (online/offline) por jogador -----
+  const gp = await getGuildPresence().catch(() => ({ members: [], onlineCount: 0, generatedAt: null }));
+  const albionByName = new Map();
+  for (const gm of (gp.members || [])) { const k = normName(gm.playerName); if (k) albionByName.set(k, gm); }
+  function albionOf(key) { const g = albionByName.get(key); return { st: g ? (g.online ? "online" : "offline") : "unknown", seenAt: g ? g.lastSeenAt : null, stateAt: g ? g.stateAt : null }; }
+  function categoriaDe(st, albionSt, inDiscord) {
+    if (albionSt === "offline") return "off_pingou";
+    if (st === "wrong") return "pt_errada";
+    if (st === "ok") return inDiscord ? "pronto" : "online_fora_call";
+    if (albionSt === "online") return inDiscord ? "fora_pt" : "online_fora_call";
+    return "indefinido";
+  }
+  const CAT_LABEL = { pronto: "PRONTO", online_fora_call: "ONLINE, FORA DA CALL", fora_pt: "NA CALL, FORA DA PT", off_pingou: "PINGOU, OFFLINE", pt_errada: "PT ERRADA", indefinido: "—" };
+
   const signupByName = new Map();
   for (const s of signups) signupByName.set(normName(s.username), s);
 
@@ -435,6 +450,8 @@ async function getConfirm(db, eventId) {
       obs += (obs ? " · " : "") + "fora da call de preparação";
     }
 
+    const alb = albionOf(key);
+    const categoria = categoriaDe(status, alb.st, inDiscord);
     const row = {
       n: s.username,
       arma: s.weapon,
@@ -445,6 +462,11 @@ async function getConfirm(db, eventId) {
       discord: inDiscord,
       game: !!actual,
       ping: true,
+      albion: alb.st,
+      albionSeenAt: alb.seenAt,
+      albionStateAt: alb.stateAt,
+      categoria,
+      categoriaLabel: CAT_LABEL[categoria],
       st: status,
       obs
     };
@@ -465,6 +487,7 @@ async function getConfirm(db, eventId) {
       discord: true,
       ping: false,
       game: !!actual,
+      albion: albionOf(key).st,
       actualParty: actual?.party || null,
       actualPartyLabel: actual?.partyLabel || null,
       st: "nop",
@@ -483,6 +506,7 @@ async function getConfirm(db, eventId) {
       discord: voiceByName.has(key),
       ping: false,
       game: true,
+      albion: albionOf(key).st,
       actualParty: a.party || null,
       actualPartyLabel: a.partyLabel,
       st: "extra",
@@ -546,6 +570,8 @@ async function getConfirm(db, eventId) {
     })),
     meta: {
       partySnapshots: snapshotRows.length,
+      guildGeneratedAt: gp.generatedAt || null,
+      guildOnline: gp.onlineCount || 0,
       realParties: realParties.length,
       partyPlayers: actualByName.size,
       discordPlayers: voice.length,

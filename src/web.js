@@ -427,6 +427,10 @@ const PAGE = `<!doctype html>
   .danger{ border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; font-weight:700; }
   .ptx{ margin-left:8px; border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; border-radius:6px; width:22px; height:22px; cursor:pointer; font-weight:700; line-height:1; flex:0 0 auto; }
   .ptx:hover{ background:#2a1315; }
+  .catdot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; flex:0 0 auto; }
+  .catleg{ display:flex; flex-wrap:wrap; gap:10px; margin:8px 0 4px; font-size:11px; color:var(--muted); }
+  .catleg span{ display:inline-flex; align-items:center; gap:4px; }
+  .catleg i{ width:9px; height:9px; border-radius:50%; display:inline-block; }
   /* hero */
   .hero{ display:grid; grid-template-columns:1.3fr .7fr; gap:12px; margin-bottom:14px; }
   .card{ background:linear-gradient(180deg,#121923,#0e131b); border:1px solid var(--line); border-radius:13px; padding:15px 17px; }
@@ -921,19 +925,27 @@ const PAGE = `<!doctype html>
         +'</div>';
 
       function pill(cls,text){ return '<span class="pill '+cls+'">'+text+'</span>'; }
+      function albionPill(a){ if(a==='online') return pill('ok','ALBION ON'); if(a==='offline') return pill('miss','ALBION OFF'); return '<span class="pill" style="color:var(--faint);border-color:#2a3550">ALBION —</span>'; }
+      function catInfo(c){ var M={pronto:['#35c46a','PRONTO'],online_fora_call:['#e2b95e','ONLINE, FORA DA CALL'],fora_pt:['#e08a3c','NA CALL, FORA DA PT'],off_pingou:['#d9534f','PINGOU, OFFLINE'],pt_errada:['#9a6cff','PT ERRADA'],indefinido:['#8a94a6','—']}; return M[c]||M.indefinido; }
       function playerLine(x,kind){
         var slot=x.slot?('<span class="num">'+('0'+x.slot).slice(-2)+'</span>'):'<span class="num">--</span>';
         var status='', detail='';
         if(kind==='missing'){ status=pill('miss','NÃO VISTO'); detail=x.game&&x.actualPartyLabel?('visto '+esc(x.actualPartyLabel)):'não consta no último estado conhecido'; }
         else if(kind==='intruder'){ status=pill('div','PT ERRADA'); detail=x.plannedParty?('deveria estar PT '+x.plannedParty):'não deveria estar nesta PT'; }
         else { status=pill('ok','CORRETO'); detail='posição confirmada'; }
-        return '<div class="auditline '+kind+'">'+slot+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+status+'</span><span class="auditdetail">'+detail+'</span></div>';
+        var ci=catInfo(x.categoria||'indefinido');
+        var cat='<span class="catdot" style="background:'+ci[0]+'" title="'+esc(x.categoriaLabel||ci[1])+'"></span>';
+        return '<div class="auditline '+kind+'">'+slot+cat+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+status+albionPill(x.albion||'unknown')+'</span><span class="auditdetail">'+detail+'</span></div>';
       }
       function partyColumn(title,arr,kind,empty){
         return '<div><div class="audittitle">'+title+'</div>'+((arr||[]).length?(arr||[]).map(function(x){return playerLine(x,kind);}).join(''):'<div class="auditok">'+empty+'</div>')+'</div>';
       }
 
       var groups=d.issuesByParty||[];
+      var gAge='';
+      if(m.guildGeneratedAt){ var gsec=Math.max(0,Math.round((Date.now()-new Date(m.guildGeneratedAt).getTime())/1000)); gAge=gsec<60?(gsec+'s'):(Math.floor(gsec/60)+'min'); }
+      html+='<div class="catleg"><span><i style="background:#35c46a"></i>Pronto</span><span><i style="background:#e2b95e"></i>Online, fora da call</span><span><i style="background:#e08a3c"></i>Na call, fora da PT</span><span><i style="background:#d9534f"></i>Pingou, offline</span><span><i style="background:#9a6cff"></i>PT errada</span></div>';
+      if(m.guildGeneratedAt) html+='<div class="preview"><b>PRESENÇA DA GUILDA:</b> '+(m.guildOnline||0)+' online'+(gAge?' · atualizado '+gAge+' atrás':'')+'. Cada jogador mostra o estado no Albion (ALBION ON/OFF) e a categoria pela cor.</div>';
       if(!groups.length){
         html+='<div class="panel"><div class="empty-note">Ainda não há uma party observada para comparar com a escala.</div></div>';
       } else {
@@ -956,10 +968,10 @@ const PAGE = `<!doctype html>
       }
 
       if((d.discordNoPing||[]).length){
-        html+='<div class="panel"><h3>Na call sem inscrição</h3><div class="auditgrid">'+(d.discordNoPing||[]).map(function(l){return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM PING')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';}).join('')+'</div></div>';
+        html+='<div class="panel"><h3>Na call sem inscrição</h3><div class="auditgrid">'+(d.discordNoPing||[]).map(function(l){return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM PING')+albionPill(l.albion||'unknown')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';}).join('')+'</div></div>';
       }
       if((d.gameNoSignup||[]).length){
-        html+='<div class="panel"><h3>Na PT sem escala</h3><div class="auditgrid">'+(d.gameNoSignup||[]).map(function(l){return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';}).join('')+'</div></div>';
+        html+='<div class="panel"><h3>Na PT sem escala</h3><div class="auditgrid">'+(d.gameNoSignup||[]).map(function(l){return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+albionPill(l.albion||'unknown')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';}).join('')+'</div></div>';
       }
       if(m.note) html+='<div class="note">'+esc(m.note)+'</div>';
       setView('view-confirm',html);
