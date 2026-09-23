@@ -51,6 +51,7 @@ function commandDefs() {
     new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
     new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
     new SlashCommandBuilder().setName("attendance_monthly").setDescription("Relatório de presença — últimos 30 dias"),
+    new SlashCommandBuilder().setName("attendance_temporada").setDescription("Relatório de presença — temporada atual (do início até agora)"),
     new SlashCommandBuilder().setName("attendance_audit").setDescription("(staff) Auditoria dos CTAs contados / de um jogador")
       .addIntegerOption((o) => o.setName("dias").setDescription("Período").addChoices({ name: "7 dias", value: 7 }, { name: "30 dias", value: 30 }))
       .addUserOption((o) => o.setName("usuario").setDescription("Auditar um jogador específico")),

@@ -895,6 +895,7 @@ async function onSlash(interaction) {
   if (name === "attendance_daily")   return slashAttendance(interaction, 1, "hoje");
   if (name === "attendance_week")    return slashAttendance(interaction, 7, "últimos 7 dias");
   if (name === "attendance_monthly") return slashAttendance(interaction, 30, "últimos 30 dias");
+  if (name === "attendance_temporada") return slashAttendanceSeason(interaction);
 
   if (name === "cta_flashmass") return slashFlashmass(interaction);
 
@@ -1561,6 +1562,27 @@ async function slashFinishSeason(interaction) {
 }
 
 // ---- Placar fixo no canal ┇📊ranking ----
+async function slashAttendanceSeason(interaction) {
+  await interaction.deferReply();
+  const season = await db.getCurrentSeason(interaction.guildId);
+  if (!season)
+    return interaction.editReply({ content: "Nenhuma temporada ativa. Um Mestre de Guerra inicia com /cta_start_temporada." });
+  const start = new Date(season.started_at);
+  const end = season.ended_at ? new Date(season.ended_at) : new Date();
+  const rotulo = `Temporada ${season.number}`;
+  const report = await attendance.buildReport(interaction.guildId, start, end);
+  if (!report.ctaCount)
+    return interaction.editReply({ content: `Nenhum CTA encontrado na ${rotulo}.` });
+  const html = renderAttendanceHTML(report, rotulo, start, end);
+  const buf = Buffer.from(html, "utf-8");
+  const file = { attachment: buf, name: `attendance-temporada-${season.number}.html` };
+  const top = report.rows.slice(0, 5).map((r, i) => `${i + 1}. ${r.username} — ${r.integral} integral, score ${r.score} (${r.cat})`).join("\n");
+  await interaction.editReply({
+    content: `📊 **Attendance — ${rotulo}** (${report.ctaCount} CTAs · desde ${start.toISOString().slice(0,10)})\n\n**Top 5:**\n${top || "(sem dados)"}\n\nRelatório completo no anexo 👇`,
+    files: [file],
+  });
+}
+
 // Mantém o placar completo (todos os pontuantes) no canal, sem .txt. A cada
 // atualização apaga as mensagens anteriores do próprio bot ali e reposta, então
 // o canal sempre mostra o placar atual e nunca acumula (zero spam no canal).
