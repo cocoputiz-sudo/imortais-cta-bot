@@ -1301,19 +1301,30 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const events = Array.isArray(body.events) ? body.events : [];
       if (!events.length || events.length > 500) return res.status(400).json({ error: "events" });
 
+      // 1) Contexto explicito do proprio Combat Client (currentCtaId) tem prioridade:
+      //    o client sabe qual CTA esta observando; o servidor nao deve adivinhar por cima disso.
       let ctaEventId = body.ctaEventId != null && String(body.ctaEventId).trim() !== "" ? String(body.ctaEventId).trim() : null;
       if (!ctaEventId) {
-        let active = await resolveActiveCtaForPlayer(detectedPlayer);
+        const hbCta = events
+          .map(e => (e.payload ?? e.Payload ?? {}))
+          .map(p => p.currentCtaId)
+          .find(v => v != null && String(v).trim() !== "");
+        if (hbCta) ctaEventId = String(hbCta).trim();
+      }
 
-        if (!active) {
-          const partyEvent = events
-            .filter(e => String(e.type || e.Type || "").trim() === "party_snapshot")
-            .map(e => e.payload ?? e.Payload ?? {})
-            .find(p => Array.isArray(p.members) && p.members.length);
+      if (!ctaEventId) {
+        // 2) Desambiguacao pela PARTY REAL observada no jogo: com varios CTAs abertos,
+        //    a party que o device ve agora bate melhor com o CTA vigente (maior overlap).
+        //    Isso evita o loot/combate cair no CTA mais recem-criado por engano.
+        const partyEvent = events
+          .filter(e => String(e.type || e.Type || "").trim() === "party_snapshot")
+          .map(e => e.payload ?? e.Payload ?? {})
+          .find(p => Array.isArray(p.members) && p.members.length);
 
-          if (partyEvent) active = await resolveActiveCtaFromParty(partyEvent.members);
-        }
+        let active = partyEvent ? await resolveActiveCtaFromParty(partyEvent.members) : null;
 
+        // 3) Fallbacks apenas se a party nao resolveu:
+        if (!active) active = await resolveActiveCtaForPlayer(detectedPlayer);
         if (!active) active = await resolveActiveCtaForDevice(deviceId);
         ctaEventId = active ? String(active.id) : null;
       }
