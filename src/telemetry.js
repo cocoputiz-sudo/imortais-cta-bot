@@ -7,6 +7,8 @@ const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
 const _confirmCache = new Map(); // eventId -> { at, payload }
 const CONFIRM_TTL_MS = 2000;
+const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRESH_MS) || 10 * 60 * 1000);
+const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
 
 function normName(v) {
   return String(v || "")
@@ -386,7 +388,18 @@ async function getConfirm(db, eventId) {
   const gp = await getGuildPresence().catch(() => ({ members: [], onlineCount: 0, generatedAt: null }));
   const albionByName = new Map();
   for (const gm of (gp.members || [])) { const k = normName(gm.playerName); if (k) albionByName.set(k, gm); }
-  function albionOf(key) { const g = albionByName.get(key); return { st: g ? (g.online ? "online" : "offline") : "unknown", seenAt: g ? g.lastSeenAt : null, stateAt: g ? g.stateAt : null }; }
+  function albionOf(key) {
+    const g = albionByName.get(key);
+    return {
+      st: g ? (g.effectiveStatus || "unknown") : "unknown",
+      raw: g ? (g.online ? "online" : "offline") : "unknown",
+      freshness: g ? g.freshness : "unknown",
+      observerActive: g ? !!g.observerActive : false,
+      seenAt: g ? g.lastSeenAt : null,
+      stateAt: g ? g.stateAt : null,
+      lastEventAt: g ? g.lastEventAt : null
+    };
+  }
   function categoriaDe(st, albionSt, inDiscord) {
     if (albionSt === "offline") return "off_pingou";
     if (st === "wrong") return "pt_errada";
@@ -463,8 +476,12 @@ async function getConfirm(db, eventId) {
       game: !!actual,
       ping: true,
       albion: alb.st,
+      albionKnownState: alb.raw,
+      albionFreshness: alb.freshness,
+      albionObserverActive: alb.observerActive,
       albionSeenAt: alb.seenAt,
       albionStateAt: alb.stateAt,
+      albionLastEventAt: alb.lastEventAt,
       categoria,
       categoriaLabel: CAT_LABEL[categoria],
       st: status,
@@ -571,7 +588,11 @@ async function getConfirm(db, eventId) {
     meta: {
       partySnapshots: snapshotRows.length,
       guildGeneratedAt: gp.generatedAt || null,
-      guildOnline: gp.onlineCount || 0,
+      guildOnline: gp.onlineConfirmedCount || 0,
+      guildOnlineKnown: gp.onlineKnownCount || 0,
+      guildOnlineStale: gp.onlineStaleCount || 0,
+      guildActiveObservers: gp.activeObserverCount || 0,
+      guildRecentStates: gp.recentStateCount || 0,
       realParties: realParties.length,
       partyPlayers: actualByName.size,
       discordPlayers: voice.length,
@@ -840,24 +861,120 @@ async function applyGuildPresenceProbe({ payload, deviceId, occurredAt }) {
 
 async function getGuildPresence() {
   const { rows } = await pool.query(`
-    SELECT player_name, player_id, online, last_seen_at, state_at, last_event_at, observer_device
-      FROM albion_guild_presence
-     ORDER BY online DESC, CASE WHEN online THEN state_at END DESC NULLS LAST,
-              last_seen_at DESC NULLS LAST, lower(player_name)
+    WITH heartbeat AS (
+      SELECT DISTINCT ON (device_id)
+             device_id,
+             player_name AS heartbeat_player_name,
+             payload AS heartbeat_payload,
+             occurred_at AS heartbeat_occurred_at,
+             received_at AS heartbeat_received_at
+        FROM albion_telemetry_events
+       WHERE type='client_heartbeat'
+       ORDER BY device_id, received_at DESC, occurred_at DESC
+    )
+    SELECT gp.player_name, gp.player_id, gp.online, gp.last_seen_at, gp.state_at,
+           gp.last_event_at, gp.observer_device,
+           hb.heartbeat_player_name, hb.heartbeat_payload,
+           hb.heartbeat_occurred_at, hb.heartbeat_received_at
+      FROM albion_guild_presence gp
+      LEFT JOIN heartbeat hb ON hb.device_id=gp.observer_device
+     ORDER BY gp.online DESC,
+              CASE WHEN gp.online THEN gp.state_at END DESC NULLS LAST,
+              gp.last_seen_at DESC NULLS LAST,
+              lower(gp.player_name)
   `);
-  const members = rows.map(r => ({
+
+  const { rows: heartbeatRows } = await pool.query(`
+    WITH ranked AS (
+      SELECT device_id, player_name, payload, occurred_at, received_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY device_id
+               ORDER BY received_at DESC, occurred_at DESC
+             ) AS rn
+        FROM albion_telemetry_events
+       WHERE type='client_heartbeat'
+    )
+    SELECT device_id, player_name, payload, occurred_at, received_at
+      FROM ranked
+     WHERE rn=1
+     ORDER BY received_at DESC
+  `);
+
+  const now = Date.now();
+  function ageMs(value) {
+    if (!value) return Number.POSITIVE_INFINITY;
+    const t = new Date(value).getTime();
+    return Number.isFinite(t) ? Math.max(0, now - t) : Number.POSITIVE_INFINITY;
+  }
+
+  const members = rows.map(r => {
+    const stateFreshAt = r.last_event_at || r.state_at || null;
+    const stateFresh = ageMs(stateFreshAt) <= GUILD_STATE_FRESH_MS;
+    const observerActive = ageMs(r.heartbeat_received_at) <= OBSERVER_HEARTBEAT_FRESH_MS;
+    const confirmed = stateFresh && observerActive;
+    const online = !!r.online;
+    return {
+      playerName: r.player_name,
+      playerId: r.player_id,
+      online,
+      lastSeenAt: r.last_seen_at,
+      stateAt: r.state_at,
+      lastEventAt: r.last_event_at,
+      observerDevice: r.observer_device,
+      observerHeartbeatAt: r.heartbeat_received_at,
+      observerHeartbeatOccurredAt: r.heartbeat_occurred_at,
+      observerActive,
+      stateFresh,
+      freshness: confirmed ? "fresh" : "stale",
+      presenceClass: online
+        ? (confirmed ? "online_confirmed" : "online_stale")
+        : (confirmed ? "offline_confirmed" : "offline_stale"),
+      effectiveStatus: confirmed ? (online ? "online" : "offline") : "unknown"
+    };
+  });
+
+  const observers = heartbeatRows.map(r => ({
+    deviceId: r.device_id,
     playerName: r.player_name,
-    playerId: r.player_id,
-    online: !!r.online,
-    lastSeenAt: r.last_seen_at,
-    stateAt: r.state_at,
-    lastEventAt: r.last_event_at,
-    observerDevice: r.observer_device
+    lastHeartbeatAt: r.received_at,
+    heartbeatOccurredAt: r.occurred_at,
+    active: ageMs(r.received_at) <= OBSERVER_HEARTBEAT_FRESH_MS,
+    version: r.payload?.version || null,
+    gameDetected: typeof r.payload?.gameDetected === "boolean" ? r.payload.gameDetected : null,
+    currentCtaId: r.payload?.currentCtaId || null
   }));
+
+  const onlineConfirmedCount = members.filter(m => m.presenceClass === "online_confirmed").length;
+  const onlineStaleCount = members.filter(m => m.presenceClass === "online_stale").length;
+  const offlineConfirmedCount = members.filter(m => m.presenceClass === "offline_confirmed").length;
+  const offlineStaleCount = members.filter(m => m.presenceClass === "offline_stale").length;
+  const recentStateCount = members.filter(m => m.stateFresh).length;
+
+  let dataFreshAt = null;
+  for (const m of members) {
+    for (const value of [m.stateAt, m.lastEventAt]) {
+      if (!value) continue;
+      if (!dataFreshAt || new Date(value) > new Date(dataFreshAt)) dataFreshAt = value;
+    }
+  }
+
   return {
-    onlineCount: members.filter(m => m.online).length,
+    onlineCount: onlineConfirmedCount,
+    onlineKnownCount: members.filter(m => m.online).length,
+    onlineConfirmedCount,
+    onlineStaleCount,
+    offlineConfirmedCount,
+    offlineStaleCount,
+    unconfirmedTrackedCount: onlineStaleCount + offlineStaleCount,
     totalTracked: members.length,
-    generatedAt: new Date().toISOString(),
+    recentStateCount,
+    activeObserverCount: observers.filter(o => o.active).length,
+    totalObserverCount: observers.length,
+    stateFreshSeconds: Math.round(GUILD_STATE_FRESH_MS / 1000),
+    observerFreshSeconds: Math.round(OBSERVER_HEARTBEAT_FRESH_MS / 1000),
+    generatedAt: dataFreshAt,
+    dataFreshAt,
+    observers,
     members
   };
 }
@@ -910,11 +1027,72 @@ async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200, pla
     }
   }
 
+  const heartbeatRows = await pool.query(`
+    WITH ranked AS (
+      SELECT device_id, player_name, payload, occurred_at, received_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY device_id
+               ORDER BY received_at DESC, occurred_at DESC
+             ) AS rn
+        FROM albion_telemetry_events
+       WHERE type='client_heartbeat'
+    )
+    SELECT device_id, player_name, payload, occurred_at, received_at
+      FROM ranked
+     WHERE rn=1
+     ORDER BY received_at DESC
+  `).then(r => r.rows);
+
+  const now = Date.now();
+  const heartbeatDevices = heartbeatRows.map(row => {
+    const received = row.received_at ? new Date(row.received_at).getTime() : 0;
+    return {
+      deviceId: row.device_id,
+      playerName: row.player_name,
+      receivedAt: row.received_at,
+      occurredAt: row.occurred_at,
+      active: received > 0 && now - received <= OBSERVER_HEARTBEAT_FRESH_MS,
+      version: row.payload?.version || null,
+      gameDetected: typeof row.payload?.gameDetected === "boolean" ? row.payload.gameDetected : null,
+      currentCtaId: row.payload?.currentCtaId || null
+    };
+  });
+
+  let currentPresence = null;
+  if (safePlayer) {
+    const current = await pool.query(`
+      SELECT player_name, player_id, online, last_seen_at, state_at, last_event_at, observer_device
+        FROM albion_guild_presence
+       WHERE player_key=$1
+       LIMIT 1
+    `, [normName(safePlayer)]).then(r => r.rows[0] || null);
+    if (current) {
+      const hb = heartbeatDevices.find(x => x.deviceId === current.observer_device) || null;
+      currentPresence = {
+        playerName: current.player_name,
+        playerId: current.player_id,
+        online: !!current.online,
+        lastSeenAt: current.last_seen_at,
+        stateAt: current.state_at,
+        lastEventAt: current.last_event_at,
+        observerDevice: current.observer_device,
+        observerHeartbeat: hb
+      };
+    }
+  }
+
   const recentLimit = safePlayer ? safeLimit : Math.min(50, safeLimit);
   return {
     windowMinutes: safeMinutes,
     player: safePlayer,
     total: rows.length,
+    heartbeat: {
+      activeWithinSeconds: Math.round(OBSERVER_HEARTBEAT_FRESH_MS / 1000),
+      totalDevices: heartbeatDevices.length,
+      activeDevices: heartbeatDevices.filter(x => x.active).length,
+      devices: heartbeatDevices
+    },
+    currentPresence,
     events: [...byEvent.values()].sort((a, b) => b.count - a.count),
     recent: rows.slice(0, recentLimit).map(row => ({
       eventId: row.event_id,
