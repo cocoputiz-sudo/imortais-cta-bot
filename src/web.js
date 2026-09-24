@@ -945,7 +945,7 @@ const PAGE = `<!doctype html>
       var gAge='';
       if(m.guildGeneratedAt){ var gsec=Math.max(0,Math.round((Date.now()-new Date(m.guildGeneratedAt).getTime())/1000)); gAge=gsec<60?(gsec+'s'):(Math.floor(gsec/60)+'min'); }
       html+='<div class="catleg"><span><i style="background:#35c46a"></i>Pronto</span><span><i style="background:#e2b95e"></i>Online, fora da call</span><span><i style="background:#e08a3c"></i>Na call, fora da PT</span><span><i style="background:#d9534f"></i>Pingou, offline</span><span><i style="background:#9a6cff"></i>PT errada</span></div>';
-      if(m.guildGeneratedAt) html+='<div class="preview"><b>PRESENÇA DA GUILDA:</b> '+(m.guildOnline||0)+' online'+(gAge?' · atualizado '+gAge+' atrás':'')+'. Cada jogador mostra o estado no Albion (ALBION ON/OFF) e a categoria pela cor.</div>';
+      if(m.guildGeneratedAt) html+='<div class="preview"><b>PRESENÇA DA GUILDA:</b> '+(m.guildOnline||0)+' online confirmados · '+(m.guildOnlineStale||0)+' online não confirmados · '+(m.guildActiveObservers||0)+' observer(s) ativo(s) · '+(m.guildRecentStates||0)+' estados recentes'+(gAge?' · último dado '+gAge+' atrás':'')+'. Estado stale não é tratado como OFFLINE.</div>';
       if(!groups.length){
         html+='<div class="panel"><div class="empty-note">Ainda não há uma party observada para comparar com a escala.</div></div>';
       } else {
@@ -1099,22 +1099,37 @@ const PAGE = `<!doctype html>
     if(!silent) loading('view-guild','🟢 Guilda online');
     fetch('/api/telemetry/guild-presence').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
       var members=d.members||[];
-      var online=d.onlineCount||0, total=d.totalTracked||0;
+      var online=d.onlineConfirmedCount||0;
+      var staleOnline=d.onlineStaleCount||0;
+      var total=d.totalTracked||0;
+      var recent=d.recentStateCount||0;
+      var observers=d.activeObserverCount||0;
       function ago(ts){ if(!ts) return '—'; var s=Math.max(0,Math.round((Date.now()-new Date(ts).getTime())/1000)); if(s<60) return s+'s'; if(s<3600) return Math.floor(s/60)+'min'; if(s<86400) return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
+      function presenceBadge(m){
+        if(m.presenceClass==='online_confirmed') return '<span class="pill ok">ONLINE CONFIRMADO</span>';
+        if(m.presenceClass==='online_stale') return '<span class="pill" style="color:#e2b95e;border-color:#6f5a2b">ONLINE NÃO CONFIRMADO</span>';
+        if(m.presenceClass==='offline_confirmed') return '<span class="pill miss">OFFLINE CONFIRMADO</span>';
+        return '<span class="pill" style="color:var(--faint);border-color:#2a3550">OFFLINE ANTIGO</span>';
+      }
       var rows=members.map(function(m){
-        var badge=m.online?'<span class="pill ok">ONLINE</span>':'<span class="pill miss">OFFLINE</span>';
-        var visto=m.online?'agora':ago(m.lastSeenAt)+' atras';
-        return '<tr><td><b>'+esc(m.playerName||'?')+'</b></td><td>'+badge+'</td><td>'+esc(visto)+'</td><td>'+ago(m.stateAt)+' atras</td><td style="color:var(--faint)">'+esc(m.observerDevice||'—')+'</td></tr>';
+        var visto=m.online?(m.effectiveStatus==='online'?'agora':'último estado: online'):(m.lastSeenAt?ago(m.lastSeenAt)+' atrás':'—');
+        var hb=m.observerHeartbeatAt?(ago(m.observerHeartbeatAt)+' atrás'):'—';
+        var hbBadge=m.observerActive?'<span class="pill ok">VIVO</span>':'<span class="pill" style="color:var(--faint);border-color:#2a3550">STALE</span>';
+        return '<tr><td><b>'+esc(m.playerName||'?')+'</b></td><td>'+presenceBadge(m)+'</td><td>'+esc(visto)+'</td><td>'+ago(m.lastEventAt||m.stateAt)+' atrás</td><td style="color:var(--faint)">'+esc(m.observerDevice||'—')+'</td><td>'+hbBadge+' <span style="color:var(--faint)">'+esc(hb)+'</span></td></tr>';
       }).join('');
-      var fresh=d.generatedAt?ago(d.generatedAt)+' atras':'agora';
-      var html=liveBadge('atualizado '+fresh)
+      var fresh=d.dataFreshAt?ago(d.dataFreshAt)+' atrás':'sem dado';
+      var html=liveBadge('último dado Albion '+fresh)
         +'<div class="modhead">🟢 Guilda online</div>'
-        +'<div class="statgrid"><div class="stat g"><div class="k">Online agora</div><div class="v">'+online+'</div></div>'
-        +'<div class="stat b"><div class="k">Rastreados</div><div class="v">'+total+'</div></div></div>'
-        +'<div class="panel"><table class="dtable"><thead><tr><th>Jogador</th><th>Status</th><th>Ultimo visto</th><th>Atualizado</th><th>Observer</th></tr></thead><tbody>'
-        +(rows||'<tr><td colspan="5" style="color:var(--faint)">Nenhum jogador rastreado ainda.</td></tr>')
+        +'<div class="statgrid"><div class="stat g"><div class="k">Online confirmado</div><div class="v">'+online+'</div></div>'
+        +'<div class="stat a"><div class="k">Online não confirmado</div><div class="v">'+staleOnline+'</div></div>'
+        +'<div class="stat b"><div class="k">Estados recentes</div><div class="v">'+recent+'</div></div>'
+        +'<div class="stat p"><div class="k">Observers ativos</div><div class="v">'+observers+'</div></div></div>'
+        +'<div class="statgrid"><div class="stat b"><div class="k">Rastreados</div><div class="v">'+total+'</div></div>'
+        +'<div class="stat"><div class="k">Observers conhecidos</div><div class="v">'+(d.totalObserverCount||0)+'</div></div></div>'
+        +'<div class="panel"><table class="dtable"><thead><tr><th>Jogador</th><th>Status</th><th>Ultimo visto</th><th>Estado recebido</th><th>Observer</th><th>Heartbeat</th></tr></thead><tbody>'
+        +(rows||'<tr><td colspan="6" style="color:var(--faint)">Nenhum jogador rastreado ainda.</td></tr>')
         +'</tbody></table></div>'
-        +'<div class="note">Presenca captada pelos Combat Clients via evento do Albion. Dado antigo aparece com o tempo desde a ultima atualizacao; ausencia de novos eventos nao zera o estado.</div>';
+        +'<div class="note">Estado e frescor são separados. ONLINE não confirmado continua sendo o último estado conhecido e não vira OFFLINE por timeout. Para entrar em “Online confirmado”, o estado precisa ser recente e o observer precisa ter heartbeat ativo. A cobertura depende da quantidade de Combat Clients observando a guilda.</div>';
       setView('view-guild',html);
     }).catch(function(e){
       setView('view-guild','<div class="modhead">🟢 Guilda online</div><div class="empty-note">Erro ao carregar presenca: '+esc(e.message)+'</div>');
