@@ -11,12 +11,15 @@ const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRE
 const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
 
 function normName(v) {
-  return String(v || "")
-    .trim()
-    .replace(/^[!\s]+/, "")
-    .replace(/^\[[^\]]{1,16}\]\s*/i, "")
-    .trim()
-    .toLowerCase();
+  let out = String(v || "").trim();
+  // Remove repetidamente prefixos de tag ([IM], [ESP], [BR], etc.) e sinais (!, !!)
+  // ate sobrar so o nick do jogo. Cobre nicks com multiplas tags: "[IM] [ESP] Cizk".
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/^[!\s]+/, "").replace(/^\[[^\]]{1,16}\]\s*/i, "");
+  } while (out !== prev);
+  return out.trim().toLowerCase();
 }
 
 function normGuild(v) {
