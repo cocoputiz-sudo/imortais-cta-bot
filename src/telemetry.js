@@ -9,6 +9,7 @@ const _confirmCache = new Map(); // eventId -> { at, payload }
 const CONFIRM_TTL_MS = 2000;
 const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRESH_MS) || 10 * 60 * 1000);
 const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
+const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
 
 function normName(v) {
   let out = String(v || "").trim();
@@ -790,7 +791,8 @@ async function getCombat(db, eventId) {
         rawKillLikeEvents: 0,
         deaths: 0,
         firstAt: null,
-        lastAt: null
+        lastAt: null,
+        fights: []
       });
     }
     return mapAgg.get(key);
@@ -803,15 +805,40 @@ async function getCombat(db, eventId) {
     if (!bucket.firstAt || new Date(at) < new Date(bucket.firstAt)) bucket.firstAt = at;
     if (!bucket.lastAt || new Date(at) > new Date(bucket.lastAt)) bucket.lastAt = at;
   }
+  function fightFor(map, at) {
+    const atMs = new Date(at).getTime();
+    let fight = map.fights[map.fights.length - 1];
+    const lastMs = fight && fight.lastAt ? new Date(fight.lastAt).getTime() : NaN;
+    if (!fight || !Number.isFinite(lastMs) || !Number.isFinite(atMs) || atMs - lastMs > COMBAT_FIGHT_GAP_MS) {
+      fight = {
+        n: map.fights.length + 1,
+        players: new Map(),
+        pts: new Map(),
+        devices: new Set(),
+        killCandidates: new Map(),
+        totalEvents: 0,
+        rawKillLikeEvents: 0,
+        deaths: 0,
+        firstAt: at,
+        lastAt: at
+      };
+      map.fights.push(fight);
+    }
+    touchWindow(fight, at);
+    return fight;
+  }
 
   for (const r of rows) {
     const p = r.payload || {};
     const cluster = cleanMap(p.cluster);
     const map = mapBucket(cluster);
+    const fight = fightFor(map, r.occurred_at);
     const d = device(r.device_id);
     d.eventos++;
     map.totalEvents++;
+    fight.totalEvents++;
     map.devices.add(String(r.device_id || "sem-device"));
+    fight.devices.add(String(r.device_id || "sem-device"));
     touchWindow(map, r.occurred_at);
     if (!d.firstAt || new Date(r.occurred_at) < new Date(d.firstAt)) d.firstAt = r.occurred_at;
     if (!d.lastAt || new Date(r.occurred_at) > new Date(d.lastAt)) d.lastAt = r.occurred_at;
@@ -825,6 +852,9 @@ async function getCombat(db, eventId) {
 
       const mx = playerIn(map.players, name), mg = ptIn(map.pts, ptFor(name));
       mx.dmg += dmg; mx.heal += heal; mg.dmg += dmg; mg.heal += heal;
+
+      const fx = playerIn(fight.players, name), fg = ptIn(fight.pts, ptFor(name));
+      fx.dmg += dmg; fx.heal += heal; fg.dmg += dmg; fg.heal += heal;
 
       d.combatDelta++; d.damage += dmg; d.healing += heal;
 
@@ -843,8 +873,11 @@ async function getCombat(db, eventId) {
       ptIn(ptAgg, ptFor(name)).mortes++;
       playerIn(map.players, name).mortes++;
       ptIn(map.pts, ptFor(name)).mortes++;
+      playerIn(fight.players, name).mortes++;
+      ptIn(fight.pts, ptFor(name)).mortes++;
       deaths++;
       map.deaths++;
+      fight.deaths++;
     }
 
     if (r.type === "kill" || r.type === "death") {
@@ -854,6 +887,7 @@ async function getCombat(db, eventId) {
       if (killer && victim && lethal) {
         rawKillLikeEvents++;
         map.rawKillLikeEvents++;
+        fight.rawKillLikeEvents++;
         d.killLike++;
         const key = [cluster, normName(killer), normName(victim), String(bucketMs(r.occurred_at, 2000))].join("|");
         let k = killCandidates.get(key);
@@ -871,13 +905,14 @@ async function getCombat(db, eventId) {
           killCandidates.set(key, k);
           map.killCandidates.set(key, k);
         }
+        fight.killCandidates.set(key, k);
         k.rawEvents++;
         k.devices.add(String(r.device_id || "sem-device"));
       }
     }
   }
 
-  function killRanking(kills) {
+  function killRanking(kills, limit = 20) {
     const byPlayer = new Map();
     for (const k of kills.filter(x => x.killerInRoster && !x.victimInRoster)) {
       const key = normName(k.killer);
@@ -885,7 +920,36 @@ async function getCombat(db, eventId) {
       cur.v++;
       byPlayer.set(key, cur);
     }
-    return [...byPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, 20);
+    return [...byPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, limit);
+  }
+  function serializeFight(bucket) {
+    const list = [...bucket.players.values()];
+    const kills = [...bucket.killCandidates.values()];
+    const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
+    const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
+    return {
+      n: bucket.n,
+      firstAt: bucket.firstAt,
+      lastAt: bucket.lastAt,
+      totalEvents: bucket.totalEvents,
+      observers: [...bucket.devices],
+      resumo: {
+        damage: list.reduce((a, x) => a + x.dmg, 0),
+        healing: list.reduce((a, x) => a + x.heal, 0),
+        mortes: bucket.deaths,
+        killsCandidate: ourKills.length,
+        deathsCandidate: ourDeaths.length
+      },
+      topDmg: list.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 10).map(x => ({ n: x.n, v: x.dmg })),
+      topHeal: list.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 10).map(x => ({ n: x.n, v: x.heal })),
+      topKillsCandidate: killRanking(kills, 10),
+      audit: {
+        rawKillLikeEvents: bucket.rawKillLikeEvents,
+        uniqueKillCandidates: kills.length,
+        duplicateKillLikeEvents: Math.max(0, bucket.rawKillLikeEvents - kills.length),
+        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length
+      }
+    };
   }
   function serializeMap(bucket) {
     const list = [...bucket.players.values()];
@@ -909,6 +973,7 @@ async function getCombat(db, eventId) {
       topDmg: list.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
       topHeal: list.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills),
+      fights: bucket.fights.map(serializeFight),
       audit: {
         rawKillLikeEvents: bucket.rawKillLikeEvents,
         uniqueKillCandidates: kills.length,
@@ -972,7 +1037,8 @@ async function getCombat(db, eventId) {
       totalEventos: rows.length,
       retentionDays: 3,
       mapsWithContext: maps.filter(x => x.map !== "Mapa desconhecido").length,
-      note: "Combate passa a ser separado por mapa quando o Combat Client envia cluster (v0.5.4+). Eventos antigos permanecem em 'Mapa desconhecido'. Dano/cura ainda são brutos até fecharmos a deduplicação entre observers."
+      fightGapMs: COMBAT_FIGHT_GAP_MS,
+      note: "Combate é separado por mapa e, dentro de cada mapa, em lutas candidatas quando há mais de 2 minutos sem eventos de combate. Dano/cura ainda são brutos até fecharmos a deduplicação entre observers."
     }
   };
 }
