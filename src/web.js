@@ -1069,6 +1069,9 @@ const PAGE = `<!doctype html>
           var a=d.audit||{};
           var devices=a.devices||[];
           var maps=d.maps||[];
+          var deathObserver=!!(d.meta&&d.meta.zergDeathObserver);
+          var killLabel=deathObserver?'Kills da zerg':'Kills candidatas';
+          var deathLabel=deathObserver?'Mortes da zerg':'Mortes candidatas';
           function renderFightBlock(f){
             var fr=f.resumo||{}, fa=f.audit||{}, fwhen='';
             if(f.firstAt&&f.lastAt){
