@@ -942,6 +942,36 @@ const PAGE = `<!doctype html>
       }
 
       var groups=d.issuesByParty||[];
+      // ----- VISAO DE COMANDO: agrega divergencias de TODAS as PTs no topo, por urgencia -----
+      (function(){
+        var atencao=[];
+        (groups||[]).forEach(function(g){
+          (g.intruders||[]).forEach(function(x){ atencao.push({x:x, kind:'intruder', pt:g.party}); });
+          (g.missing||[]).forEach(function(x){ atencao.push({x:x, kind:'missing', pt:g.party}); });
+        });
+        function peso(it){
+          var c=(it.x&&it.x.categoria)||'';
+          if(c==='off_pingou') return 0;
+          if(it.kind==='intruder'||c==='pt_errada') return 1;
+          if(c==='fora_pt') return 2;
+          return 3;
+        }
+        atencao.sort(function(a,b){ return peso(a)-peso(b) || ((a.x.slot||99)-(b.x.slot||99)); });
+        if(atencao.length){
+          function linhaAtencao(it){
+            var x=it.x, ci=catInfo(x.categoria||'indefinido');
+            var cat='<span class="catdot" style="background:'+ci[0]+'" title="'+esc(x.categoriaLabel||ci[1])+'"></span>';
+            var st=(it.kind==='intruder')?pill('div','PT ERRADA'):pill('miss','NAO VISTO');
+            var alvo=(it.kind==='intruder')?('deveria estar PT '+(x.plannedParty||'?')):('escalado PT '+it.pt);
+            var vis=(x.game&&x.actualPartyLabel)?('- visto '+esc(x.actualPartyLabel)):'';
+            return '<div class="auditline '+it.kind+'"><span class="num">PT'+it.pt+'</span>'+cat+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+st+albionPill(x.albion||'unknown')+'</span><span class="auditdetail">'+esc(alvo)+' '+vis+'</span></div>';
+          }
+          html+='<div class="panel auditpt" style="border-color:#7a2a2a"><div class="audithead"><h3>\u26A0\uFE0F Precisa de atencao</h3><span class="auditbad">'+atencao.length+' jogador(es)</span></div>'
+            +'<div class="note" style="margin:2px 0 8px">Ordenado por urgencia: pingou e offline, depois PT errada, depois fora da PT. As PTs completas seguem abaixo.</div>'
+            +atencao.map(linhaAtencao).join('')
+            +'</div>';
+        }
+      })();
       var gAge='';
       if(m.guildGeneratedAt){ var gsec=Math.max(0,Math.round((Date.now()-new Date(m.guildGeneratedAt).getTime())/1000)); gAge=gsec<60?(gsec+'s'):(Math.floor(gsec/60)+'min'); }
       html+='<div class="catleg"><span><i style="background:#35c46a"></i>Pronto</span><span><i style="background:#e2b95e"></i>Online, fora da call</span><span><i style="background:#e08a3c"></i>Na call, fora da PT</span><span><i style="background:#d9534f"></i>Pingou, offline</span><span><i style="background:#9a6cff"></i>PT errada</span></div>';
@@ -1066,17 +1096,96 @@ const PAGE = `<!doctype html>
             }).join('')
             +'</div><div class="note" style="margin-top:10px">Os rankings detalhados de combate ficam disponíveis por 3 dias após o encerramento do CTA.</div></div>';
 
+          var a=d.audit||{};
+          var devices=a.devices||[];
+          var maps=d.maps||[];
+          var deathObserver=!!(d.meta&&d.meta.zergDeathObserver);
+          var killLabel=deathObserver?'Kills da zerg':'Kills candidatas';
+          var deathLabel=deathObserver?'Mortes da zerg':'Mortes candidatas';
+          function renderFightBlock(f){
+            var fr=f.resumo||{}, fd=f.resumoDedup||fr, fa=f.audit||{}, players=f.players||[], fwhen='';
+            if(f.firstAt&&f.lastAt){
+              var ffi=new Date(f.firstAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+              var fla=new Date(f.lastAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+              fwhen=ffi+'–'+fla;
+            }
+            var playerTable='<div style="overflow-x:auto;margin-top:12px"><table class="dtable"><thead><tr>'
+              +'<th>#</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Dano bruto</th><th>Cura bruta</th>'
+              +'</tr></thead><tbody>'
+              +(players.length?players.map(function(p,i){
+                return '<tr><td>'+(i+1)+'</td><td><b>'+esc(p.n||'?')+'</b></td><td>'+esc(p.pt||'Sem PT')+'</td>'
+                  +'<td><b>'+fmtS(p.damage||0)+'</b></td><td>'+fmtS(p.healing||0)+'</td>'
+                  +'<td>'+fmtS(p.kills||0)+'</td><td>'+fmtS(p.deaths||0)+'</td>'
+                  +'<td style="color:var(--muted)">'+fmtS(p.rawDamage||0)+'</td><td style="color:var(--muted)">'+fmtS(p.rawHealing||0)+'</td></tr>';
+              }).join(''):'<tr><td colspan="9" style="color:var(--faint)">Sem jogadores suficientes para o relatório.</td></tr>')
+              +'</tbody></table></div>';
+            return '<div class="preview" style="margin-top:12px;padding:14px">'
+              +'<div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><b>⚔️ Battle Report · Batalha '+esc(f.n||'?')+'</b><span style="color:var(--muted)">'+esc(fwhen)+'</span></div>'
+              +'<div class="statgrid" style="margin-top:10px">'
+              +'<div class="stat r"><div class="k">Dano dedup. · conservador</div><div class="v">'+fmtS(fd.damage||0)+'</div></div>'
+              +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(fd.healing||0)+'</div></div>'
+              +'<div class="stat b"><div class="k">'+esc(killLabel)+'</div><div class="v">'+fmtS(fr.killsCandidate||0)+'</div></div>'
+              +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(fr.deathsCandidate||0)+'</div></div></div>'
+              +'<div class="split"><div><h3>🏆 Top DPS · dedup.</h3>'+topList(f.topDmgDedup||f.topDmg||[],fmtS)+'</div>'
+              +'<div><h3>☠️ Top Kills</h3>'+topList(f.topKillsCandidate||[],fmtS)+'</div></div>'
+              +'<h3 style="margin-top:14px">📋 Jogadores da batalha</h3>'+playerTable
+              +'<div class="note">Bruto: '+fmtS(fr.damage||0)+' dano · '+fmtS(fr.healing||0)+' cura. Fusão: '+fmtS(fa.rawCombatDeltaEvents||0)+' deltas brutos → '+fmtS(fa.canonicalDeltaEvents||0)+' preservados; '+fmtS(fa.collapsedCombatDeltaEvents||0)+' colapsados por fingerprint exato. '+fmtS((f.observers||[]).length)+' observer(s).</div>'
+              +'</div>';
+          }
+          function renderMapBlock(m){
+            var mr=m.resumo||{}, md=m.resumoDedup||mr, ma=m.audit||{}, fights=m.fights||[];
+            var when='';
+            if(m.firstAt&&m.lastAt){
+              var fi=new Date(m.firstAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+              var la=new Date(m.lastAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+              when=' · '+fi+'–'+la;
+            }
+            return '<div class="panel">'
+              +'<h3>🗺️ '+esc(m.map||'Mapa desconhecido')+when+'</h3>'
+              +'<div class="statgrid">'
+              +'<div class="stat r"><div class="k">Dano dedup. · conservador</div><div class="v">'+fmtS(md.damage||0)+'</div></div>'
+              +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(md.healing||0)+'</div></div>'
+              +'<div class="stat b"><div class="k">'+esc(killLabel)+'</div><div class="v">'+fmtS(mr.killsCandidate||0)+'</div></div>'
+              +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(mr.deathsCandidate||0)+'</div></div></div>'
+              +'<div class="split"><div><h3>🏆 Top DPS do mapa · dedup.</h3>'+topList(m.topDmgDedup||m.topDmg||[],fmtS)+'</div>'
+              +'<div><h3>☠️ Top Kills do mapa</h3>'+topList(m.topKillsCandidate||[],fmtS)+'</div></div>'
+              +'<div class="note">Bruto do mapa: '+fmtS(mr.damage||0)+' dano · '+fmtS(mr.healing||0)+' cura. '+fmtS(ma.rawCombatDeltaEvents||0)+' deltas → '+fmtS(ma.canonicalDeltaEvents||0)+' preservados; '+fmtS(ma.collapsedCombatDeltaEvents||0)+' colapsados. '+fmtS(m.totalEvents||0)+' eventos totais · '+fmtS((m.observers||[]).length)+' observer(s) · '+fmtS(fights.length)+' luta(s) candidata(s).</div>'
+              +(fights.length?fights.map(renderFightBlock).join(''):'<div class="empty-note">Nenhuma luta candidata segmentada neste mapa.</div>')
+              +'</div>';
+          }
+          var rd=d.resumoDedup||r;
           var html=picker+liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate</div>'
             +'<div class="statgrid">'
-            +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
-            +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
-            +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
-            +'<div class="stat b"><div class="k">Fights</div><div class="v">'+fmtS(r.fights)+'</div></div></div>'
-            +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
+            +'<div class="stat r"><div class="k">Dano dedup. · conservador</div><div class="v">'+fmtS(rd.damage||0)+'</div></div>'
+            +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(rd.healing||0)+'</div></div>'
+            +'<div class="stat a"><div class="k">'+esc(deathObserver?'Mortes da zerg':'Mortes candidatas · legado')+'</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
+            +'<div class="stat b"><div class="k">'+esc(deathObserver?'Kills da zerg':'Kills candidatas · legado')+'</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div></div>'            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e, dentro dele, o sistema abre uma nova luta candidata após mais de 2 minutos sem eventos de combate. Eventos anteriores ao Combat Client v0.5.4 aparecem em “Mapa desconhecido”.</div></div>'
+            +(maps.length?maps.map(renderMapBlock).join(''):'<div class="panel"><div class="empty-note">Ainda não há eventos de combate com mapa neste CTA.</div></div>')
+            +'<div class="panel"><h3>Resumo por PT · bruto</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
             +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
             +'</tbody></table></div>'
-            +'<div class="split"><div class="panel"><h3>🏆 Top DPS</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>💚 Top Heal</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>';
+            +'<div class="split"><div class="panel"><h3>🏆 Top DPS · dedup. conservador</h3>'+topList(d.topDmgDedup||d.topDmg||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>💚 Top Heal · dedup. conservador</h3>'+topList(d.topHealDedup||d.topHeal||[],fmtS)+'</div></div>'
+            +'<div class="split"><div class="panel"><h3>☠️ Top Kills · candidato</h3>'+topList(d.topKillsCandidate||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>🧪 Auditoria de abates</h3>'
+            +'<div class="srow">DiedEvent observados brutos: <b>'+(a.rawObservedDeaths||0)+'</b></div>'
+            +'<div class="srow">Eventos kill/death totais: <b>'+(a.rawKillLikeEvents||0)+'</b></div>'
+            +'<div class="srow">Abates únicos candidatos: <b>'+(a.uniqueKillCandidates||0)+'</b></div>'
+            +'<div class="srow">'+esc(deathObserver?'Kills da nossa zerg':'Kills candidatas da nossa zerg')+': <b>'+(a.ourKillCandidates||0)+'</b></div>'
+            +'<div class="srow">'+esc(deathObserver?'Mortes da nossa zerg':'Mortes candidatas da nossa zerg')+': <b>'+(a.ourDeathCandidates||0)+'</b></div>'
+            +'<div class="srow">Eventos repetidos estimados: <b>'+(a.duplicateKillLikeEvents||0)+'</b></div>'
+            +'<div class="srow">Abates vistos por mais de 1 observer: <b>'+(a.multiObserverKillCandidates||0)+'</b></div>'
+            +'</div></div>'
+            +'<div class="panel"><h3>🧮 Auditoria de dano/cura</h3>'
+            +'<div class="srow">Deltas brutos: <b>'+fmtS(a.rawCombatDeltaEvents||0)+'</b></div>'
+            +'<div class="srow">Deltas preservados na fusão: <b>'+fmtS(a.canonicalCombatDeltaEvents||0)+'</b></div>'
+            +'<div class="srow">Deltas colapsados: <b>'+fmtS(a.collapsedCombatDeltaEvents||0)+'</b></div>'
+            +'<div class="srow">Fingerprints vistos por mais de 1 observer: <b>'+fmtS(a.multiObserverDeltaCandidates||0)+'</b></div>'
+            +'<div class="note">A fusão é conservadora: só une deltas exatamente iguais do mesmo jogador, mapa e janela de 1 segundo. O bruto continua armazenado e exibido para comparação.</div></div>'
+            +'<div class="panel"><h3>🖥️ Observers de combate</h3><table class="dtable"><thead><tr><th>Device</th><th>Eventos</th><th>combat_delta</th><th>DiedEvent bruto</th><th>Kill/death</th><th>Dano bruto</th><th>Cura bruta</th></tr></thead><tbody>'
+            +(devices.length?devices.map(function(x){return '<tr><td><b>'+esc(x.deviceId)+'</b></td><td>'+fmtS(x.eventos)+'</td><td>'+fmtS(x.combatDelta)+'</td><td>'+fmtS(x.observedDeaths||0)+'</td><td>'+fmtS(x.killLike)+'</td><td>'+fmtS(x.damage)+'</td><td>'+fmtS(x.healing)+'</td></tr>';}).join(''):'<tr><td colspan="7" style="color:var(--faint)">Nenhum observer com combate neste CTA.</td></tr>')
+            +'</tbody></table>'
+            +'<div class="note">Fingerprint de deltas iguais entre devices: '+fmtS(a.overlappingDeltaFingerprints||0)+' de '+fmtS(a.combatDeltaFingerprints||0)+'. É um indicador de sobreposição, não uma correção automática.</div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
           setView('view-combat',html);
 
