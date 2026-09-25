@@ -734,7 +734,7 @@ async function getCombat(db, eventId) {
     SELECT event_id, device_id, type, player_name, payload, occurred_at, received_at
     FROM albion_telemetry_events
     WHERE cta_event_id=$1
-      AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result')
+      AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result','player_death_observed')
     ORDER BY occurred_at ASC, received_at ASC
   `, [eventId]);
 
@@ -748,14 +748,20 @@ async function getCombat(db, eventId) {
   const ptAgg = new Map();
   const deviceAgg = new Map();
   const killCandidates = new Map();
+  const killCandidatesByPair = new Map();
   const deltaFingerprints = new Map();
   const mapAgg = new Map();
   let deaths = 0;
   let rawKillLikeEvents = 0;
+  let rawObservedDeaths = 0;
 
   function cleanMap(value) {
     const text = String(value || "").trim();
     return text || "Mapa desconhecido";
+  }
+  function isImortaisFamilyGuild(value) {
+    const g = normGuild(value);
+    return g === "imortais" || g === "imortais2" || g === "imortaisacademy";
   }
   function ptFor(name) {
     const s = signupByName.get(normName(name));
@@ -774,7 +780,17 @@ async function getCombat(db, eventId) {
   function device(id) {
     const key = String(id || "sem-device");
     if (!deviceAgg.has(key)) {
-      deviceAgg.set(key, { deviceId: key, eventos: 0, combatDelta: 0, killLike: 0, damage: 0, healing: 0, firstAt: null, lastAt: null });
+      deviceAgg.set(key, {
+        deviceId: key,
+        eventos: 0,
+        combatDelta: 0,
+        killLike: 0,
+        observedDeaths: 0,
+        damage: 0,
+        healing: 0,
+        firstAt: null,
+        lastAt: null
+      });
     }
     return deviceAgg.get(key);
   }
@@ -827,10 +843,58 @@ async function getCombat(db, eventId) {
     touchWindow(fight, at);
     return fight;
   }
+  function deathCandidateFor(cluster, killer, victim, occurredAt, map, fight) {
+    const baseKey = [cluster, normName(killer), normName(victim)].join("|");
+    if (!killCandidatesByPair.has(baseKey)) killCandidatesByPair.set(baseKey, []);
+    const arr = killCandidatesByPair.get(baseKey);
+    const atMs = new Date(occurredAt).getTime();
+    let k = arr.length ? arr[arr.length - 1] : null;
+    if (!k || !Number.isFinite(atMs) || atMs - k.lastSeenMs > 3000) {
+      const id = baseKey + "|" + String(Number.isFinite(atMs) ? atMs : Date.now()) + "|" + String(arr.length + 1);
+      k = {
+        id,
+        map: cluster,
+        killer,
+        victim,
+        occurredAt,
+        lastSeenMs: Number.isFinite(atMs) ? atMs : Date.now(),
+        devices: new Set(),
+        sourceTypes: new Set(),
+        killerGuilds: new Set(),
+        victimGuilds: new Set(),
+        rawEvents: 0,
+        killerInRoster: rosterKeys.has(normName(killer)),
+        victimInRoster: rosterKeys.has(normName(victim)),
+        killerInFamily: false,
+        victimInFamily: false,
+        mapBucket: map,
+        fightBucket: fight
+      };
+      arr.push(k);
+      killCandidates.set(id, k);
+      map.killCandidates.set(id, k);
+      fight.killCandidates.set(id, k);
+    } else if (Number.isFinite(atMs)) {
+      k.lastSeenMs = Math.max(k.lastSeenMs, atMs);
+    }
+    return k;
+  }
 
   for (const r of rows) {
     const p = r.payload || {};
     const cluster = cleanMap(p.cluster);
+
+    if (r.type === "player_death_observed") {
+      const killerKey = normName(p.killer);
+      const victimKey = normName(p.victim);
+      const relevant =
+        isImortaisFamilyGuild(p.killerGuild) ||
+        isImortaisFamilyGuild(p.victimGuild) ||
+        rosterKeys.has(killerKey) ||
+        rosterKeys.has(victimKey);
+      if (!relevant) continue;
+    }
+
     const map = mapBucket(cluster);
     const fight = fightFor(map, r.occurred_at);
     const d = device(r.device_id);
@@ -867,20 +931,9 @@ async function getCombat(db, eventId) {
       ].join("|");
       if (!deltaFingerprints.has(fp)) deltaFingerprints.set(fp, new Set());
       deltaFingerprints.get(fp).add(String(r.device_id || "sem-device"));
-    } else if (r.type === "death") {
-      const name = String(p.victim || r.player_name || "?");
-      playerIn(players, name).mortes++;
-      ptIn(ptAgg, ptFor(name)).mortes++;
-      playerIn(map.players, name).mortes++;
-      ptIn(map.pts, ptFor(name)).mortes++;
-      playerIn(fight.players, name).mortes++;
-      ptIn(fight.pts, ptFor(name)).mortes++;
-      deaths++;
-      map.deaths++;
-      fight.deaths++;
     }
 
-    if (r.type === "kill" || r.type === "death") {
+    if (r.type === "kill" || r.type === "death" || r.type === "player_death_observed") {
       const killer = String(p.killer || "").trim();
       const victim = String(p.victim || "").trim();
       const lethal = p.isLethal !== false;
@@ -889,32 +942,46 @@ async function getCombat(db, eventId) {
         map.rawKillLikeEvents++;
         fight.rawKillLikeEvents++;
         d.killLike++;
-        const key = [cluster, normName(killer), normName(victim), String(bucketMs(r.occurred_at, 2000))].join("|");
-        let k = killCandidates.get(key);
-        if (!k) {
-          k = {
-            map: cluster,
-            killer,
-            victim,
-            occurredAt: r.occurred_at,
-            devices: new Set(),
-            rawEvents: 0,
-            killerInRoster: rosterKeys.has(normName(killer)),
-            victimInRoster: rosterKeys.has(normName(victim))
-          };
-          killCandidates.set(key, k);
-          map.killCandidates.set(key, k);
+        if (r.type === "player_death_observed") {
+          rawObservedDeaths++;
+          d.observedDeaths++;
         }
-        fight.killCandidates.set(key, k);
+
+        const k = deathCandidateFor(cluster, killer, victim, r.occurred_at, map, fight);
         k.rawEvents++;
         k.devices.add(String(r.device_id || "sem-device"));
+        k.sourceTypes.add(r.type);
+        if (p.killerGuild) k.killerGuilds.add(String(p.killerGuild).trim());
+        if (p.victimGuild) k.victimGuilds.add(String(p.victimGuild).trim());
+        k.killerInRoster = k.killerInRoster || rosterKeys.has(normName(killer));
+        k.victimInRoster = k.victimInRoster || rosterKeys.has(normName(victim));
+        k.killerInFamily = k.killerInFamily || isImortaisFamilyGuild(p.killerGuild);
+        k.victimInFamily = k.victimInFamily || isImortaisFamilyGuild(p.victimGuild);
       }
+    }
+  }
+
+  const canonicalKills = [...killCandidates.values()];
+  for (const k of canonicalKills) {
+    k.killerIsOurs = k.killerInFamily || k.killerInRoster;
+    k.victimIsOurs = k.victimInFamily || k.victimInRoster;
+
+    if (k.victimIsOurs && !k.killerIsOurs) {
+      deaths++;
+      k.mapBucket.deaths++;
+      k.fightBucket.deaths++;
+      playerIn(players, k.victim).mortes++;
+      ptIn(ptAgg, ptFor(k.victim)).mortes++;
+      playerIn(k.mapBucket.players, k.victim).mortes++;
+      ptIn(k.mapBucket.pts, ptFor(k.victim)).mortes++;
+      playerIn(k.fightBucket.players, k.victim).mortes++;
+      ptIn(k.fightBucket.pts, ptFor(k.victim)).mortes++;
     }
   }
 
   function killRanking(kills, limit = 20) {
     const byPlayer = new Map();
-    for (const k of kills.filter(x => x.killerInRoster && !x.victimInRoster)) {
+    for (const k of kills.filter(x => x.killerIsOurs && !x.victimIsOurs)) {
       const key = normName(k.killer);
       const cur = byPlayer.get(key) || { n: k.killer, v: 0 };
       cur.v++;
@@ -925,8 +992,8 @@ async function getCombat(db, eventId) {
   function serializeFight(bucket) {
     const list = [...bucket.players.values()];
     const kills = [...bucket.killCandidates.values()];
-    const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
-    const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
+    const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
+    const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
     return {
       n: bucket.n,
       firstAt: bucket.firstAt,
@@ -954,8 +1021,8 @@ async function getCombat(db, eventId) {
   function serializeMap(bucket) {
     const list = [...bucket.players.values()];
     const kills = [...bucket.killCandidates.values()];
-    const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
-    const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
+    const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
+    const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
     return {
       map: bucket.map,
       firstAt: bucket.firstAt,
@@ -984,9 +1051,9 @@ async function getCombat(db, eventId) {
   }
 
   const list = [...players.values()];
-  const kills = [...killCandidates.values()];
-  const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
-  const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
+  const kills = canonicalKills;
+  const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
+  const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
   const overlappingDeltaFingerprints = [...deltaFingerprints.values()].filter(set => set.size > 1).length;
   const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
   const maps = [...mapAgg.values()]
@@ -1014,6 +1081,7 @@ async function getCombat(db, eventId) {
     audit: {
       rosterPlayers: rosterKeys.size,
       rawKillLikeEvents,
+      rawObservedDeaths,
       uniqueKillCandidates: kills.length,
       ourKillCandidates: ourKills.length,
       ourDeathCandidates: ourDeaths.length,
@@ -1025,12 +1093,17 @@ async function getCombat(db, eventId) {
       sampleKills: kills.slice(-30).reverse().map(k => ({
         map: k.map,
         killer: k.killer,
+        killerGuilds: [...k.killerGuilds],
         victim: k.victim,
+        victimGuilds: [...k.victimGuilds],
         occurredAt: k.occurredAt,
         rawEvents: k.rawEvents,
         observers: k.devices.size,
+        sourceTypes: [...k.sourceTypes],
         killerInRoster: k.killerInRoster,
-        victimInRoster: k.victimInRoster
+        victimInRoster: k.victimInRoster,
+        killerInFamily: k.killerInFamily,
+        victimInFamily: k.victimInFamily
       }))
     },
     meta: {
@@ -1038,7 +1111,10 @@ async function getCombat(db, eventId) {
       retentionDays: 3,
       mapsWithContext: maps.filter(x => x.map !== "Mapa desconhecido").length,
       fightGapMs: COMBAT_FIGHT_GAP_MS,
-      note: "Combate é separado por mapa e, dentro de cada mapa, em lutas candidatas quando há mais de 2 minutos sem eventos de combate. Dano/cura ainda são brutos até fecharmos a deduplicação entre observers."
+      zergDeathObserver: rawObservedDeaths > 0,
+      note: rawObservedDeaths > 0
+        ? "Kills e mortes da zerg usam observações brutas do DiedEvent, fundidas entre observers em janela de 3s e classificadas pelas guilds IMORTAIS / IMORTAIS 2 / IMORTAIS ACADEMY ou pelo roster do CTA. Dano/cura continuam brutos."
+        : "Este CTA ainda não possui player_death_observed (requer Combat Client v0.5.5+). Kills/mortes usam apenas os eventos locais legados; dano/cura continuam brutos."
     }
   };
 }
@@ -1721,7 +1797,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
           FROM cta_events e
           LEFT JOIN albion_telemetry_events t
             ON t.cta_event_id=e.id
-           AND t.type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result')
+           AND t.type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result','player_death_observed')
          WHERE (
            e.status='open'
            OR (

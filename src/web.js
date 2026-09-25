@@ -1069,6 +1069,9 @@ const PAGE = `<!doctype html>
           var a=d.audit||{};
           var devices=a.devices||[];
           var maps=d.maps||[];
+          var deathObserver=!!(d.meta&&d.meta.zergDeathObserver);
+          var killLabel=deathObserver?'Kills da zerg':'Kills candidatas';
+          var deathLabel=deathObserver?'Mortes da zerg':'Mortes candidatas';
           function renderFightBlock(f){
             var fr=f.resumo||{}, fa=f.audit||{}, fwhen='';
             if(f.firstAt&&f.lastAt){
@@ -1081,8 +1084,8 @@ const PAGE = `<!doctype html>
               +'<div class="statgrid" style="margin-top:10px">'
               +'<div class="stat r"><div class="k">Dano bruto</div><div class="v">'+fmtS(fr.damage||0)+'</div></div>'
               +'<div class="stat g"><div class="k">Cura bruta</div><div class="v">'+fmtS(fr.healing||0)+'</div></div>'
-              +'<div class="stat b"><div class="k">Kills candidatas</div><div class="v">'+fmtS(fr.killsCandidate||0)+'</div></div>'
-              +'<div class="stat a"><div class="k">Mortes candidatas</div><div class="v">'+fmtS(fr.deathsCandidate||0)+'</div></div></div>'
+              +'<div class="stat b"><div class="k">'+esc(killLabel)+'</div><div class="v">'+fmtS(fr.killsCandidate||0)+'</div></div>'
+              +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(fr.deathsCandidate||0)+'</div></div></div>'
               +'<div class="split"><div><h3>🏆 Top DPS da luta</h3>'+topList(f.topDmg||[],fmtS)+'</div>'
               +'<div><h3>☠️ Top Kills da luta</h3>'+topList(f.topKillsCandidate||[],fmtS)+'</div></div>'
               +'<div class="note">'+fmtS(f.totalEvents||0)+' eventos · '+fmtS((f.observers||[]).length)+' observer(s) · '+fmtS(fa.duplicateKillLikeEvents||0)+' repetição(ões) estimada(s).</div>'
@@ -1101,8 +1104,8 @@ const PAGE = `<!doctype html>
               +'<div class="statgrid">'
               +'<div class="stat r"><div class="k">Dano bruto</div><div class="v">'+fmtS(mr.damage||0)+'</div></div>'
               +'<div class="stat g"><div class="k">Cura bruta</div><div class="v">'+fmtS(mr.healing||0)+'</div></div>'
-              +'<div class="stat b"><div class="k">Kills candidatas</div><div class="v">'+fmtS(mr.killsCandidate||0)+'</div></div>'
-              +'<div class="stat a"><div class="k">Mortes candidatas</div><div class="v">'+fmtS(mr.deathsCandidate||0)+'</div></div></div>'
+              +'<div class="stat b"><div class="k">'+esc(killLabel)+'</div><div class="v">'+fmtS(mr.killsCandidate||0)+'</div></div>'
+              +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(mr.deathsCandidate||0)+'</div></div></div>'
               +'<div class="split"><div><h3>🏆 Top DPS do mapa</h3>'+topList(m.topDmg||[],fmtS)+'</div>'
               +'<div><h3>☠️ Top Kills do mapa</h3>'+topList(m.topKillsCandidate||[],fmtS)+'</div></div>'
               +'<div class="note">'+fmtS(m.totalEvents||0)+' eventos · '+fmtS((m.observers||[]).length)+' observer(s) · '+fmtS(ma.duplicateKillLikeEvents||0)+' repetição(ões) estimada(s) de kill/death · '+fmtS(fights.length)+' luta(s) candidata(s).</div>'
@@ -1113,8 +1116,8 @@ const PAGE = `<!doctype html>
             +'<div class="statgrid">'
             +'<div class="stat r"><div class="k">Dano bruto</div><div class="v">'+fmtS(r.damage)+'</div></div>'
             +'<div class="stat g"><div class="k">Cura bruta</div><div class="v">'+fmtS(r.healing)+'</div></div>'
-            +'<div class="stat a"><div class="k">Mortes brutas</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
-            +'<div class="stat b"><div class="k">Kills candidatas da zerg</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div></div>'            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e, dentro dele, o sistema abre uma nova luta candidata após mais de 2 minutos sem eventos de combate. Eventos anteriores ao Combat Client v0.5.4 aparecem em “Mapa desconhecido”.</div></div>'
+            +'<div class="stat a"><div class="k">'+esc(deathObserver?'Mortes da zerg':'Mortes candidatas · legado')+'</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
+            +'<div class="stat b"><div class="k">'+esc(deathObserver?'Kills da zerg':'Kills candidatas · legado')+'</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div></div>'            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e, dentro dele, o sistema abre uma nova luta candidata após mais de 2 minutos sem eventos de combate. Eventos anteriores ao Combat Client v0.5.4 aparecem em “Mapa desconhecido”.</div></div>'
             +(maps.length?maps.map(renderMapBlock).join(''):'<div class="panel"><div class="empty-note">Ainda não há eventos de combate com mapa neste CTA.</div></div>')
             +'<div class="panel"><h3>Resumo por PT · bruto</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
             +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
@@ -1123,15 +1126,16 @@ const PAGE = `<!doctype html>
             +'<div class="panel"><h3>💚 Top Heal · bruto</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>'
             +'<div class="split"><div class="panel"><h3>☠️ Top Kills · candidato</h3>'+topList(d.topKillsCandidate||[],fmtS)+'</div>'
             +'<div class="panel"><h3>🧪 Auditoria de abates</h3>'
-            +'<div class="srow">Eventos kill/death brutos: <b>'+(a.rawKillLikeEvents||0)+'</b></div>'
+            +'<div class="srow">DiedEvent observados brutos: <b>'+(a.rawObservedDeaths||0)+'</b></div>'
+            +'<div class="srow">Eventos kill/death totais: <b>'+(a.rawKillLikeEvents||0)+'</b></div>'
             +'<div class="srow">Abates únicos candidatos: <b>'+(a.uniqueKillCandidates||0)+'</b></div>'
-            +'<div class="srow">Kills candidatas da nossa zerg: <b>'+(a.ourKillCandidates||0)+'</b></div>'
-            +'<div class="srow">Mortes candidatas da nossa zerg: <b>'+(a.ourDeathCandidates||0)+'</b></div>'
+            +'<div class="srow">'+esc(deathObserver?'Kills da nossa zerg':'Kills candidatas da nossa zerg')+': <b>'+(a.ourKillCandidates||0)+'</b></div>'
+            +'<div class="srow">'+esc(deathObserver?'Mortes da nossa zerg':'Mortes candidatas da nossa zerg')+': <b>'+(a.ourDeathCandidates||0)+'</b></div>'
             +'<div class="srow">Eventos repetidos estimados: <b>'+(a.duplicateKillLikeEvents||0)+'</b></div>'
             +'<div class="srow">Abates vistos por mais de 1 observer: <b>'+(a.multiObserverKillCandidates||0)+'</b></div>'
             +'</div></div>'
-            +'<div class="panel"><h3>🖥️ Observers de combate</h3><table class="dtable"><thead><tr><th>Device</th><th>Eventos</th><th>combat_delta</th><th>Kill/death</th><th>Dano bruto</th><th>Cura bruta</th></tr></thead><tbody>'
-            +(devices.length?devices.map(function(x){return '<tr><td><b>'+esc(x.deviceId)+'</b></td><td>'+fmtS(x.eventos)+'</td><td>'+fmtS(x.combatDelta)+'</td><td>'+fmtS(x.killLike)+'</td><td>'+fmtS(x.damage)+'</td><td>'+fmtS(x.healing)+'</td></tr>';}).join(''):'<tr><td colspan="6" style="color:var(--faint)">Nenhum observer com combate neste CTA.</td></tr>')
+            +'<div class="panel"><h3>🖥️ Observers de combate</h3><table class="dtable"><thead><tr><th>Device</th><th>Eventos</th><th>combat_delta</th><th>DiedEvent bruto</th><th>Kill/death</th><th>Dano bruto</th><th>Cura bruta</th></tr></thead><tbody>'
+            +(devices.length?devices.map(function(x){return '<tr><td><b>'+esc(x.deviceId)+'</b></td><td>'+fmtS(x.eventos)+'</td><td>'+fmtS(x.combatDelta)+'</td><td>'+fmtS(x.observedDeaths||0)+'</td><td>'+fmtS(x.killLike)+'</td><td>'+fmtS(x.damage)+'</td><td>'+fmtS(x.healing)+'</td></tr>';}).join(''):'<tr><td colspan="7" style="color:var(--faint)">Nenhum observer com combate neste CTA.</td></tr>')
             +'</tbody></table>'
             +'<div class="note">Fingerprint de deltas iguais entre devices: '+fmtS(a.overlappingDeltaFingerprints||0)+' de '+fmtS(a.combatDeltaFingerprints||0)+'. É um indicador de sobreposição, não uma correção automática.</div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
