@@ -129,8 +129,9 @@ async function enrichKillFameEvent(eventId, payload, occurredAt, attempt = 0) {
     if (!eventId || !killer || !victim) return;
 
     const official = await findOfficialKillEvent(killer, victim, occurredAt, attempt > 0);
-    const fame = num(official?.TotalVictimKillFame ?? official?.totalVictimKillFame);
-    if (official && fame >= 0) {
+    const rawFame = official?.TotalVictimKillFame ?? official?.totalVictimKillFame;
+    const fame = Number(rawFame);
+    if (official && rawFame != null && Number.isFinite(fame) && fame >= 0) {
       const killerOfficial = official?.Killer ?? official?.killer ?? {};
       const victimOfficial = official?.Victim ?? official?.victim ?? {};
       const patch = {
