@@ -1066,17 +1066,32 @@ const PAGE = `<!doctype html>
             }).join('')
             +'</div><div class="note" style="margin-top:10px">Os rankings detalhados de combate ficam disponíveis por 3 dias após o encerramento do CTA.</div></div>';
 
+          var a=d.audit||{};
+          var devices=a.devices||[];
           var html=picker+liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate</div>'
             +'<div class="statgrid">'
-            +'<div class="stat r"><div class="k">Dano</div><div class="v">'+fmtS(r.damage)+'</div></div>'
-            +'<div class="stat g"><div class="k">Cura</div><div class="v">'+fmtS(r.healing)+'</div></div>'
-            +'<div class="stat a"><div class="k">Mortes</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
-            +'<div class="stat b"><div class="k">Fights</div><div class="v">'+fmtS(r.fights)+'</div></div></div>'
-            +'<div class="panel"><h3>Resumo por PT</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
+            +'<div class="stat r"><div class="k">Dano bruto</div><div class="v">'+fmtS(r.damage)+'</div></div>'
+            +'<div class="stat g"><div class="k">Cura bruta</div><div class="v">'+fmtS(r.healing)+'</div></div>'
+            +'<div class="stat a"><div class="k">Mortes brutas</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
+            +'<div class="stat b"><div class="k">Kills candidatas da zerg</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div></div>'
+            +'<div class="panel"><h3>Resumo por PT · bruto</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
             +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
             +'</tbody></table></div>'
-            +'<div class="split"><div class="panel"><h3>🏆 Top DPS</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>💚 Top Heal</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>';
+            +'<div class="split"><div class="panel"><h3>🏆 Top DPS · bruto</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>💚 Top Heal · bruto</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>'
+            +'<div class="split"><div class="panel"><h3>☠️ Top Kills · candidato</h3>'+topList(d.topKillsCandidate||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>🧪 Auditoria de abates</h3>'
+            +'<div class="srow">Eventos kill/death brutos: <b>'+(a.rawKillLikeEvents||0)+'</b></div>'
+            +'<div class="srow">Abates únicos candidatos: <b>'+(a.uniqueKillCandidates||0)+'</b></div>'
+            +'<div class="srow">Kills candidatas da nossa zerg: <b>'+(a.ourKillCandidates||0)+'</b></div>'
+            +'<div class="srow">Mortes candidatas da nossa zerg: <b>'+(a.ourDeathCandidates||0)+'</b></div>'
+            +'<div class="srow">Eventos repetidos estimados: <b>'+(a.duplicateKillLikeEvents||0)+'</b></div>'
+            +'<div class="srow">Abates vistos por mais de 1 observer: <b>'+(a.multiObserverKillCandidates||0)+'</b></div>'
+            +'</div></div>'
+            +'<div class="panel"><h3>🖥️ Observers de combate</h3><table class="dtable"><thead><tr><th>Device</th><th>Eventos</th><th>combat_delta</th><th>Kill/death</th><th>Dano bruto</th><th>Cura bruta</th></tr></thead><tbody>'
+            +(devices.length?devices.map(function(x){return '<tr><td><b>'+esc(x.deviceId)+'</b></td><td>'+fmtS(x.eventos)+'</td><td>'+fmtS(x.combatDelta)+'</td><td>'+fmtS(x.killLike)+'</td><td>'+fmtS(x.damage)+'</td><td>'+fmtS(x.healing)+'</td></tr>';}).join(''):'<tr><td colspan="6" style="color:var(--faint)">Nenhum observer com combate neste CTA.</td></tr>')
+            +'</tbody></table>'
+            +'<div class="note">Fingerprint de deltas iguais entre devices: '+fmtS(a.overlappingDeltaFingerprints||0)+' de '+fmtS(a.combatDeltaFingerprints||0)+'. É um indicador de sobreposição, não uma correção automática.</div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
           setView('view-combat',html);
 

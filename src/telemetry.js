@@ -730,10 +730,11 @@ async function getLoot(db, eventId) {
 
 async function getCombat(db, eventId) {
   const { rows } = await pool.query(`
-    SELECT type, player_name, payload, occurred_at
+    SELECT event_id, device_id, type, player_name, payload, occurred_at, received_at
     FROM albion_telemetry_events
-    WHERE cta_event_id=$1 AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result')
-    ORDER BY occurred_at ASC
+    WHERE cta_event_id=$1
+      AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result')
+    ORDER BY occurred_at ASC, received_at ASC
   `, [eventId]);
 
   const signups = await db.getSignups(eventId).catch(() => []);
@@ -741,9 +742,14 @@ async function getCombat(db, eventId) {
   const pl = ev ? db.parsePartyList(ev) : [];
   const displayByRaw = new Map(pl.map((raw, idx) => [Number(raw), idx + 1]));
   const signupByName = new Map(signups.map(s => [normName(s.username), s]));
+  const rosterKeys = new Set(signups.map(s => normName(s.username)).filter(Boolean));
   const players = new Map();
   const ptAgg = new Map();
+  const deviceAgg = new Map();
+  const killCandidates = new Map();
+  const deltaFingerprints = new Map();
   let deaths = 0;
+  let rawKillLikeEvents = 0;
 
   function player(name) {
     const key = normName(name);
@@ -759,21 +765,105 @@ async function getCombat(db, eventId) {
     if (!ptAgg.has(name)) ptAgg.set(name, { pt: name, dmg: 0, heal: 0, mortes: 0 });
     return ptAgg.get(name);
   }
+  function device(id) {
+    const key = String(id || "sem-device");
+    if (!deviceAgg.has(key)) {
+      deviceAgg.set(key, {
+        deviceId: key,
+        eventos: 0,
+        combatDelta: 0,
+        killLike: 0,
+        damage: 0,
+        healing: 0,
+        firstAt: null,
+        lastAt: null
+      });
+    }
+    return deviceAgg.get(key);
+  }
+  function bucketMs(value, size) {
+    const t = new Date(value).getTime();
+    return Number.isFinite(t) ? Math.floor(t / size) * size : 0;
+  }
 
   for (const r of rows) {
     const p = r.payload || {};
+    const d = device(r.device_id);
+    d.eventos++;
+    if (!d.firstAt || new Date(r.occurred_at) < new Date(d.firstAt)) d.firstAt = r.occurred_at;
+    if (!d.lastAt || new Date(r.occurred_at) > new Date(d.lastAt)) d.lastAt = r.occurred_at;
+
     if (r.type === "combat_delta") {
       const name = String(p.player || r.player_name || "?");
       const x = player(name), g = pt(ptFor(name));
       const dmg = num(p.damage), heal = num(p.healing);
       x.dmg += dmg; x.heal += heal; g.dmg += dmg; g.heal += heal;
+      d.combatDelta++; d.damage += dmg; d.healing += heal;
+
+      // Apenas heurística de auditoria: deltas iguais emitidos por observers diferentes
+      // no mesmo segundo podem indicar sobreposição de captura. Não é usado para
+      // corrigir/alterar o ranking oficial.
+      const fp = [
+        normName(name),
+        String(Math.round(dmg)),
+        String(Math.round(heal)),
+        String(bucketMs(r.occurred_at, 1000))
+      ].join("|");
+      if (!deltaFingerprints.has(fp)) deltaFingerprints.set(fp, new Set());
+      deltaFingerprints.get(fp).add(String(r.device_id || "sem-device"));
     } else if (r.type === "death") {
       const name = String(p.victim || r.player_name || "?");
       player(name).mortes++; pt(ptFor(name)).mortes++; deaths++;
     }
+
+    if (r.type === "kill" || r.type === "death") {
+      const killer = String(p.killer || "").trim();
+      const victim = String(p.victim || "").trim();
+      const lethal = p.isLethal !== false;
+      if (killer && victim && lethal) {
+        rawKillLikeEvents++;
+        d.killLike++;
+        // Janela de 2s para colapsar observers que viram o mesmo abate. Isso é
+        // propositalmente "candidato único", não estatística oficial ainda.
+        const key = [
+          normName(killer),
+          normName(victim),
+          String(bucketMs(r.occurred_at, 2000))
+        ].join("|");
+        let k = killCandidates.get(key);
+        if (!k) {
+          k = {
+            killer,
+            victim,
+            occurredAt: r.occurred_at,
+            devices: new Set(),
+            rawEvents: 0,
+            killerInRoster: rosterKeys.has(normName(killer)),
+            victimInRoster: rosterKeys.has(normName(victim))
+          };
+          killCandidates.set(key, k);
+        }
+        k.rawEvents++;
+        k.devices.add(String(r.device_id || "sem-device"));
+      }
+    }
   }
 
   const list = [...players.values()];
+  const kills = [...killCandidates.values()];
+  const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
+  const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
+  const killByPlayer = new Map();
+  for (const k of ourKills) {
+    const key = normName(k.killer);
+    const cur = killByPlayer.get(key) || { n: k.killer, v: 0 };
+    cur.v++;
+    killByPlayer.set(key, cur);
+  }
+
+  const overlappingDeltaFingerprints = [...deltaFingerprints.values()].filter(set => set.size > 1).length;
+  const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
+
   return {
     resumo: {
       damage: list.reduce((a, x) => a + x.dmg, 0),
@@ -784,10 +874,32 @@ async function getCombat(db, eventId) {
     porPt: [...ptAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
     topDmg: list.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
     topHeal: list.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
+    topKillsCandidate: [...killByPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, 20),
+    audit: {
+      rosterPlayers: rosterKeys.size,
+      rawKillLikeEvents,
+      uniqueKillCandidates: kills.length,
+      ourKillCandidates: ourKills.length,
+      ourDeathCandidates: ourDeaths.length,
+      duplicateKillLikeEvents: Math.max(0, rawKillLikeEvents - kills.length),
+      multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+      combatDeltaFingerprints: deltaFingerprints.size,
+      overlappingDeltaFingerprints,
+      devices,
+      sampleKills: kills.slice(-30).reverse().map(k => ({
+        killer: k.killer,
+        victim: k.victim,
+        occurredAt: k.occurredAt,
+        rawEvents: k.rawEvents,
+        observers: k.devices.size,
+        killerInRoster: k.killerInRoster,
+        victimInRoster: k.victimInRoster
+      }))
+    },
     meta: {
       totalEventos: rows.length,
       retentionDays: 3,
-      note: "Ranking por CTA: dano, cura e mortes ficam disponíveis para conferência por 3 dias após o encerramento. Fight segmentation ainda não está disponível."
+      note: "Dano/cura continuam brutos por CTA. A seção Auditoria mede sobreposição entre observers antes de ativarmos kills e Battle Report como números oficiais."
     }
   };
 }
