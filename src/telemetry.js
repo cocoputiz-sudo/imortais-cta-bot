@@ -748,62 +748,88 @@ async function getCombat(db, eventId) {
   const deviceAgg = new Map();
   const killCandidates = new Map();
   const deltaFingerprints = new Map();
+  const mapAgg = new Map();
   let deaths = 0;
   let rawKillLikeEvents = 0;
 
-  function player(name) {
-    const key = normName(name);
-    if (!players.has(key)) players.set(key, { n: String(name || "?"), dmg: 0, heal: 0, mortes: 0 });
-    return players.get(key);
+  function cleanMap(value) {
+    const text = String(value || "").trim();
+    return text || "Mapa desconhecido";
   }
   function ptFor(name) {
     const s = signupByName.get(normName(name));
     if (!s || s.party_index == null) return "Sem PT";
     return `PT ${displayByRaw.get(Number(s.party_index)) || (Number(s.party_index) + 1)}`;
   }
-  function pt(name) {
-    if (!ptAgg.has(name)) ptAgg.set(name, { pt: name, dmg: 0, heal: 0, mortes: 0 });
-    return ptAgg.get(name);
+  function playerIn(store, name) {
+    const key = normName(name);
+    if (!store.has(key)) store.set(key, { n: String(name || "?"), dmg: 0, heal: 0, mortes: 0 });
+    return store.get(key);
+  }
+  function ptIn(store, name) {
+    if (!store.has(name)) store.set(name, { pt: name, dmg: 0, heal: 0, mortes: 0 });
+    return store.get(name);
   }
   function device(id) {
     const key = String(id || "sem-device");
     if (!deviceAgg.has(key)) {
-      deviceAgg.set(key, {
-        deviceId: key,
-        eventos: 0,
-        combatDelta: 0,
-        killLike: 0,
-        damage: 0,
-        healing: 0,
+      deviceAgg.set(key, { deviceId: key, eventos: 0, combatDelta: 0, killLike: 0, damage: 0, healing: 0, firstAt: null, lastAt: null });
+    }
+    return deviceAgg.get(key);
+  }
+  function mapBucket(name) {
+    const key = cleanMap(name);
+    if (!mapAgg.has(key)) {
+      mapAgg.set(key, {
+        map: key,
+        players: new Map(),
+        pts: new Map(),
+        devices: new Set(),
+        killCandidates: new Map(),
+        totalEvents: 0,
+        rawKillLikeEvents: 0,
+        deaths: 0,
         firstAt: null,
         lastAt: null
       });
     }
-    return deviceAgg.get(key);
+    return mapAgg.get(key);
   }
   function bucketMs(value, size) {
     const t = new Date(value).getTime();
     return Number.isFinite(t) ? Math.floor(t / size) * size : 0;
   }
+  function touchWindow(bucket, at) {
+    if (!bucket.firstAt || new Date(at) < new Date(bucket.firstAt)) bucket.firstAt = at;
+    if (!bucket.lastAt || new Date(at) > new Date(bucket.lastAt)) bucket.lastAt = at;
+  }
 
   for (const r of rows) {
     const p = r.payload || {};
+    const cluster = cleanMap(p.cluster);
+    const map = mapBucket(cluster);
     const d = device(r.device_id);
     d.eventos++;
+    map.totalEvents++;
+    map.devices.add(String(r.device_id || "sem-device"));
+    touchWindow(map, r.occurred_at);
     if (!d.firstAt || new Date(r.occurred_at) < new Date(d.firstAt)) d.firstAt = r.occurred_at;
     if (!d.lastAt || new Date(r.occurred_at) > new Date(d.lastAt)) d.lastAt = r.occurred_at;
 
     if (r.type === "combat_delta") {
       const name = String(p.player || r.player_name || "?");
-      const x = player(name), g = pt(ptFor(name));
       const dmg = num(p.damage), heal = num(p.healing);
+
+      const x = playerIn(players, name), g = ptIn(ptAgg, ptFor(name));
       x.dmg += dmg; x.heal += heal; g.dmg += dmg; g.heal += heal;
+
+      const mx = playerIn(map.players, name), mg = ptIn(map.pts, ptFor(name));
+      mx.dmg += dmg; mx.heal += heal; mg.dmg += dmg; mg.heal += heal;
+
       d.combatDelta++; d.damage += dmg; d.healing += heal;
 
-      // Apenas heurística de auditoria: deltas iguais emitidos por observers diferentes
-      // no mesmo segundo podem indicar sobreposição de captura. Não é usado para
-      // corrigir/alterar o ranking oficial.
       const fp = [
+        cluster,
         normName(name),
         String(Math.round(dmg)),
         String(Math.round(heal)),
@@ -813,7 +839,12 @@ async function getCombat(db, eventId) {
       deltaFingerprints.get(fp).add(String(r.device_id || "sem-device"));
     } else if (r.type === "death") {
       const name = String(p.victim || r.player_name || "?");
-      player(name).mortes++; pt(ptFor(name)).mortes++; deaths++;
+      playerIn(players, name).mortes++;
+      ptIn(ptAgg, ptFor(name)).mortes++;
+      playerIn(map.players, name).mortes++;
+      ptIn(map.pts, ptFor(name)).mortes++;
+      deaths++;
+      map.deaths++;
     }
 
     if (r.type === "kill" || r.type === "death") {
@@ -822,17 +853,13 @@ async function getCombat(db, eventId) {
       const lethal = p.isLethal !== false;
       if (killer && victim && lethal) {
         rawKillLikeEvents++;
+        map.rawKillLikeEvents++;
         d.killLike++;
-        // Janela de 2s para colapsar observers que viram o mesmo abate. Isso é
-        // propositalmente "candidato único", não estatística oficial ainda.
-        const key = [
-          normName(killer),
-          normName(victim),
-          String(bucketMs(r.occurred_at, 2000))
-        ].join("|");
+        const key = [cluster, normName(killer), normName(victim), String(bucketMs(r.occurred_at, 2000))].join("|");
         let k = killCandidates.get(key);
         if (!k) {
           k = {
+            map: cluster,
             killer,
             victim,
             occurredAt: r.occurred_at,
@@ -842,6 +869,7 @@ async function getCombat(db, eventId) {
             victimInRoster: rosterKeys.has(normName(victim))
           };
           killCandidates.set(key, k);
+          map.killCandidates.set(key, k);
         }
         k.rawEvents++;
         k.devices.add(String(r.device_id || "sem-device"));
@@ -849,32 +877,75 @@ async function getCombat(db, eventId) {
     }
   }
 
+  function killRanking(kills) {
+    const byPlayer = new Map();
+    for (const k of kills.filter(x => x.killerInRoster && !x.victimInRoster)) {
+      const key = normName(k.killer);
+      const cur = byPlayer.get(key) || { n: k.killer, v: 0 };
+      cur.v++;
+      byPlayer.set(key, cur);
+    }
+    return [...byPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, 20);
+  }
+  function serializeMap(bucket) {
+    const list = [...bucket.players.values()];
+    const kills = [...bucket.killCandidates.values()];
+    const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
+    const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
+    return {
+      map: bucket.map,
+      firstAt: bucket.firstAt,
+      lastAt: bucket.lastAt,
+      totalEvents: bucket.totalEvents,
+      observers: [...bucket.devices],
+      resumo: {
+        damage: list.reduce((a, x) => a + x.dmg, 0),
+        healing: list.reduce((a, x) => a + x.heal, 0),
+        mortes: bucket.deaths,
+        killsCandidate: ourKills.length,
+        deathsCandidate: ourDeaths.length
+      },
+      porPt: [...bucket.pts.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
+      topDmg: list.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
+      topHeal: list.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
+      topKillsCandidate: killRanking(kills),
+      audit: {
+        rawKillLikeEvents: bucket.rawKillLikeEvents,
+        uniqueKillCandidates: kills.length,
+        duplicateKillLikeEvents: Math.max(0, bucket.rawKillLikeEvents - kills.length),
+        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length
+      }
+    };
+  }
+
   const list = [...players.values()];
   const kills = [...killCandidates.values()];
   const ourKills = kills.filter(k => k.killerInRoster && !k.victimInRoster);
   const ourDeaths = kills.filter(k => k.victimInRoster && !k.killerInRoster);
-  const killByPlayer = new Map();
-  for (const k of ourKills) {
-    const key = normName(k.killer);
-    const cur = killByPlayer.get(key) || { n: k.killer, v: 0 };
-    cur.v++;
-    killByPlayer.set(key, cur);
-  }
-
   const overlappingDeltaFingerprints = [...deltaFingerprints.values()].filter(set => set.size > 1).length;
   const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
+  const maps = [...mapAgg.values()]
+    .map(serializeMap)
+    .sort((a, b) => {
+      if (a.map === "Mapa desconhecido" && b.map !== "Mapa desconhecido") return 1;
+      if (b.map === "Mapa desconhecido" && a.map !== "Mapa desconhecido") return -1;
+      return b.totalEvents - a.totalEvents || a.map.localeCompare(b.map);
+    });
 
   return {
     resumo: {
       damage: list.reduce((a, x) => a + x.dmg, 0),
       healing: list.reduce((a, x) => a + x.heal, 0),
       mortes: deaths,
-      fights: null,
+      killsCandidate: ourKills.length,
+      deathsCandidate: ourDeaths.length,
+      fights: null
     },
+    maps,
     porPt: [...ptAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
     topDmg: list.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
     topHeal: list.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
-    topKillsCandidate: [...killByPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, 20),
+    topKillsCandidate: killRanking(kills),
     audit: {
       rosterPlayers: rosterKeys.size,
       rawKillLikeEvents,
@@ -887,6 +958,7 @@ async function getCombat(db, eventId) {
       overlappingDeltaFingerprints,
       devices,
       sampleKills: kills.slice(-30).reverse().map(k => ({
+        map: k.map,
         killer: k.killer,
         victim: k.victim,
         occurredAt: k.occurredAt,
@@ -899,7 +971,8 @@ async function getCombat(db, eventId) {
     meta: {
       totalEventos: rows.length,
       retentionDays: 3,
-      note: "Dano/cura continuam brutos por CTA. A seção Auditoria mede sobreposição entre observers antes de ativarmos kills e Battle Report como números oficiais."
+      mapsWithContext: maps.filter(x => x.map !== "Mapa desconhecido").length,
+      note: "Combate passa a ser separado por mapa quando o Combat Client envia cluster (v0.5.4+). Eventos antigos permanecem em 'Mapa desconhecido'. Dano/cura ainda são brutos até fecharmos a deduplicação entre observers."
     }
   };
 }
