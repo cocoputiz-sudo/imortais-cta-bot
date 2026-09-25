@@ -1134,8 +1134,8 @@ const PAGE = `<!doctype html>
             +'<div class="panel"><h3>Resumo por PT · bruto</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
             +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
             +'</tbody></table></div>'
-            +'<div class="split"><div class="panel"><h3>🏆 Top DPS · bruto</h3>'+topList(d.topDmg||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>💚 Top Heal · bruto</h3>'+topList(d.topHeal||[],fmtS)+'</div></div>'
+            +'<div class="split"><div class="panel"><h3>🏆 Top DPS · dedup. conservador</h3>'+topList(d.topDmgDedup||d.topDmg||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>💚 Top Heal · dedup. conservador</h3>'+topList(d.topHealDedup||d.topHeal||[],fmtS)+'</div></div>'
             +'<div class="split"><div class="panel"><h3>☠️ Top Kills · candidato</h3>'+topList(d.topKillsCandidate||[],fmtS)+'</div>'
             +'<div class="panel"><h3>🧪 Auditoria de abates</h3>'
             +'<div class="srow">DiedEvent observados brutos: <b>'+(a.rawObservedDeaths||0)+'</b></div>'
