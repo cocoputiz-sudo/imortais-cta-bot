@@ -221,12 +221,29 @@ function solve(signups, numParties = 4, partyList = null, opts = {}) {
           if (!best) take = true;
           else if (sc.cost < best.cost) take = true;
           else if (sc.cost === best.cost) {
+            const IP_WEAPONS = ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"];
+            const ehArmaIp = IP_WEAPONS.includes(U(su.weapon));
+            const suIp = su.ip || 0, bestIp = best.su.ip || 0;
             if (coreOn) {
               const suCore = opts.coreIds.has(String(su.user_id));
               const bestCore = opts.coreIds.has(String(best.su.user_id));
-              take = (suCore !== bestCore) ? suCore : ((su.ip || 0) > (best.su.ip || 0));
+              if (suCore !== bestCore) {
+                // Nas armas que exigem IP, o core so mantem a preferencia se o nao-core
+                // NAO tiver IP mais de 50 acima dele. Acima de 50, o IP maior vence.
+                if (ehArmaIp) {
+                  const core = suCore ? { ip: suIp } : { ip: bestIp };
+                  const naoCore = suCore ? { ip: bestIp } : { ip: suIp };
+                  const naoCoreVence = naoCore.ip - core.ip > 50;
+                  // se o nao-core vence pelo IP, fica com quem tem IP maior; senao, com o core
+                  take = naoCoreVence ? (suIp > bestIp) : suCore;
+                } else {
+                  take = suCore; // fora das armas de IP, core tem preferencia absoluta
+                }
+              } else {
+                take = suIp > bestIp; // ambos core ou ambos nao-core: desempata por IP
+              }
             } else {
-              take = (su.ip || 0) > (best.su.ip || 0);
+              take = suIp > bestIp;
             }
           }
           if (take) best = { su, cost: sc.cost, kind: sc.kind };
@@ -367,7 +384,7 @@ function renderRoster(signups, numParties = 4, partyList = null) {
         filled++;
         const flag = su.presence === "online" ? "🟢" : "🕐";
         const ipTag =
-          su.ip && ["URSINAS", "CRAVADAS"].includes((su.weapon || "").toUpperCase())
+          su.ip && ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"].includes((su.weapon || "").toUpperCase())
             ? ` \`IP ${su.ip}\``
             : "";
         lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${ipTag} ${flag}${su.manual ? " 🔒" : ""}`);

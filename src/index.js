@@ -194,7 +194,7 @@ async function startSignupFromText(msg, ev, role, weapon) {
   }
   if (weapon) {
     const role2 = WEAPONS[weapon]?.role;
-    const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
+    const IP_WEAPONS = ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"];
     if (IP_WEAPONS.includes(weapon.toUpperCase())) {
       await msg.channel.send({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
       return;
@@ -490,7 +490,7 @@ async function onWeaponPick(interaction) {
   if (ownerId && interaction.user.id !== ownerId)
     return interaction.reply({ content: "Esse menu é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const weapon = interaction.values[0];
-  const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
+  const IP_WEAPONS = ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"];
   if (IP_WEAPONS.includes(weapon.toUpperCase())) {
     const modal = new ModalBuilder().setCustomId(`ipmodal|${eventId}|${encodeURIComponent(weapon)}`)
       .setTitle(`IP da tua ${weapon}`);

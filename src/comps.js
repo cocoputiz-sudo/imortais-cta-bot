@@ -106,6 +106,12 @@ const F = {
   ],
 
   TANK_MACA: [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]],
+  TANK_LIVRE: [
+    ["GOLEM", 1], ["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1],
+    ["MAÇA DE UMA MÃO", 1], ["MARTELO DE UMA MÃO", 1], ["MAÇA PESADA W RUNA GUARDA", 1],
+    ["BRUXO DE UMA MÃO", 1], ["MONARCA", 1], ["MANGUAL", 1], ["CAMBRIANA", 1],
+    ["SEGANÍMICA", 1], ["CAJADO PRIMORDIAL", 1],
+  ],
   DPS_LIVRE: [
     ["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
     ["PRESA DEMONIACA", 2], ["GALATINAS", 2], ["ASTRAL", 2], ["PRISMA", 2],
@@ -133,7 +139,7 @@ const PARTY1 = [
   slot("Support", [["CAÇA ESPÍRITOS", 1], ["ENTALHADA", 1], ["EXECRADO", 2]]),                     // 09
   slot("Support", [["SILENCE", 1]]),                                            // 10
   slot("Melee",   [["QUEBRA REINOS", 1]]),                                      // 11
-  slot("Melee",   [["PRISMA", 1]]),                                             // 12
+  slot("Ranged",  [["PRISMA", 1], ["GELO ELEVADO", 1]]),                         // 12
   slot("Melee",   [["CANÇÃO", 1], ["ASTRAL", 1]]),                               // 13
   slot("Melee",   [["BRAÇADEIRAS", 1], ["CANÇÃO", 1]]),                           // 14
   slot("Melee",   [["URSINAS", 1]]),                                            // 15
@@ -213,7 +219,7 @@ const PARTY5 = [
 // PARTY 6 (pt6teste — exatamente os 20 slots solicitados)
 // ---------------------------------------------------------------------------
 const PARTY6_TESTE = [
-  { ...slot("Tank", [["GOLEM", 1], ["MAÇA DE UMA MÃO", 1], ["MONARCA", 1]]), locked: true }, // 01 caller
+  slot("Tank",    F.TANK_LIVRE),                                                          // 01 tank (encaixe livre)
   slot("Tank",    [["MAÇA PÉTREA", 1]]),                                                    // 02
   slot("Tank",    [["MAÇA PESADA", 1]]),                                                    // 03
   slot("Tank",    [["MONARCA", 1]]),                                                        // 04
@@ -241,7 +247,7 @@ const PARTIES = [
   { name: "Party 3", slots: PARTY3 },
   { name: "Party 4", slots: PARTY4 },
   { name: "Party 5", slots: PARTY5 },
-  { name: "pt6teste", slots: PARTY6_TESTE }, // index 5 -> pt6teste
+  { name: "PTPRESSRANGED", slots: PARTY6_TESTE }, // index 5 -> PTPRESSRANGED
 ];
 
 function buildWeaponCatalog() {
