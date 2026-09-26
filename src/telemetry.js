@@ -10,6 +10,12 @@ const CONFIRM_TTL_MS = 2000;
 const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRESH_MS) || 10 * 60 * 1000);
 const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
 const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
+const ALBION_GAMEINFO_BASE = String(process.env.ALBION_GAMEINFO_BASE || "https://gameinfo.albiononline.com/api/gameinfo").replace(/\/+$/, "");
+const ALBION_FAME_MATCH_WINDOW_MS = Math.max(15_000, Number(process.env.ALBION_FAME_MATCH_WINDOW_MS) || 2 * 60 * 1000);
+const ALBION_API_TIMEOUT_MS = Math.max(2_000, Number(process.env.ALBION_API_TIMEOUT_MS) || 8_000);
+const KILL_FAME_RETRY_MS = [4_000, 15_000, 45_000, 120_000];
+const _albionPlayerIdCache = new Map();
+const _albionRecentEventsCache = new Map();
 
 function normName(v) {
   let out = String(v || "").trim();
@@ -33,6 +39,138 @@ function normGuild(v) {
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+async function albionJson(path) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ALBION_API_TIMEOUT_MS);
+  try {
+    const response = await fetch(ALBION_GAMEINFO_BASE + path, {
+      signal: controller.signal,
+      headers: { "User-Agent": "IMORTAIS-War-Room/kill-fame-enrichment" }
+    });
+    if (!response.ok) throw new Error("Albion GameInfo HTTP " + response.status);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function resolveAlbionPlayerId(name) {
+  const key = normName(name);
+  if (!key) return null;
+  const cached = _albionPlayerIdCache.get(key);
+  if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) return cached.id;
+
+  const data = await albionJson("/search?q=" + encodeURIComponent(String(name || "").trim()));
+  const players = Array.isArray(data?.players) ? data.players : (Array.isArray(data?.Players) ? data.Players : []);
+  const exact = players.find(p => normName(p?.Name ?? p?.name) === key);
+  const id = exact?.Id ?? exact?.id ?? null;
+  if (id) _albionPlayerIdCache.set(key, { at: Date.now(), id: String(id) });
+  return id ? String(id) : null;
+}
+
+async function recentAlbionEvents(playerName, kind, forceFresh = false) {
+  const id = await resolveAlbionPlayerId(playerName);
+  if (!id) return [];
+  const cacheKey = id + "|" + kind;
+  const cached = _albionRecentEventsCache.get(cacheKey);
+  if (!forceFresh && cached && Date.now() - cached.at < 4_000) return cached.events;
+
+  const data = await albionJson("/players/" + encodeURIComponent(id) + "/" + kind);
+  const events = Array.isArray(data) ? data : [];
+  _albionRecentEventsCache.set(cacheKey, { at: Date.now(), events });
+  return events;
+}
+
+function albionEventTimeMs(evt) {
+  const raw = evt?.TimeStamp ?? evt?.timestamp ?? evt?.Timestamp ?? evt?.timeStamp;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function albionEventName(evt, side) {
+  const obj = side === "killer" ? (evt?.Killer ?? evt?.killer) : (evt?.Victim ?? evt?.victim);
+  return String(obj?.Name ?? obj?.name ?? "").trim();
+}
+
+async function findOfficialKillEvent(killer, victim, occurredAt, forceFresh = false) {
+  const targetMs = new Date(occurredAt).getTime();
+  const sources = await Promise.allSettled([
+    recentAlbionEvents(killer, "kills", forceFresh),
+    recentAlbionEvents(victim, "deaths", forceFresh)
+  ]);
+  const all = [];
+  const seen = new Set();
+  for (const result of sources) {
+    if (result.status !== "fulfilled") continue;
+    for (const evt of result.value) {
+      const eventId = String(evt?.EventId ?? evt?.eventId ?? "");
+      const dedupKey = eventId || JSON.stringify([albionEventName(evt, "killer"), albionEventName(evt, "victim"), evt?.TimeStamp]);
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      all.push(evt);
+    }
+  }
+
+  return all
+    .filter(evt =>
+      normName(albionEventName(evt, "killer")) === normName(killer) &&
+      normName(albionEventName(evt, "victim")) === normName(victim))
+    .map(evt => ({ evt, diff: Number.isFinite(targetMs) ? Math.abs(albionEventTimeMs(evt) - targetMs) : 0 }))
+    .filter(x => !Number.isFinite(targetMs) || (Number.isFinite(x.diff) && x.diff <= ALBION_FAME_MATCH_WINDOW_MS))
+    .sort((a, b) => a.diff - b.diff)[0]?.evt || null;
+}
+
+async function enrichKillFameEvent(eventId, payload, occurredAt, attempt = 0) {
+  try {
+    const killer = String(payload?.killer || "").trim();
+    const victim = String(payload?.victim || "").trim();
+    if (!eventId || !killer || !victim) return;
+
+    const official = await findOfficialKillEvent(killer, victim, occurredAt, attempt > 0);
+    const rawFame = official?.TotalVictimKillFame ?? official?.totalVictimKillFame;
+    const fame = Number(rawFame);
+    if (official && rawFame != null && Number.isFinite(fame) && fame >= 0) {
+      const killerOfficial = official?.Killer ?? official?.killer ?? {};
+      const victimOfficial = official?.Victim ?? official?.victim ?? {};
+      const patch = {
+        killFame: fame,
+        totalVictimKillFame: fame,
+        albionEventId: String(official?.EventId ?? official?.eventId ?? "") || null,
+        albionBattleId: String(official?.BattleId ?? official?.battleId ?? "") || null,
+        officialTimestamp: official?.TimeStamp ?? official?.timestamp ?? null,
+        officialLocation: official?.Location ?? official?.location ?? null,
+        killerGuildOfficial: killerOfficial?.GuildName ?? killerOfficial?.guildName ?? null,
+        victimGuildOfficial: victimOfficial?.GuildName ?? victimOfficial?.guildName ?? null,
+        killerAllianceOfficial: killerOfficial?.AllianceName ?? killerOfficial?.allianceName ?? null,
+        victimAllianceOfficial: victimOfficial?.AllianceName ?? victimOfficial?.allianceName ?? null,
+        killFameSource: "albion-gameinfo",
+        killFameResolvedAt: new Date().toISOString()
+      };
+      await pool.query(
+        `UPDATE albion_telemetry_events
+            SET payload = COALESCE(payload, '{}'::jsonb) || $2::jsonb
+          WHERE event_id=$1`,
+        [eventId, JSON.stringify(patch)]
+      );
+      return;
+    }
+  } catch (err) {
+    console.warn("kill fame enrichment:", err?.message || err);
+  }
+
+  if (attempt < KILL_FAME_RETRY_MS.length) {
+    setTimeout(() => {
+      enrichKillFameEvent(eventId, payload, occurredAt, attempt + 1).catch(() => {});
+    }, KILL_FAME_RETRY_MS[attempt]).unref?.();
+  }
+}
+
+function queueKillFameEnrichment(eventId, payload, occurredAt) {
+  setTimeout(() => {
+    enrichKillFameEvent(eventId, payload, occurredAt, 0).catch(() => {});
+  }, KILL_FAME_RETRY_MS[0]).unref?.();
 }
 
 function bearer(req) {
@@ -881,6 +1019,9 @@ async function getCombat(db, eventId) {
         victimInRoster: rosterKeys.has(normName(victim)),
         killerInFamily: false,
         victimInFamily: false,
+        killFame: 0,
+        albionEventIds: new Set(),
+        albionBattleIds: new Set(),
         mapBucket: map,
         fightBucket: fight
       };
@@ -999,6 +1140,14 @@ async function getCombat(db, eventId) {
         k.victimInRoster = k.victimInRoster || rosterKeys.has(normName(victim));
         k.killerInFamily = k.killerInFamily || isImortaisFamilyGuild(p.killerGuild);
         k.victimInFamily = k.victimInFamily || isImortaisFamilyGuild(p.victimGuild);
+        const observedFame = Math.max(
+          num(p.killFame),
+          num(p.totalVictimKillFame),
+          num(p.TotalVictimKillFame)
+        );
+        if (observedFame > k.killFame) k.killFame = observedFame;
+        if (p.albionEventId) k.albionEventIds.add(String(p.albionEventId));
+        if (p.albionBattleId) k.albionBattleIds.add(String(p.albionBattleId));
       }
     }
   }
@@ -1068,12 +1217,20 @@ async function getCombat(db, eventId) {
     const kd = new Map();
     function kdFor(name) {
       const key = normName(name);
-      if (!kd.has(key)) kd.set(key, { n: String(name || "?"), kills: 0, deaths: 0 });
+      if (!kd.has(key)) kd.set(key, { n: String(name || "?"), kills: 0, deaths: 0, killFame: 0, deathFame: 0 });
       return kd.get(key);
     }
     for (const k of kills) {
-      if (k.killerIsOurs && !k.victimIsOurs) kdFor(k.killer).kills++;
-      if (k.victimIsOurs && !k.killerIsOurs) kdFor(k.victim).deaths++;
+      if (k.killerIsOurs && !k.victimIsOurs) {
+        const row = kdFor(k.killer);
+        row.kills++;
+        row.killFame += num(k.killFame);
+      }
+      if (k.victimIsOurs && !k.killerIsOurs) {
+        const row = kdFor(k.victim);
+        row.deaths++;
+        row.deathFame += num(k.killFame);
+      }
     }
 
     const keys = new Set([...rawStore.keys(), ...canonicalStore.keys(), ...kd.keys()]);
@@ -1090,10 +1247,12 @@ async function getCombat(db, eventId) {
         rawDamage: num(raw.dmg),
         rawHealing: num(raw.heal),
         kills: num(combat.kills),
-        deaths: num(combat.deaths)
+        deaths: num(combat.deaths),
+        killFame: num(combat.killFame),
+        deathFame: num(combat.deathFame)
       };
     })
-      .filter(x => x.damage > 0 || x.healing > 0 || x.rawDamage > 0 || x.rawHealing > 0 || x.kills > 0 || x.deaths > 0)
+      .filter(x => x.damage > 0 || x.healing > 0 || x.rawDamage > 0 || x.rawHealing > 0 || x.kills > 0 || x.deaths > 0 || x.killFame > 0 || x.deathFame > 0)
       .sort((a, b) =>
         b.damage - a.damage ||
         b.kills - a.kills ||
@@ -1101,6 +1260,22 @@ async function getCombat(db, eventId) {
         a.n.localeCompare(b.n, "pt-BR")
       )
       .slice(0, limit);
+  }
+
+  function fameRanking(kills, side = "kill", limit = 20) {
+    const byPlayer = new Map();
+    for (const k of kills) {
+      const ours = side === "kill"
+        ? (k.killerIsOurs && !k.victimIsOurs)
+        : (k.victimIsOurs && !k.killerIsOurs);
+      if (!ours || num(k.killFame) <= 0) continue;
+      const name = side === "kill" ? k.killer : k.victim;
+      const key = normName(name);
+      const cur = byPlayer.get(key) || { n: name, v: 0 };
+      cur.v += num(k.killFame);
+      byPlayer.set(key, cur);
+    }
+    return [...byPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, limit);
   }
 
   function killRanking(kills, limit = 20) {
@@ -1130,7 +1305,9 @@ async function getCombat(db, eventId) {
         healing: list.reduce((a, x) => a + x.heal, 0),
         mortes: bucket.deaths,
         killsCandidate: ourKills.length,
-        deathsCandidate: ourDeaths.length
+        deathsCandidate: ourDeaths.length,
+        killFame: ourKills.reduce((a, k) => a + num(k.killFame), 0),
+        deathFame: ourDeaths.reduce((a, k) => a + num(k.killFame), 0)
       },
       resumoDedup: {
         damage: canonicalList.reduce((a, x) => a + x.dmg, 0),
@@ -1142,6 +1319,8 @@ async function getCombat(db, eventId) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 10).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 10).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills, 10),
+      topKillFame: fameRanking(kills, "kill", 10),
+      topDeathFame: fameRanking(kills, "death", 10),
       audit: {
         rawCombatDeltaEvents: bucket.rawCombatDeltaEvents,
         canonicalDeltaEvents: bucket.canonicalDeltaEvents,
@@ -1150,7 +1329,9 @@ async function getCombat(db, eventId) {
         rawKillLikeEvents: bucket.rawKillLikeEvents,
         uniqueKillCandidates: kills.length,
         duplicateKillLikeEvents: Math.max(0, bucket.rawKillLikeEvents - kills.length),
-        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length
+        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+        fameResolvedCandidates: kills.filter(k => num(k.killFame) > 0).length,
+        fameUnresolvedCandidates: kills.filter(k => num(k.killFame) <= 0).length
       }
     };
   }
@@ -1171,7 +1352,9 @@ async function getCombat(db, eventId) {
         healing: list.reduce((a, x) => a + x.heal, 0),
         mortes: bucket.deaths,
         killsCandidate: ourKills.length,
-        deathsCandidate: ourDeaths.length
+        deathsCandidate: ourDeaths.length,
+        killFame: ourKills.reduce((a, k) => a + num(k.killFame), 0),
+        deathFame: ourDeaths.reduce((a, k) => a + num(k.killFame), 0)
       },
       resumoDedup: {
         damage: canonicalList.reduce((a, x) => a + x.dmg, 0),
@@ -1184,6 +1367,8 @@ async function getCombat(db, eventId) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills),
+      topKillFame: fameRanking(kills, "kill"),
+      topDeathFame: fameRanking(kills, "death"),
       fights: bucket.fights.map(serializeFight),
       audit: {
         rawCombatDeltaEvents: bucket.rawCombatDeltaEvents,
@@ -1193,7 +1378,9 @@ async function getCombat(db, eventId) {
         rawKillLikeEvents: bucket.rawKillLikeEvents,
         uniqueKillCandidates: kills.length,
         duplicateKillLikeEvents: Math.max(0, bucket.rawKillLikeEvents - kills.length),
-        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length
+        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+        fameResolvedCandidates: kills.filter(k => num(k.killFame) > 0).length,
+        fameUnresolvedCandidates: kills.filter(k => num(k.killFame) <= 0).length
       }
     };
   }
@@ -1220,6 +1407,8 @@ async function getCombat(db, eventId) {
       mortes: deaths,
       killsCandidate: ourKills.length,
       deathsCandidate: ourDeaths.length,
+      killFame: ourKills.reduce((a, k) => a + num(k.killFame), 0),
+      deathFame: ourDeaths.reduce((a, k) => a + num(k.killFame), 0),
       fights: null
     },
     resumoDedup: {
@@ -1234,6 +1423,8 @@ async function getCombat(db, eventId) {
     topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
     topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
     topKillsCandidate: killRanking(kills),
+    topKillFame: fameRanking(kills, "kill"),
+    topDeathFame: fameRanking(kills, "death"),
     audit: {
       rosterPlayers: rosterKeys.size,
       rawCombatDeltaEvents,
@@ -1247,6 +1438,10 @@ async function getCombat(db, eventId) {
       ourDeathCandidates: ourDeaths.length,
       duplicateKillLikeEvents: Math.max(0, rawKillLikeEvents - kills.length),
       multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+      fameResolvedCandidates: kills.filter(k => num(k.killFame) > 0).length,
+      fameUnresolvedCandidates: kills.filter(k => num(k.killFame) <= 0).length,
+      totalKillFame: ourKills.reduce((a, k) => a + num(k.killFame), 0),
+      totalDeathFame: ourDeaths.reduce((a, k) => a + num(k.killFame), 0),
       combatDeltaFingerprints: deltaFingerprints.size,
       overlappingDeltaFingerprints,
       devices,
@@ -1263,7 +1458,10 @@ async function getCombat(db, eventId) {
         killerInRoster: k.killerInRoster,
         victimInRoster: k.victimInRoster,
         killerInFamily: k.killerInFamily,
-        victimInFamily: k.victimInFamily
+        victimInFamily: k.victimInFamily,
+        killFame: num(k.killFame),
+        albionEventIds: [...k.albionEventIds],
+        albionBattleIds: [...k.albionBattleIds]
       }))
     },
     meta: {
@@ -1273,6 +1471,8 @@ async function getCombat(db, eventId) {
       fightGapMs: COMBAT_FIGHT_GAP_MS,
       zergDeathObserver: rawObservedDeaths > 0,
       damageFusionMode: "exact-fingerprint-conservative",
+      killFameSource: "albion-gameinfo",
+      killFameMatchWindowMs: ALBION_FAME_MATCH_WINDOW_MS,
       note: rawObservedDeaths > 0
         ? "Kills e mortes da zerg usam DiedEvent fundido entre observers. Dano/cura agora também expõem uma visão deduplicada conservadora: deltas exatamente iguais do mesmo jogador/mapa/janela de 1s são fundidos entre devices, preservando a maior multiplicidade vista por um único observer. O bruto continua disponível para auditoria."
         : "Este CTA ainda não possui player_death_observed (requer Combat Client v0.5.5+). Dano/cura expõem deduplicação conservadora por fingerprint exato; kills/mortes usam apenas os eventos locais legados."
@@ -1831,6 +2031,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       `, [deviceId, device.playerName || null, device.version || null]);
 
       let inserted = 0, duplicate = 0;
+      const fameEnrichmentQueue = [];
       await pool.query("BEGIN");
       try {
         for (const e of events) {
@@ -1850,6 +2051,9 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
             if (type === "guild_presence_probe") {
               await applyGuildPresenceProbe({ payload, deviceId, occurredAt });
             }
+            if (type === "player_death_observed" && payload?.isLethal !== false) {
+              fameEnrichmentQueue.push({ eventId, payload, occurredAt });
+            }
           } else {
             duplicate++;
           }
@@ -1858,6 +2062,10 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       } catch (e) {
         await pool.query("ROLLBACK");
         throw e;
+      }
+
+      for (const item of fameEnrichmentQueue) {
+        queueKillFameEnrichment(item.eventId, item.payload, item.occurredAt);
       }
 
       if (ctaEventId) notifyTelemetry(ctaEventId, { inserted, deviceId });
