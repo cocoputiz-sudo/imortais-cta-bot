@@ -96,6 +96,43 @@ async function authenticateTelemetry(req, { deviceId = "", playerName = "", allo
   return { kind: "agent", tokenHash: hash, agent };
 }
 
+function parseCtaClockMinutes(label) {
+  const m = /(?:^|\s)([01]?\d|2[0-3]):([0-5]\d)(?:\s|$)/.exec(String(label || "").trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function signedClockDeltaMinutes(targetMinutes, now = new Date()) {
+  if (!Number.isFinite(targetMinutes)) return null;
+  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  let delta = targetMinutes - nowMinutes;
+  while (delta <= -720) delta += 1440;
+  while (delta > 720) delta -= 1440;
+  return delta;
+}
+
+function ctaTimeRank(row, now = new Date()) {
+  const clock = parseCtaClockMinutes(row?.time_label);
+  const delta = signedClockDeltaMinutes(clock, now);
+  if (delta == null) {
+    return { bucket: 9, distance: Number.MAX_SAFE_INTEGER };
+  }
+
+  // Até 45 min antes do horário, o próximo CTA já pode estar em formação.
+  // Depois do horário, mantemos o CTA preferido por até 3h.
+  if (delta >= 0 && delta <= 45) return { bucket: 0, distance: delta };
+  if (delta < 0 && delta >= -180) return { bucket: 1, distance: Math.abs(delta) };
+  return { bucket: 2, distance: Math.abs(delta) };
+}
+
+function compareCtaRelevance(a, b, now = new Date()) {
+  const ar = ctaTimeRank(a, now);
+  const br = ctaTimeRank(b, now);
+  return ar.bucket - br.bucket
+    || ar.distance - br.distance
+    || new Date(b.created_at || 0) - new Date(a.created_at || 0);
+}
+
 async function resolveActiveCtaForPlayer(playerName) {
   const key = normName(playerName);
   if (!key) return null;
@@ -104,14 +141,12 @@ async function resolveActiveCtaForPlayer(playerName) {
     `SELECT e.id, e.time_label, e.status, e.created_at, s.username
        FROM cta_events e
        JOIN cta_signups s ON s.event_id=e.id
-      WHERE e.status='open'
-      ORDER BY e.created_at DESC`
+      WHERE e.status='open'`
   );
 
-  for (const row of rows) {
-    if (normName(row.username) === key) return row;
-  }
-  return null;
+  return rows
+    .filter(row => normName(row.username) === key)
+    .sort((a, b) => compareCtaRelevance(a, b))[0] || null;
 }
 
 async function resolveActiveCtaForDevice(deviceId) {
@@ -144,8 +179,7 @@ async function resolveActiveCtaFromParty(members) {
     `SELECT e.id, e.time_label, e.status, e.created_at, s.username
        FROM cta_events e
        JOIN cta_signups s ON s.event_id=e.id
-      WHERE e.status='open'
-      ORDER BY e.created_at DESC`
+      WHERE e.status='open'`
   );
 
   const byEvent = new Map();
@@ -165,7 +199,28 @@ async function resolveActiveCtaFromParty(members) {
 
   return [...byEvent.values()]
     .filter(x => x.overlap > 0)
-    .sort((a, b) => b.overlap - a.overlap || new Date(b.created_at) - new Date(a.created_at))[0] || null;
+    .sort((a, b) => b.overlap - a.overlap || compareCtaRelevance(a, b))[0] || null;
+}
+
+async function resolveActiveCtaFromLatestPartyForDevice(deviceId) {
+  const id = String(deviceId || "").trim();
+  if (!id) return null;
+
+  const { rows } = await pool.query(
+    `SELECT payload
+       FROM albion_telemetry_events
+      WHERE device_id=$1
+        AND type='party_snapshot'
+        AND received_at >= now() - interval '3 hours'
+      ORDER BY received_at DESC, occurred_at DESC
+      LIMIT 1`,
+    [id]
+  );
+
+  const members = rows[0]?.payload?.members;
+  return Array.isArray(members) && members.length
+    ? resolveActiveCtaFromParty(members)
+    : null;
 }
 
 async function initSchema(dbPool) {
@@ -1313,7 +1368,7 @@ function dotNetTicksToDate(value, fallback) {
   return Number.isNaN(d.getTime()) ? (fallback instanceof Date ? fallback : new Date(fallback)) : d;
 }
 
-async function applyGuildPresenceProbe({ payload, deviceId, occurredAt }) {
+async function applyGuildPresenceProbe({ payload, deviceId, occurredAt, dbClient = pool }) {
   if (!payload || String(payload.eventName || "") !== "GuildPlayerUpdated") return;
   const parameters = payload.parameters && typeof payload.parameters === "object" ? payload.parameters : {};
   const playerName = String(parameters["1"] || "").trim();
@@ -1328,7 +1383,7 @@ async function applyGuildPresenceProbe({ payload, deviceId, occurredAt }) {
     : null;
   const lastSeenAt = online ? null : stateAt;
 
-  await pool.query(`
+  await dbClient.query(`
     INSERT INTO albion_guild_presence(
       player_key, player_name, player_id, online, last_seen_at,
       state_at, last_event_at, observer_device, updated_at
@@ -1792,33 +1847,36 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const events = Array.isArray(body.events) ? body.events : [];
       if (!events.length || events.length > 500) return res.status(400).json({ error: "events" });
 
-      // 1) Contexto explicito do proprio Combat Client (currentCtaId) tem prioridade:
-      //    o client sabe qual CTA esta observando; o servidor nao deve adivinhar por cima disso.
-      let ctaEventId = body.ctaEventId != null && String(body.ctaEventId).trim() !== "" ? String(body.ctaEventId).trim() : null;
-      if (!ctaEventId) {
+      // O CTA informado pelo client e apenas uma dica. O servidor revalida o contexto
+      // para impedir que um currentCtaId antigo "grude" todos os lotes no CTA mais recente.
+      let clientCtaEventId = body.ctaEventId != null && String(body.ctaEventId).trim() !== ""
+        ? String(body.ctaEventId).trim()
+        : null;
+      if (!clientCtaEventId) {
         const hbCta = events
           .map(e => (e.payload ?? e.Payload ?? {}))
           .map(p => p.currentCtaId)
           .find(v => v != null && String(v).trim() !== "");
-        if (hbCta) ctaEventId = String(hbCta).trim();
+        if (hbCta) clientCtaEventId = String(hbCta).trim();
       }
 
-      if (!ctaEventId) {
-        // 2) Desambiguacao pela PARTY REAL observada no jogo: com varios CTAs abertos,
-        //    a party que o device ve agora bate melhor com o CTA vigente (maior overlap).
-        //    Isso evita o loot/combate cair no CTA mais recem-criado por engano.
-        const partyEvent = events
-          .filter(e => String(e.type || e.Type || "").trim() === "party_snapshot")
-          .map(e => e.payload ?? e.Payload ?? {})
-          .find(p => Array.isArray(p.members) && p.members.length);
+      const partyEvent = events
+        .filter(e => String(e.type || e.Type || "").trim() === "party_snapshot")
+        .map(e => e.payload ?? e.Payload ?? {})
+        .find(p => Array.isArray(p.members) && p.members.length);
 
-        let active = partyEvent ? await resolveActiveCtaFromParty(partyEvent.members) : null;
+      // Ordem de confianca:
+      // 1. party observada neste proprio lote;
+      // 2. party recente deste device;
+      // 3. CTA temporalmente relevante em que o player esta inscrito;
+      // 4. ultimo CTA recente do device;
+      // 5. somente entao a dica currentCtaId do client.
+      let active = partyEvent ? await resolveActiveCtaFromParty(partyEvent.members) : null;
+      if (!active) active = await resolveActiveCtaFromLatestPartyForDevice(deviceId);
+      if (!active) active = await resolveActiveCtaForPlayer(detectedPlayer);
+      if (!active) active = await resolveActiveCtaForDevice(deviceId);
 
-        // 3) Fallbacks apenas se a party nao resolveu:
-        if (!active) active = await resolveActiveCtaForPlayer(detectedPlayer);
-        if (!active) active = await resolveActiveCtaForDevice(deviceId);
-        ctaEventId = active ? String(active.id) : null;
-      }
+      let ctaEventId = active ? String(active.id) : clientCtaEventId;
       if (ctaEventId) {
         const ev = await db.getEvent(ctaEventId).catch(() => null);
         if (!ev || ev.status !== "open") ctaEventId = null;
@@ -1831,33 +1889,52 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       `, [deviceId, device.playerName || null, device.version || null]);
 
       let inserted = 0, duplicate = 0;
-      await pool.query("BEGIN");
+      const client = await pool.connect();
       try {
-        for (const e of events) {
-          const eventId = String(e.eventId || e.EventId || "").trim();
-          const type = String(e.type || e.Type || "").trim();
-          const occurredAt = e.occurredAt || e.OccurredAt || new Date().toISOString();
-          const playerName = e.playerName ?? e.PlayerName ?? null;
-          const payload = e.payload ?? e.Payload ?? {};
-          if (!eventId || !type) continue;
-          const q = await pool.query(`
-            INSERT INTO albion_telemetry_events(event_id, cta_event_id, device_id, type, occurred_at, player_name, payload)
-            VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
-            ON CONFLICT(event_id) DO NOTHING
-          `, [eventId, ctaEventId, deviceId, type, occurredAt, playerName, JSON.stringify(payload || {})]);
-          if (q.rowCount) {
-            inserted++;
-            if (type === "guild_presence_probe") {
-              await applyGuildPresenceProbe({ payload, deviceId, occurredAt });
+        await client.query("BEGIN");
+        try {
+          const presenceProbes = [];
+          for (const e of events) {
+            const eventId = String(e.eventId || e.EventId || "").trim();
+            const type = String(e.type || e.Type || "").trim();
+            const occurredAt = e.occurredAt || e.OccurredAt || new Date().toISOString();
+            const playerName = e.playerName ?? e.PlayerName ?? null;
+            const payload = e.payload ?? e.Payload ?? {};
+            if (!eventId || !type) continue;
+            const q = await client.query(`
+              INSERT INTO albion_telemetry_events(event_id, cta_event_id, device_id, type, occurred_at, player_name, payload)
+              VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
+              ON CONFLICT(event_id) DO NOTHING
+            `, [eventId, ctaEventId, deviceId, type, occurredAt, playerName, JSON.stringify(payload || {})]);
+            if (q.rowCount) {
+              inserted++;
+              if (type === "guild_presence_probe") {
+                presenceProbes.push({ payload, deviceId, occurredAt });
+              }
+            } else {
+              duplicate++;
             }
-          } else {
-            duplicate++;
           }
+
+          // Dois observers podem receber o mesmo burst de GuildPlayerUpdated em ordens
+          // diferentes. Ordenar as chaves antes dos UPSERTs garante a mesma ordem de locks
+          // entre transacoes concorrentes e evita o ciclo de deadlock visto em producao.
+          presenceProbes.sort((a, b) => {
+            const aName = normName(a.payload?.parameters?.["1"]);
+            const bName = normName(b.payload?.parameters?.["1"]);
+            return aName.localeCompare(bName);
+          });
+          for (const probe of presenceProbes) {
+            await applyGuildPresenceProbe({ ...probe, dbClient: client });
+          }
+
+          await client.query("COMMIT");
+        } catch (e) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw e;
         }
-        await pool.query("COMMIT");
-      } catch (e) {
-        await pool.query("ROLLBACK");
-        throw e;
+      } finally {
+        client.release();
       }
 
       if (ctaEventId) notifyTelemetry(ctaEventId, { inserted, deviceId });
