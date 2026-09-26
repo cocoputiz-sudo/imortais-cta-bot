@@ -1893,6 +1893,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       try {
         await client.query("BEGIN");
         try {
+          const presenceProbes = [];
           for (const e of events) {
             const eventId = String(e.eventId || e.EventId || "").trim();
             const type = String(e.type || e.Type || "").trim();
@@ -1908,12 +1909,25 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
             if (q.rowCount) {
               inserted++;
               if (type === "guild_presence_probe") {
-                await applyGuildPresenceProbe({ payload, deviceId, occurredAt, dbClient: client });
+                presenceProbes.push({ payload, deviceId, occurredAt });
               }
             } else {
               duplicate++;
             }
           }
+
+          // Dois observers podem receber o mesmo burst de GuildPlayerUpdated em ordens
+          // diferentes. Ordenar as chaves antes dos UPSERTs garante a mesma ordem de locks
+          // entre transacoes concorrentes e evita o ciclo de deadlock visto em producao.
+          presenceProbes.sort((a, b) => {
+            const aName = normName(a.payload?.parameters?.["1"]);
+            const bName = normName(b.payload?.parameters?.["1"]);
+            return aName.localeCompare(bName);
+          });
+          for (const probe of presenceProbes) {
+            await applyGuildPresenceProbe({ ...probe, dbClient: client });
+          }
+
           await client.query("COMMIT");
         } catch (e) {
           await client.query("ROLLBACK").catch(() => {});
