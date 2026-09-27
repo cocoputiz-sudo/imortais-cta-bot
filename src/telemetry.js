@@ -989,6 +989,8 @@ async function getCombat(db, eventId) {
         firstReceivedMs: Number.isFinite(receivedMs) ? receivedMs : null,
         lastReceivedMs: Number.isFinite(receivedMs) ? receivedMs : null,
         devices: new Set(),
+        observedDeathDevices: new Set(),
+        observedDeathDeviceCounts: new Map(),
         sourceTypes: new Set(),
         killerNames: new Set(),
         killerGuilds: new Set(),
@@ -1131,8 +1133,16 @@ async function getCombat(db, eventId) {
           p
         );
         k.rawEvents++;
-        if (r.type === "player_death_observed") k.observedDeathEvents++;
-        k.devices.add(String(r.device_id || "sem-device"));
+        const observerDeviceId = String(r.device_id || "sem-device");
+        if (r.type === "player_death_observed") {
+          k.observedDeathEvents++;
+          k.observedDeathDevices.add(observerDeviceId);
+          k.observedDeathDeviceCounts.set(
+            observerDeviceId,
+            (k.observedDeathDeviceCounts.get(observerDeviceId) || 0) + 1
+          );
+        }
+        k.devices.add(observerDeviceId);
         k.sourceTypes.add(r.type);
         if (p.killerGuild) k.killerGuilds.add(String(p.killerGuild).trim());
         if (p.victimGuild) k.victimGuilds.add(String(p.victimGuild).trim());
@@ -1190,9 +1200,20 @@ async function getCombat(db, eventId) {
   const canonicalKills = [...killCandidates.values()];
   const canonicalObservedDeaths = canonicalKills.filter(k => k.observedDeathEvents > 0);
   const observedDeathObserverHistogram = canonicalObservedDeaths.reduce((acc, k) => {
-    const observers = Math.max(1, k.devices.size);
+    const observers = Math.max(1, k.observedDeathDevices.size);
     acc[observers] = (acc[observers] || 0) + 1;
     return acc;
+  }, {});
+  const crossObserverObservedDeathCopies = canonicalObservedDeaths.reduce(
+    (sum, k) => sum + Math.max(0, k.observedDeathDevices.size - 1),
+    0
+  );
+  const sameObserverObservedDeathCopies = canonicalObservedDeaths.reduce((sum, k) => {
+    let duplicates = 0;
+    for (const count of k.observedDeathDeviceCounts.values()) {
+      duplicates += Math.max(0, Number(count) - 1);
+    }
+    return sum + duplicates;
   }, {});
   for (const k of canonicalKills) {
     k.killerIsOurs = k.killerInFamily || k.killerInRoster;
@@ -1209,6 +1230,34 @@ async function getCombat(db, eventId) {
       playerIn(k.fightBucket.players, k.victim).mortes++;
       ptIn(k.fightBucket.pts, ptFor(k.victim)).mortes++;
     }
+  }
+
+  const unclassifiedCanonicalKills = canonicalKills.filter(
+    k => !!k.killerIsOurs === !!k.victimIsOurs
+  );
+  const friendlyCanonicalKills = unclassifiedCanonicalKills.filter(
+    k => k.killerIsOurs && k.victimIsOurs
+  );
+  const externalCanonicalKills = unclassifiedCanonicalKills.filter(
+    k => !k.killerIsOurs && !k.victimIsOurs
+  );
+
+  function serializeUnclassifiedKill(k) {
+    let classification = "nem_kill_nossa_nem_morte_nossa";
+    if (k.killerIsOurs && k.victimIsOurs) classification = "ambos_nossos";
+    else if (!k.killerIsOurs && !k.victimIsOurs) classification = "nenhum_nosso";
+    return {
+      map: k.map,
+      occurredAt: k.occurredAt,
+      killer: k.killer,
+      victim: k.victim,
+      killerGuilds: [...k.killerGuilds],
+      victimGuilds: [...k.victimGuilds],
+      sourceTypes: [...k.sourceTypes],
+      observers: k.devices.size,
+      observedDeathObservers: k.observedDeathDevices.size,
+      classification
+    };
   }
 
   function combatPlayerRows(rawStore, canonicalStore, kills, limit = 100) {
@@ -1401,13 +1450,19 @@ async function getCombat(db, eventId) {
       rawObservedDeaths,
       canonicalObservedDeaths: canonicalObservedDeaths.length,
       collapsedObservedDeathCopies: Math.max(0, rawObservedDeaths - canonicalObservedDeaths.length),
+      crossObserverObservedDeathCopies,
+      sameObserverObservedDeathCopies,
       observedDeathObserverHistogram,
       uniqueKillCandidates: kills.length,
       ourKillCandidates: ourKills.length,
       ourDeathCandidates: ourDeaths.length,
+      unclassifiedCanonicalCandidates: unclassifiedCanonicalKills.length,
+      friendlyCanonicalCandidates: friendlyCanonicalKills.length,
+      externalCanonicalCandidates: externalCanonicalKills.length,
+      unclassifiedCanonicalSample: unclassifiedCanonicalKills.slice(-20).reverse().map(serializeUnclassifiedKill),
       duplicateKillLikeEvents: Math.max(0, rawKillLikeEvents - kills.length),
       multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
-      multiObserverObservedDeaths: canonicalObservedDeaths.filter(k => k.devices.size > 1).length,
+      multiObserverObservedDeaths: canonicalObservedDeaths.filter(k => k.observedDeathDevices.size > 1).length,
       deathDedupWindowMs: COMBAT_DEATH_DEDUP_MS,
       combatDeltaFingerprints: deltaFingerprints.size,
       overlappingDeltaFingerprints,
@@ -1424,6 +1479,9 @@ async function getCombat(db, eventId) {
         observedDeathEvents: k.observedDeathEvents,
         observers: k.devices.size,
         observerDevices: [...k.devices],
+        observedDeathObservers: k.observedDeathDevices.size,
+        observedDeathObserverDevices: [...k.observedDeathDevices],
+        observedDeathDeviceCounts: Object.fromEntries(k.observedDeathDeviceCounts),
         sourceTypes: [...k.sourceTypes],
         victimObjectIds: [...k.victimObjectIds],
         killerObjectIds: [...k.killerObjectIds],
