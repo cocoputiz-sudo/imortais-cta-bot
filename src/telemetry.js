@@ -11,6 +11,7 @@ const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRE
 const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
 const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
 const COMBAT_DEATH_DEDUP_MS = Math.max(5_000, Number(process.env.COMBAT_DEATH_DEDUP_MS) || 30_000);
+const COMBAT_BATTLE_MIN_EVENTS = Math.max(1, Number(process.env.COMBAT_BATTLE_MIN_EVENTS) || 5);
 
 function normName(v) {
   let out = String(v || "").trim();
@@ -771,6 +772,8 @@ async function getLoot(db, eventId) {
     itens,
     meta: {
       totalEventos: rows.length,
+      battleMinRelevantEvents: COMBAT_BATTLE_MIN_EVENTS,
+      deathDedupWindowMs: COMBAT_DEATH_DEDUP_MS,
       eventosConsiderados: rows.length - ignorados,
       eventosIgnorados: ignorados,
       guildConsiderados,
@@ -1263,12 +1266,15 @@ async function getCombat(db, eventId) {
     const kills = [...bucket.killCandidates.values()];
     const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
     const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
+    const relevantDeathEvents = ourKills.length + ourDeaths.length;
     return {
       n: bucket.n,
       firstAt: bucket.firstAt,
       lastAt: bucket.lastAt,
       totalEvents: bucket.totalEvents,
       observers: [...bucket.devices],
+      relevantDeathEvents,
+      reportable: relevantDeathEvents >= COMBAT_BATTLE_MIN_EVENTS,
       resumo: {
         damage: list.reduce((a, x) => a + x.dmg, 0),
         healing: list.reduce((a, x) => a + x.heal, 0),
@@ -1304,6 +1310,8 @@ async function getCombat(db, eventId) {
     const kills = [...bucket.killCandidates.values()];
     const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
     const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
+    const serializedFights = bucket.fights.map(serializeFight);
+    const reportableFights = serializedFights.filter(f => f.reportable);
     return {
       map: bucket.map,
       firstAt: bucket.firstAt,
@@ -1328,8 +1336,12 @@ async function getCombat(db, eventId) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills),
-      fights: bucket.fights.map(serializeFight),
+      fights: reportableFights,
       audit: {
+        candidateFights: serializedFights.length,
+        reportableFights: reportableFights.length,
+        suppressedFights: Math.max(0, serializedFights.length - reportableFights.length),
+        battleMinRelevantEvents: COMBAT_BATTLE_MIN_EVENTS,
         rawCombatDeltaEvents: bucket.rawCombatDeltaEvents,
         canonicalDeltaEvents: bucket.canonicalDeltaEvents,
         collapsedCombatDeltaEvents: bucket.collapsedCombatDeltaEvents,
@@ -1351,6 +1363,7 @@ async function getCombat(db, eventId) {
   const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
   const maps = [...mapAgg.values()]
     .map(serializeMap)
+    .filter(m => (m.fights || []).length > 0)
     .sort((a, b) => {
       if (a.map === "Mapa desconhecido" && b.map !== "Mapa desconhecido") return 1;
       if (b.map === "Mapa desconhecido" && a.map !== "Mapa desconhecido") return -1;
