@@ -1219,8 +1219,8 @@ const PAGE = `<!doctype html>
 
       function equipmentTier(uniqueName){
         var id=String(uniqueName||'');
-        var t=/^T(\d+)_/i.exec(id);
-        var e=/@(\d+)/.exec(id);
+        var t=/^T(\\d+)_/i.exec(id);
+        var e=/@(\\d+)/.exec(id);
         return t?('T'+t[1]+'.'+(e?e[1]:'0')):'';
       }
       function equipmentIconUrl(uniqueName){
@@ -1245,7 +1245,7 @@ const PAGE = `<!doctype html>
         var items=slots.map(function(s){
           var id=state.equipment[s[1]]||'';
           if(!id) return '<div class="cv2-equip-item empty"><img class="cv2-equip-icon" alt=""><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">—</span></div>';
-          return '<div class="cv2-equip-item" title="'+attr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
+          return '<div class="cv2-equip-item" title="'+attr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\\'hidden\\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
         }).join('');
         var ip=Number(state.itemPower)||0;
         var observed=state.observedAt?age(state.observedAt):'snapshot atual';
