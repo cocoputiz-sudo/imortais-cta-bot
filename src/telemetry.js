@@ -135,6 +135,33 @@ function compareCtaRelevance(a, b, now = new Date()) {
     || new Date(b.created_at || 0) - new Date(a.created_at || 0);
 }
 
+/**
+ * Fila autoritativa da telemetria.
+ *
+ * Regra operacional IMORTAIS: enquanto existir um CTA anterior com status "open",
+ * TODA a telemetria pertence a ele. Somente quando esse CTA for finalizado/cancelado
+ * o próximo CTA aberto passa a receber dados.
+ *
+ * remind_30/remind_10 carregam a data real do CTA e evitam ambiguidade em virada de dia.
+ * created_at é fallback para CTAs sem lembrete (ex.: eventos abertos manualmente).
+ */
+async function resolveEarliestOpenCta() {
+  const { rows } = await pool.query(
+    `SELECT id, guild_id, time_label, status, created_at, remind_30, remind_10
+       FROM cta_events
+      WHERE status='open'
+      ORDER BY COALESCE(
+                 remind_30 + interval '30 minutes',
+                 remind_10 + interval '10 minutes',
+                 created_at
+               ) ASC,
+               created_at ASC,
+               id ASC
+      LIMIT 1`
+  );
+  return rows[0] || null;
+}
+
 async function resolveActiveCtaForPlayer(playerName) {
   const key = normName(playerName);
   if (!key) return null;
@@ -2052,8 +2079,12 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       if (!auth) return res.status(401).json({ error: "unauthorized" });
 
       const playerName = requestedPlayer || String(auth.agent?.player_name || "").trim();
-      let cta = await resolveActiveCtaForPlayer(playerName);
-      if (!cta) cta = await resolveActiveCtaForDevice(deviceId);
+
+      // O vínculo do client segue a FILA dos CTAs, não proximidade de horário e
+      // não a inscrição individual do observer. Se 15:20 continua aberto, nenhum
+      // client pode saltar para 17:20. Ao finalizar 15:20, 17:20 vira o primeiro.
+      const cta = await resolveEarliestOpenCta();
+
       res.json({
         ok: true,
         playerName: playerName || null,
@@ -2092,22 +2123,13 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         if (hbCta) clientCtaEventId = String(hbCta).trim();
       }
 
-      const partyEvent = events
-        .filter(e => String(e.type || e.Type || "").trim() === "party_snapshot")
-        .map(e => e.payload ?? e.Payload ?? {})
-        .find(p => Array.isArray(p.members) && p.members.length);
+      // Regra autoritativa da fila:
+      // TODA telemetria vai para o CTA aberto mais antigo/mais cedo.
+      // Party, jogador, relógio do client ou currentCtaId NÃO podem saltar um CTA
+      // ainda aberto. Finalizou/cancelou o atual -> o próximo aberto assume.
+      const active = await resolveEarliestOpenCta();
 
-      // Ordem de confianca:
-      // 1. party observada neste proprio lote;
-      // 2. party recente deste device;
-      // 3. CTA temporalmente relevante em que o player esta inscrito;
-      // 4. ultimo CTA recente do device;
-      // 5. somente entao a dica currentCtaId do client.
-      let active = partyEvent ? await resolveActiveCtaFromParty(partyEvent.members) : null;
-      if (!active) active = await resolveActiveCtaFromLatestPartyForDevice(deviceId);
-      if (!active) active = await resolveActiveCtaForPlayer(detectedPlayer);
-      if (!active) active = await resolveActiveCtaForDevice(deviceId);
-
+      // A dica do client só é usada se não existir nenhum CTA aberto no servidor.
       let ctaEventId = active ? String(active.id) : clientCtaEventId;
       if (ctaEventId) {
         const ev = await db.getEvent(ctaEventId).catch(() => null);
