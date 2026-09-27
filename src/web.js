@@ -1279,6 +1279,14 @@ const PAGE = `<!doctype html>
           var observerHistText=Object.keys(observerHist).sort(function(x,y){return Number(x)-Number(y);}).map(function(k){
             return k+' observer'+(Number(k)===1?'':'s')+': '+observerHist[k];
           }).join(' · ');
+          var unclassified=a.unclassifiedCanonicalSample||[];
+          var unclassifiedRows=unclassified.map(function(x){
+            var when=x.occurredAt?new Date(x.occurredAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
+            var label=x.classification==='ambos_nossos'?'AMBOS NOSSOS':'NENHUM NOSSO';
+            return '<tr><td>'+esc(when)+'</td><td>'+esc(x.map||'Mapa desconhecido')+'</td><td><b>'+esc(x.killer||'?')+'</b></td><td><b>'+esc(x.victim||'?')+'</b></td>'
+              +'<td>'+esc((x.killerGuilds||[]).join(', ')||'—')+'</td><td>'+esc((x.victimGuilds||[]).join(', ')||'—')+'</td>'
+              +'<td>'+esc(label)+'</td><td>'+fmtS(x.observedDeathObservers||x.observers||0)+'</td></tr>';
+          }).join('');
           var deathObserver=!!(d.meta&&d.meta.zergDeathObserver);
           var killLabel=deathObserver?'Kills da zerg':'Kills candidatas';
           var deathLabel=deathObserver?'Mortes da zerg':'Mortes candidatas';
@@ -1351,15 +1359,21 @@ const PAGE = `<!doctype html>
             +'<div class="srow">DiedEvent observados brutos: <b>'+(a.rawObservedDeaths||0)+'</b></div>'
             +'<div class="srow">Mortes canônicas vindas de DiedEvent: <b>'+(a.canonicalObservedDeaths==null?'—':a.canonicalObservedDeaths)+'</b></div>'
             +'<div class="srow">Cópias de DiedEvent colapsadas: <b>'+(a.collapsedObservedDeathCopies==null?'—':a.collapsedObservedDeathCopies)+'</b></div>'
+            +'<div class="srow">Cópias causadas por outro observer: <b>'+(a.crossObserverObservedDeathCopies==null?'—':a.crossObserverObservedDeathCopies)+'</b></div>'
+            +'<div class="srow">Duplicações dentro do mesmo observer: <b>'+(a.sameObserverObservedDeathCopies==null?'—':a.sameObserverObservedDeathCopies)+'</b></div>'
             +'<div class="srow">Mortes vistas por mais de 1 observer: <b>'+(a.multiObserverObservedDeaths==null?'—':a.multiObserverObservedDeaths)+'</b></div>'
             +(observerHistText?'<div class="srow">Distribuição por observers: <b>'+esc(observerHistText)+'</b></div>':'')
             +'<div class="srow">Eventos kill/death totais: <b>'+(a.rawKillLikeEvents||0)+'</b></div>'
             +'<div class="srow">Mortes/abates canônicos candidatos: <b>'+(a.uniqueKillCandidates||0)+'</b></div>'
             +'<div class="srow">'+esc(deathObserver?'Kills da nossa zerg':'Kills candidatas da nossa zerg')+': <b>'+(a.ourKillCandidates||0)+'</b></div>'
             +'<div class="srow">'+esc(deathObserver?'Mortes da nossa zerg':'Mortes candidatas da nossa zerg')+': <b>'+(a.ourDeathCandidates||0)+'</b></div>'
+            +'<div class="srow">Canônicos fora de kill/morte nossa: <b>'+(a.unclassifiedCanonicalCandidates==null?'—':a.unclassifiedCanonicalCandidates)+'</b></div>'
+            +'<div class="srow">↳ ambos considerados nossos: <b>'+(a.friendlyCanonicalCandidates==null?'—':a.friendlyCanonicalCandidates)+'</b></div>'
+            +'<div class="srow">↳ nenhum considerado nosso: <b>'+(a.externalCanonicalCandidates==null?'—':a.externalCanonicalCandidates)+'</b></div>'
             +'<div class="srow">Eventos kill/death repetidos colapsados: <b>'+(a.duplicateKillLikeEvents||0)+'</b></div>'
-            +'<div class="note">A mesma morte é fundida por mapa + vítima quando occurred_at ou received_at cai na janela de '+fmtS(Math.round((a.deathDedupWindowMs||30000)/1000))+'s. victimObjectId é usado como evidência forte quando disponível; o killer não é usado como identidade obrigatória da morte.</div>'
+            +'<div class="note">As cópias colapsadas agora são separadas entre observações do mesmo óbito vindas de devices diferentes e reenvios repetidos do próprio device. A mesma morte é fundida por mapa + vítima quando occurred_at ou received_at cai na janela de '+fmtS(Math.round((a.deathDedupWindowMs||30000)/1000))+'s.</div>'
             +'</div></div>'
+            +(unclassifiedRows?'<div class="panel"><h3>🔎 Canônicos fora de kill/morte nossa</h3><div class="note" style="margin-bottom:10px">Casos em que killer e vítima foram ambos classificados como nossos ou ambos como externos. Servem para auditar os eventos que não entram nos totais da zerg.</div><div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Hora</th><th>Mapa</th><th>Killer</th><th>Vítima</th><th>Guild killer</th><th>Guild vítima</th><th>Classificação</th><th>Observers</th></tr></thead><tbody>'+unclassifiedRows+'</tbody></table></div></div>':'')
             +'<div class="panel"><h3>🧮 Auditoria de dano/cura</h3>'
             +'<div class="srow">Deltas brutos: <b>'+fmtS(a.rawCombatDeltaEvents||0)+'</b></div>'
             +'<div class="srow">Deltas preservados na fusão: <b>'+fmtS(a.canonicalCombatDeltaEvents||0)+'</b></div>'
