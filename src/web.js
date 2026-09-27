@@ -1635,6 +1635,7 @@ const PAGE = `<!doctype html>
   setInterval(checkConnection,10000);
   setInterval(function(){ if(authState.member){ loadEvents(); loadNews(); } }, 20000);
 </script>
+<script src="/assets/confirm-party-filter.js?v=1"></script>
 </body>
 </html>`;
 
