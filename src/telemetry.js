@@ -351,6 +351,47 @@ async function getConfirm(db, eventId) {
   const party = await latestPartyMembers(eventId);
   const snapshotRows = party.snapshots || [];
 
+  // Party Snapshot V2: guarda somente IDs textuais dos itens. Os ícones são
+  // renderizados pelo navegador diretamente pelo renderer oficial do Albion.
+  const equipmentByName = new Map();
+  function cleanEquipment(raw) {
+    const src = raw && typeof raw === "object" ? raw : {};
+    const slots = ["mainHand","offHand","head","chest","shoes","bag","cape","mount","potion","food"];
+    const out = {};
+    let count = 0;
+    for (const slot of slots) {
+      const value = String(src[slot] || "").trim();
+      out[slot] = value || null;
+      if (value) count++;
+    }
+    return { equipment: out, itemCount: count };
+  }
+  for (const row of snapshotRows) {
+    const states = row.payload && Array.isArray(row.payload.memberStates)
+      ? row.payload.memberStates
+      : [];
+    for (const state of states) {
+      if (!state || typeof state !== "object") continue;
+      const name = String(state.name || "").trim();
+      const key = normName(name);
+      if (!key) continue;
+      const parsed = cleanEquipment(state.equipment);
+      if (!parsed.itemCount) continue;
+      const candidate = {
+        name,
+        itemPower: Math.max(0, Number(state.itemPower) || 0),
+        inspected: !!state.inspected,
+        equipment: parsed.equipment,
+        occurredAt: row.occurred_at,
+        deviceId: row.device_id
+      };
+      const prev = equipmentByName.get(key);
+      if (!prev || new Date(candidate.occurredAt) > new Date(prev.occurredAt)) {
+        equipmentByName.set(key, candidate);
+      }
+    }
+  }
+
   // Deduplica snapshots idênticos (vários clientes dentro da mesma party enxergam
   // essencialmente a mesma lista). Mantém o snapshot mais recente de cada assinatura.
   const realPartyMap = new Map();
@@ -543,6 +584,10 @@ async function getConfirm(db, eventId) {
       albionSeenAt: alb.seenAt,
       albionStateAt: alb.stateAt,
       albionLastEventAt: alb.lastEventAt,
+      equipment: equipmentByName.get(key)?.equipment || null,
+      itemPower: equipmentByName.get(key)?.itemPower || null,
+      equipmentInspected: equipmentByName.get(key)?.inspected || false,
+      equipmentObservedAt: equipmentByName.get(key)?.occurredAt || null,
       categoria,
       categoriaLabel: CAT_LABEL[categoria],
       st: status,
@@ -568,6 +613,10 @@ async function getConfirm(db, eventId) {
       albion: albionOf(key).st,
       actualParty: actual?.party || null,
       actualPartyLabel: actual?.partyLabel || null,
+      equipment: equipmentByName.get(key)?.equipment || null,
+      itemPower: equipmentByName.get(key)?.itemPower || null,
+      equipmentInspected: equipmentByName.get(key)?.inspected || false,
+      equipmentObservedAt: equipmentByName.get(key)?.occurredAt || null,
       st: "nop",
       obs: actual
         ? `Está na call e no jogo (${actual.partyLabel}), mas não pingou`
@@ -587,6 +636,10 @@ async function getConfirm(db, eventId) {
       albion: albionOf(key).st,
       actualParty: a.party || null,
       actualPartyLabel: a.partyLabel,
+      equipment: equipmentByName.get(key)?.equipment || null,
+      itemPower: equipmentByName.get(key)?.itemPower || null,
+      equipmentInspected: equipmentByName.get(key)?.inspected || false,
+      equipmentObservedAt: equipmentByName.get(key)?.occurredAt || null,
       st: "extra",
       obs: voiceByName.has(key)
         ? `No jogo e na call, sem ping (${a.partyLabel})`
@@ -648,6 +701,7 @@ async function getConfirm(db, eventId) {
     })),
     meta: {
       partySnapshots: snapshotRows.length,
+      equipmentPlayers: equipmentByName.size,
       guildGeneratedAt: gp.generatedAt || null,
       guildOnline: gp.onlineConfirmedCount || 0,
       guildOnlineKnown: gp.onlineKnownCount || 0,

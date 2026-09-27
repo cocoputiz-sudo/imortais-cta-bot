@@ -648,6 +648,20 @@ const PAGE = `<!doctype html>
   .cv2-extra-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   .cv2-extra-player{padding:7px 8px;border:1px solid #202d3d;border-radius:8px;background:#101923;font-size:9px}
   .cv2-count{padding:2px 7px;border-radius:999px;background:#67232a;color:#ffd6d9;font-size:8px;font-weight:900}
+  .cv2-equip-hover{cursor:help;text-decoration:underline;text-decoration-style:dotted;text-decoration-color:#536987;text-underline-offset:3px}
+  .cv2-equip-mark{display:inline-block;margin-left:5px;color:#7487a2;font-size:9px;text-decoration:none}
+  .cv2-equip-pop{position:fixed;z-index:1200;width:382px;max-width:calc(100vw - 20px);padding:12px;border:1px solid #40536f;border-radius:12px;background:linear-gradient(180deg,#121b29,#0a111a);box-shadow:0 18px 55px rgba(0,0,0,.58);pointer-events:none;display:none}
+  .cv2-equip-pop.open{display:block}
+  .cv2-equip-pop-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .cv2-equip-pop-head b{font-size:13px}.cv2-equip-pop-head span{color:#91a0b5;font-size:9px}
+  .cv2-equip-ip{padding:4px 7px;border:1px solid #3d506c;border-radius:7px;background:#0d1622;color:#cdd9e7;font-size:9px;font-weight:800;white-space:nowrap}
+  .cv2-equip-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+  .cv2-equip-item{min-width:0;text-align:center;padding:6px 3px;border:1px solid #24344a;border-radius:8px;background:#0d151f}
+  .cv2-equip-icon{width:48px;height:48px;display:block;margin:0 auto 3px;object-fit:contain;filter:drop-shadow(0 4px 7px rgba(0,0,0,.35))}
+  .cv2-equip-item.empty{opacity:.35}.cv2-equip-item.empty .cv2-equip-icon{visibility:hidden}
+  .cv2-equip-slot{display:block;color:#718198;font-size:7px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cv2-equip-tier{display:block;margin-top:1px;color:#dbe5f0;font-size:8px;font-weight:800}
+  .cv2-equip-foot{margin-top:8px;color:#66778e;font-size:8px}
   @media(max-width:1300px){.cv2-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-layout{grid-template-columns:1fr}.cv2-side{position:static;grid-template-columns:1fr 1fr}}
   @media(max-width:760px){.cv2-head{align-items:flex-start;flex-direction:column}.cv2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:1fr 1fr}.cv2-side{display:block}.cv2-panel{margin-bottom:10px}.cv2-distlegend,.cv2-extra-grid{grid-template-columns:1fr 1fr}}
 
@@ -1109,10 +1123,32 @@ const PAGE = `<!doctype html>
         +'<span><i style="background:#4b2d73;border:1px solid #8052ba"></i>PT errada</span>'
         +'<span><i style="background:#1c2632;border:1px solid #334052"></i>sem dado</span></div>';
 
+      var equipmentByPlayer={};
+      allRows.forEach(function(x){
+        if(x&&x.equipment){
+          equipmentByPlayer[String(x.n||'').trim().toLowerCase()]={
+            name:x.n,
+            itemPower:x.itemPower,
+            inspected:!!x.equipmentInspected,
+            observedAt:x.equipmentObservedAt,
+            equipment:x.equipment
+          };
+        }
+      });
+
+      function attr(s){
+        return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+      }
+
       var tableRows=allRows.map(function(x){
         var planned=x.plannedParty!=null?('PT '+x.plannedParty):'Reserva';
         var actual=x.actualPartyLabel||'Não visto';
-        return '<tr><td><span class="cv2-player">'+esc(x.n)+'</span><br><span class="cv2-muted">'+esc(x.arma||'')+'</span></td>'
+        var equipKey=String(x.n||'').trim().toLowerCase();
+        var hasEquip=!!equipmentByPlayer[equipKey];
+        var playerName=hasEquip
+          ? '<span class="cv2-player cv2-equip-hover" data-equip-player="'+attr(equipKey)+'">'+esc(x.n)+'<span class="cv2-equip-mark">▦</span></span>'
+          : '<span class="cv2-player">'+esc(x.n)+'</span>';
+        return '<tr><td>'+playerName+'<br><span class="cv2-muted">'+esc(x.arma||'')+'</span></td>'
           +'<td>'+esc(x.slot==null?'—':(''+x.slot))+'</td><td>'+esc(planned)+'</td>'
           +'<td class="'+(x.st==='wrong'?'cv2-purple':x.game?'cv2-good':'cv2-warn')+'">'+esc(actual)+'</td>'
           +'<td>'+discordPill(!!x.discord)+'</td><td>'+albionPill(x.albion||'unknown')+'</td><td>'+statusPill(x)+'</td>'
@@ -1180,6 +1216,65 @@ const PAGE = `<!doctype html>
 
       var html='<div class="cv2-shell">'+head+kpis+'<div class="cv2-layout"><div class="cv2-main">'+dist+parties+table+extras+'</div><aside class="cv2-side">'+side+'</aside></div></div>';
       setView('view-confirm',html);
+
+      function equipmentTier(uniqueName){
+        var id=String(uniqueName||'');
+        var t=/^T(\d+)_/i.exec(id);
+        var e=/@(\d+)/.exec(id);
+        return t?('T'+t[1]+'.'+(e?e[1]:'0')):'';
+      }
+      function equipmentIconUrl(uniqueName){
+        return 'https://render.albiononline.com/v1/item/'+encodeURIComponent(String(uniqueName||''));
+      }
+      function ensureEquipmentPopover(){
+        var pop=document.getElementById('cv2-equipment-popover');
+        if(pop) return pop;
+        pop=document.createElement('div');
+        pop.id='cv2-equipment-popover';
+        pop.className='cv2-equip-pop';
+        document.body.appendChild(pop);
+        return pop;
+      }
+      function showEquipmentPopover(anchor,state){
+        if(!state||!state.equipment) return;
+        var pop=ensureEquipmentPopover();
+        var slots=[
+          ['Arma','mainHand'],['Off-hand','offHand'],['Capacete','head'],['Peito','chest'],['Bota','shoes'],
+          ['Capa','cape'],['Bolsa','bag'],['Poção','potion'],['Food','food'],['Montaria','mount']
+        ];
+        var items=slots.map(function(s){
+          var id=state.equipment[s[1]]||'';
+          if(!id) return '<div class="cv2-equip-item empty"><img class="cv2-equip-icon" alt=""><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">—</span></div>';
+          return '<div class="cv2-equip-item" title="'+attr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
+        }).join('');
+        var ip=Number(state.itemPower)||0;
+        var observed=state.observedAt?age(state.observedAt):'snapshot atual';
+        pop.innerHTML='<div class="cv2-equip-pop-head"><div><b>'+esc(state.name||'Jogador')+'</b><br><span>equipamento observado pelo Combat Client</span></div>'
+          +(ip>0?'<div class="cv2-equip-ip">IP '+Math.round(ip)+'</div>':'')+'</div>'
+          +'<div class="cv2-equip-grid">'+items+'</div>'
+          +'<div class="cv2-equip-foot">Snapshot '+esc(observed)+' · apenas visualização do equipamento detectado</div>';
+        pop.classList.add('open');
+        var rect=anchor.getBoundingClientRect();
+        var w=Math.min(382,window.innerWidth-20);
+        var left=rect.right+10;
+        if(left+w>window.innerWidth-10) left=Math.max(10,rect.left-w-10);
+        var top=rect.top-8;
+        var estimatedHeight=270;
+        if(top+estimatedHeight>window.innerHeight-10) top=Math.max(10,window.innerHeight-estimatedHeight-10);
+        pop.style.left=left+'px';
+        pop.style.top=top+'px';
+      }
+      function hideEquipmentPopover(){
+        var pop=document.getElementById('cv2-equipment-popover');
+        if(pop) pop.classList.remove('open');
+      }
+      Array.prototype.forEach.call(document.querySelectorAll('[data-equip-player]'),function(el){
+        el.onmouseenter=function(){
+          var key=el.getAttribute('data-equip-player')||'';
+          showEquipmentPopover(el,equipmentByPlayer[key]);
+        };
+        el.onmouseleave=hideEquipmentPopover;
+      });
     }).catch(function(e){
       setView('view-confirm','<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>');
     });
