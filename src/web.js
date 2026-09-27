@@ -563,6 +563,94 @@ const PAGE = `<!doctype html>
   .toprow .bar{ flex:0 0 120px; height:6px; background:#222a35; border-radius:6px; overflow:hidden; } .toprow .bar i{ display:block; height:100%; background:linear-gradient(90deg,var(--red),var(--amber)); }
   .split{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   @media(max-width:1050px){ .statgrid{ grid-template-columns:repeat(2,1fr);} .split{ grid-template-columns:1fr;} }
+
+  /* ===== CTA validation dashboard v2 ===== */
+  .cv2-shell{display:grid;gap:12px}
+  .cv2-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;background:linear-gradient(180deg,#111a27,#0d151f);border:1px solid var(--line);border-radius:13px}
+  .cv2-title{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .cv2-title h2{margin:0;font-family:var(--disp);font-size:22px}
+  .cv2-title .cta{color:var(--gold);font-size:13px;font-weight:800}
+  .cv2-sub{margin-top:5px;color:var(--muted);font-size:11px}
+  .cv2-live{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;padding:7px 10px;border:1px solid #245b3e;border-radius:999px;background:#0d2419;color:#8ce5ad;font-size:10px;font-weight:800}
+  .cv2-live i{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(66,199,122,.65)}
+  .cv2-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+  .cv2-kpi{min-width:0;padding:12px 13px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#111923,#0d131b)}
+  .cv2-kpi .k{color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+  .cv2-kpi .v{margin-top:4px;font-family:var(--disp);font-size:27px;font-weight:900}
+  .cv2-kpi .s{margin-top:2px;color:var(--faint);font-size:9px}
+  .cv2-kpi.good{border-color:#22583b}.cv2-kpi.good .v{color:#62db91}
+  .cv2-kpi.bad{border-color:#68292f}.cv2-kpi.bad .v{color:#ff747d}
+  .cv2-kpi.warn{border-color:#66501f}.cv2-kpi.warn .v{color:#ecc45f}
+  .cv2-kpi.purple{border-color:#493169}.cv2-kpi.purple .v{color:#b88aff}
+  .cv2-kpi.blue{border-color:#294d78}.cv2-kpi.blue .v{color:#76adff}
+  .cv2-minibar{height:5px;margin-top:8px;overflow:hidden;border-radius:999px;background:#202a36}
+  .cv2-minibar i{display:block;height:100%;border-radius:999px;background:currentColor}
+  .cv2-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;align-items:start}
+  .cv2-main{min-width:0}
+  .cv2-side{min-width:0;position:sticky;top:78px;display:grid;gap:10px}
+  .cv2-panel{overflow:hidden;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#101821,#0d131a)}
+  .cv2-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;border-bottom:1px solid var(--line)}
+  .cv2-panel-head h3{margin:0;font-size:12px}
+  .cv2-panel-head small{color:var(--muted);font-size:9px}
+  .cv2-panel-head.danger{border-bottom-color:#65272d;background:linear-gradient(180deg,rgba(103,25,31,.45),rgba(58,15,19,.28))}
+  .cv2-distribution{padding:13px 14px}
+  .cv2-segmentbar{display:flex;height:12px;border-radius:999px;overflow:hidden;background:#202a37}
+  .cv2-segmentbar i{display:block;height:100%}
+  .cv2-distlegend{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:11px}
+  .cv2-distitem{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center;color:var(--muted);font-size:9px}
+  .cv2-distitem i{width:8px;height:8px;border-radius:50%}
+  .cv2-distitem b{color:var(--text);font-size:10px}
+  .cv2-party-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-top:10px}
+  .cv2-party{padding:11px;border:1px solid var(--line);border-radius:11px;background:linear-gradient(180deg,#111923,#0d131b)}
+  .cv2-party.problem{border-color:#573034}
+  .cv2-party-head{display:flex;align-items:flex-start;justify-content:space-between;gap:7px}
+  .cv2-party-name{font-family:var(--disp);font-size:17px;font-weight:900}
+  .cv2-party-score{font-size:14px;font-weight:900}
+  .cv2-party-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:4px;color:var(--muted);font-size:8px}
+  .cv2-ring-wrap{display:flex;justify-content:center;margin:8px 0}
+  .cv2-ring{width:68px;height:68px;border-radius:50%;display:grid;place-items:center;position:relative}
+  .cv2-ring:after{content:"";position:absolute;inset:7px;border-radius:50%;background:#101821;border:1px solid #26354a}
+  .cv2-ring b{z-index:1;font-size:14px}
+  .cv2-slotmap{display:grid;grid-template-columns:repeat(10,1fr);gap:3px}
+  .cv2-slot{position:relative;aspect-ratio:1;border-radius:3px;border:1px solid #334052;background:#1c2632}
+  .cv2-slot.ok{border-color:#2d9c5c;background:#1d7446}
+  .cv2-slot.miss{border-color:#a77b26;background:#614817}
+  .cv2-slot.off{border-color:#b23741;background:#71242c}
+  .cv2-slot.wrong{border-color:#8052ba;background:#4b2d73}
+  .cv2-slot.empty{opacity:.4}
+  .cv2-slot:hover:after{content:attr(data-tip);position:absolute;z-index:30;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);padding:5px 7px;border:1px solid var(--line2);border-radius:6px;background:#080c12;color:#dce4ee;font-size:9px;white-space:nowrap;pointer-events:none;box-shadow:0 8px 20px rgba(0,0,0,.42)}
+  .cv2-legend{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 10px;color:var(--muted);font-size:8px}
+  .cv2-legend span{display:inline-flex;align-items:center;gap:4px}.cv2-legend i{width:7px;height:7px;border-radius:2px}
+  .cv2-tablebox{overflow:auto}
+  .cv2-table{width:100%;min-width:840px;border-collapse:collapse;font-size:10px}
+  .cv2-table th{text-align:left;padding:8px 9px;color:var(--muted);font-size:8px;letter-spacing:.06em;background:#121b27;border-bottom:1px solid var(--line)}
+  .cv2-table td{padding:8px 9px;border-bottom:1px solid #1a2430;vertical-align:middle}
+  .cv2-table tr:last-child td{border-bottom:0}.cv2-table tbody tr:hover td{background:#131c27}
+  .cv2-player{font-weight:800}.cv2-muted{color:var(--muted)}.cv2-good{color:#7fe3a4}.cv2-warn{color:#edc463}.cv2-bad{color:#ff7f87}.cv2-purple{color:#c29bff}
+  .cv2-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border-radius:999px;border:1px solid var(--line);font-size:8px;font-weight:900;white-space:nowrap}
+  .cv2-pill.good{color:#7fe3a4;border-color:#25593b;background:#0d281a}
+  .cv2-pill.warn{color:#edc463;border-color:#68521f;background:#2a210d}
+  .cv2-pill.bad{color:#ff7f87;border-color:#672a30;background:#2b1115}
+  .cv2-pill.purple{color:#c29bff;border-color:#4f3473;background:#21162f}
+  .cv2-pill.neutral{color:#a6b2c2}
+  .cv2-attention{display:grid;grid-template-columns:29px minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border-bottom:1px solid #1a2430}
+  .cv2-attention:last-child{border-bottom:0}
+  .cv2-attention-icon{width:28px;height:28px;display:grid;place-items:center;border-radius:8px;background:#281419;color:#ff737d;font-weight:900}
+  .cv2-attention b{display:block;font-size:10px}.cv2-attention small{display:block;margin-top:2px;color:var(--muted);font-size:8px;line-height:1.3}
+  .cv2-severity{padding:3px 5px;border:1px solid #69272d;border-radius:6px;background:#2c1115;color:#ff7e87;font-size:7px;font-weight:900}
+  .cv2-severity.medium{border-color:#69531f;background:#2b220e;color:#ebc567}
+  .cv2-indicator{padding:10px 11px;border-bottom:1px solid #1a2430}.cv2-indicator:last-child{border-bottom:0}
+  .cv2-indicator-top{display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:9px;color:var(--muted)}
+  .cv2-indicator-top b{color:var(--text);font-size:13px}
+  .cv2-indicator-bar{height:5px;margin-top:7px;overflow:hidden;border-radius:999px;background:#202b38}.cv2-indicator-bar i{display:block;height:100%;border-radius:999px}
+  .cv2-extras{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+  .cv2-extra{padding:11px}.cv2-extra h3{margin:0 0 8px;color:var(--muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+  .cv2-extra-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .cv2-extra-player{padding:7px 8px;border:1px solid #202d3d;border-radius:8px;background:#101923;font-size:9px}
+  .cv2-count{padding:2px 7px;border-radius:999px;background:#67232a;color:#ffd6d9;font-size:8px;font-weight:900}
+  @media(max-width:1300px){.cv2-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-layout{grid-template-columns:1fr}.cv2-side{position:static;grid-template-columns:1fr 1fr}}
+  @media(max-width:760px){.cv2-head{align-items:flex-start;flex-direction:column}.cv2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:1fr 1fr}.cv2-side{display:block}.cv2-panel{margin-bottom:10px}.cv2-distlegend,.cv2-extra-grid{grid-template-columns:1fr 1fr}}
+
 </style>
 </head>
 <body>
@@ -900,113 +988,200 @@ const PAGE = `<!doctype html>
   function renderConfirm(silent){
     if(!current){ noCta('view-confirm','🎯 Validação do CTA'); return; }
     if(!silent) loading('view-confirm','🎯 Validação do CTA');
+
     fetchTelemetry('/api/telemetry/confirm?event='+encodeURIComponent(current)).then(function(d){
-      var r=d.resumo||{}, m=d.meta||{};
-      var age='';
-      if(m.latestPartyAt){
-        var sec=Math.max(0,Math.round((Date.now()-Number(m.latestPartyAt))/1000));
-        age=sec<60?(sec+'s atrás'):(Math.floor(sec/60)+'min atrás');
+      var r=d.resumo||{}, m=d.meta||{}, evt=d.event||{};
+      var groups=d.issuesByParty||[];
+      var allRows=[];
+      (d.pts||[]).forEach(function(g){ (g.linhas||[]).forEach(function(x){ allRows.push(x); }); });
+
+      function clamp(v){ return Math.max(0,Math.min(100,Number(v)||0)); }
+      function pct(v,total){ return total?clamp(Math.round((Number(v)||0)/total*100)):0; }
+      function age(ts){
+        if(!ts) return 'sem snapshot';
+        var n=Number(ts), t=Number.isFinite(n)?n:new Date(ts).getTime();
+        if(!Number.isFinite(t)) return 'sem snapshot';
+        var sec=Math.max(0,Math.round((Date.now()-t)/1000));
+        if(sec<60) return sec+'s atrás';
+        if(sec<3600) return Math.floor(sec/60)+'min atrás';
+        return Math.floor(sec/3600)+'h atrás';
       }
-      var evt=d.event||{};
-      var html=liveBadge((m.partyPlayers||0)+' jogadores detectados · '+(m.realParties||0)+' PTs · '+(m.discordPlayers||0)+' na call')
-        +'<div class="modhead">🎯 Validação do CTA · CTA '+esc(evt.time||'?')+' UTC <span style="font-size:11px;color:var(--muted)">#'+esc(evt.id||current)+'</span></div>'
-        +'<div class="preview"><b>ESTADO DO JOGO:</b> '+(m.partyPlayers||0)+' jogadores conhecidos'+(age?' · última mudança '+age:'')+'. A ausência de novos pacotes não zera esta informação; ela só muda quando o Combat Client envia outro estado da party.</div>'
-        +'<div class="statgrid">'
-        +'<div class="stat g"><div class="k">Formação correta</div><div class="v">'+(r.prontidao||0)+'%</div></div>'
-        +'<div class="stat b"><div class="k">Na PT certa</div><div class="v">'+(r.corretos||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">Na PT errada</div><div class="v">'+(r.ptErrada||0)+'</div></div>'
-        +'<div class="stat r"><div class="k">Não visto em PT</div><div class="v">'+(r.foraParty||0)+'</div></div>'
-        +'</div>'
-        +'<div class="statgrid">'
-        +'<div class="stat a"><div class="k">Na call Discord</div><div class="v">'+(r.discord||0)+'</div></div>'
-        +'<div class="stat b"><div class="k">Detectados nas PTs</div><div class="v">'+(r.jogo||0)+'</div></div>'
-        +'<div class="stat a"><div class="k">Na call sem inscrição</div><div class="v">'+(r.discordSemPing||0)+'</div></div>'
-        +'<div class="stat p"><div class="k">Na PT sem escala</div><div class="v">'+(r.jogoSemEscala||0)+'</div></div>'
+      function metric(cls,title,value,sub,progress){
+        return '<div class="cv2-kpi '+cls+'"><div class="k">'+esc(title)+'</div><div class="v">'+esc(value)+'</div><div class="s">'+esc(sub||'')+'</div>'
+          +(progress==null?'':'<div class="cv2-minibar" style="color:currentColor"><i style="width:'+clamp(progress)+'%"></i></div>')+'</div>';
+      }
+      function albionPill(st){
+        if(st==='online') return '<span class="cv2-pill good">ALBION ON</span>';
+        if(st==='offline') return '<span class="cv2-pill bad">ALBION OFF</span>';
+        return '<span class="cv2-pill neutral">ALBION —</span>';
+      }
+      function discordPill(flag){
+        return flag?'<span class="cv2-pill good">NA CALL</span>':'<span class="cv2-pill warn">FORA DA CALL</span>';
+      }
+      function statusPill(x){
+        if(x.categoria==='pronto') return '<span class="cv2-pill good">PRONTO</span>';
+        if(x.categoria==='pt_errada') return '<span class="cv2-pill purple">PT ERRADA</span>';
+        if(x.categoria==='off_pingou') return '<span class="cv2-pill bad">PINGOU · OFF</span>';
+        if(x.categoria==='fora_pt') return '<span class="cv2-pill warn">FORA DA PT</span>';
+        if(x.categoria==='online_fora_call') return '<span class="cv2-pill warn">FORA DA CALL</span>';
+        return '<span class="cv2-pill neutral">INDEFINIDO</span>';
+      }
+      function textClass(x){
+        if(x.categoria==='pronto') return 'cv2-good';
+        if(x.categoria==='pt_errada') return 'cv2-purple';
+        if(x.categoria==='off_pingou') return 'cv2-bad';
+        if(x.categoria==='fora_pt'||x.categoria==='online_fora_call') return 'cv2-warn';
+        return 'cv2-muted';
+      }
+      function partyStats(g){
+        var correct=(g.correct||[]).length, missing=(g.missing||[]).length, intruders=(g.intruders||[]).length;
+        var planned=correct+missing;
+        return {correct:correct,missing:missing,intruders:intruders,planned:planned,score:planned?Math.round(correct/planned*100):0,problems:missing+intruders};
+      }
+      function slotState(x){
+        if(!x) return 'empty';
+        if(x.categoria==='off_pingou'||x.albion==='offline') return 'off';
+        if(x.st==='wrong'||x.categoria==='pt_errada') return 'wrong';
+        if(x.st==='ok') return 'ok';
+        return 'miss';
+      }
+      function slotMap(g){
+        var bySlot={};
+        (g.correct||[]).forEach(function(x){ if(x.slot!=null) bySlot[Number(x.slot)]=x; });
+        (g.missing||[]).forEach(function(x){ if(x.slot!=null&&!bySlot[Number(x.slot)]) bySlot[Number(x.slot)]=x; });
+        var out='<div class="cv2-slotmap">';
+        for(var i=1;i<=20;i++){
+          var x=bySlot[i]||null;
+          var tip=x?('Slot '+i+' · '+x.n+' · '+(x.categoriaLabel||x.obs||'')):('Slot '+i+' · sem dado');
+          out+='<i class="cv2-slot '+slotState(x)+'" data-tip="'+esc(tip)+'"></i>';
+        }
+        return out+'</div>';
+      }
+      function ringColor(score){
+        if(score>=90) return '#42c77a';
+        if(score>=80) return '#4a97ff';
+        if(score>=70) return '#e2b95e';
+        return '#ef6672';
+      }
+
+      var total=Math.max(Number(r.inscritos)||0,1);
+      var head='<div class="cv2-head"><div><div class="cv2-title"><h2>🎯 Validação do CTA</h2><span class="cta">CTA '+esc(evt.time||'?')+' UTC · #'+esc(evt.id||current)+'</span></div>'
+        +'<div class="cv2-sub">Escala x party observada x Discord x estado do Albion · último estado de party '+esc(age(m.latestPartyAt))+'</div></div>'
+        +'<div class="cv2-live"><i></i> telemetria conectada</div></div>';
+
+      var kpis='<div class="cv2-kpis">'
+        +metric('purple','Prontidão',String(r.prontidao||0)+'%',String(r.corretos||0)+' de '+String(r.inscritos||0)+' inscritos na PT correta',r.prontidao||0)
+        +metric('good','Na PT correta',r.corretos||0,'posição confirmada',pct(r.corretos,total))
+        +metric('bad','PT errada',r.ptErrada||0,'precisam trocar de PT',pct(r.ptErrada,total))
+        +metric('warn','Não vistos em PT',r.foraParty||0,'sem party observada',pct(r.foraParty,total))
+        +metric('blue','Na call Discord',r.discord||0,'presença na call de preparação',pct(r.discord,total))
         +'</div>';
 
-      function pill(cls,text){ return '<span class="pill '+cls+'">'+text+'</span>'; }
-      function albionPill(a){ if(a==='online') return pill('ok','ALBION ON'); if(a==='offline') return pill('miss','ALBION OFF'); return '<span class="pill" style="color:var(--faint);border-color:#2a3550">ALBION —</span>'; }
-      function catInfo(c){ var M={pronto:['#35c46a','PRONTO'],online_fora_call:['#e2b95e','ONLINE, FORA DA CALL'],fora_pt:['#e08a3c','NA CALL, FORA DA PT'],off_pingou:['#d9534f','PINGOU, OFFLINE'],pt_errada:['#9a6cff','PT ERRADA'],indefinido:['#8a94a6','—']}; return M[c]||M.indefinido; }
-      function playerLine(x,kind){
-        var slot=x.slot?('<span class="num">'+('0'+x.slot).slice(-2)+'</span>'):'<span class="num">--</span>';
-        var status='', detail='';
-        if(kind==='missing'){ status=pill('miss','NÃO VISTO'); detail=x.game&&x.actualPartyLabel?('visto '+esc(x.actualPartyLabel)):'não consta no último estado conhecido'; }
-        else if(kind==='intruder'){ status=pill('div','PT ERRADA'); detail=x.plannedParty?('deveria estar PT '+x.plannedParty):'não deveria estar nesta PT'; }
-        else { status=pill('ok','CORRETO'); detail='posição confirmada'; }
-        var ci=catInfo(x.categoria||'indefinido');
-        var cat='<span class="catdot" style="background:'+ci[0]+'" title="'+esc(x.categoriaLabel||ci[1])+'"></span>';
-        return '<div class="auditline '+kind+'">'+slot+cat+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+status+albionPill(x.albion||'unknown')+'</span><span class="auditdetail">'+detail+'</span></div>';
-      }
-      function partyColumn(title,arr,kind,empty){
-        return '<div><div class="audittitle">'+title+'</div>'+((arr||[]).length?(arr||[]).map(function(x){return playerLine(x,kind);}).join(''):'<div class="auditok">'+empty+'</div>')+'</div>';
-      }
+      var residual=Math.max(0,total-(Number(r.corretos)||0)-(Number(r.ptErrada)||0)-(Number(r.foraParty)||0));
+      var dist='<div class="cv2-panel"><div class="cv2-panel-head"><h3>Status de validação do CTA</h3><small>'+esc(String(r.inscritos||0))+' inscritos</small></div>'
+        +'<div class="cv2-distribution"><div class="cv2-segmentbar">'
+        +'<i style="width:'+pct(r.corretos,total)+'%;background:#42c77a"></i>'
+        +'<i style="width:'+pct(r.ptErrada,total)+'%;background:#9a6cff"></i>'
+        +'<i style="width:'+pct(r.foraParty,total)+'%;background:#e2b95e"></i>'
+        +'<i style="width:'+pct(residual,total)+'%;background:#53637a"></i></div>'
+        +'<div class="cv2-distlegend">'
+        +'<div class="cv2-distitem"><i style="background:#42c77a"></i><span>PT correta</span><b>'+esc(r.corretos||0)+'</b></div>'
+        +'<div class="cv2-distitem"><i style="background:#9a6cff"></i><span>PT errada</span><b>'+esc(r.ptErrada||0)+'</b></div>'
+        +'<div class="cv2-distitem"><i style="background:#e2b95e"></i><span>Não visto</span><b>'+esc(r.foraParty||0)+'</b></div>'
+        +'<div class="cv2-distitem"><i style="background:#53637a"></i><span>Outros estados</span><b>'+esc(residual)+'</b></div>'
+        +'</div></div></div>';
 
-      var groups=d.issuesByParty||[];
-      // ----- VISAO DE COMANDO: agrega divergencias de TODAS as PTs no topo, por urgencia -----
-      (function(){
-        var atencao=[];
-        (groups||[]).forEach(function(g){
-          (g.intruders||[]).forEach(function(x){ atencao.push({x:x, kind:'intruder', pt:g.party}); });
-          (g.missing||[]).forEach(function(x){ atencao.push({x:x, kind:'missing', pt:g.party}); });
-        });
-        function peso(it){
-          var c=(it.x&&it.x.categoria)||'';
-          if(c==='off_pingou') return 0;
-          if(it.kind==='intruder'||c==='pt_errada') return 1;
-          if(c==='fora_pt') return 2;
-          return 3;
-        }
-        atencao.sort(function(a,b){ return peso(a)-peso(b) || ((a.x.slot||99)-(b.x.slot||99)); });
-        if(atencao.length){
-          function linhaAtencao(it){
-            var x=it.x, ci=catInfo(x.categoria||'indefinido');
-            var cat='<span class="catdot" style="background:'+ci[0]+'" title="'+esc(x.categoriaLabel||ci[1])+'"></span>';
-            var st=(it.kind==='intruder')?pill('div','PT ERRADA'):pill('miss','NAO VISTO');
-            var alvo=(it.kind==='intruder')?('deveria estar PT '+(x.plannedParty||'?')):('escalado PT '+it.pt);
-            var vis=(x.game&&x.actualPartyLabel)?('- visto '+esc(x.actualPartyLabel)):'';
-            return '<div class="auditline '+it.kind+'"><span class="num">PT'+it.pt+'</span>'+cat+'<b>'+esc(x.n)+'</b><span class="auditstatus">'+st+albionPill(x.albion||'unknown')+'</span><span class="auditdetail">'+esc(alvo)+' '+vis+'</span></div>';
-          }
-          html+='<div class="panel auditpt" style="border-color:#7a2a2a"><div class="audithead"><h3>\u26A0\uFE0F Precisa de atencao</h3><span class="auditbad">'+atencao.length+' jogador(es)</span></div>'
-            +'<div class="note" style="margin:2px 0 8px">Ordenado por urgencia: pingou e offline, depois PT errada, depois fora da PT. As PTs completas seguem abaixo.</div>'
-            +atencao.map(linhaAtencao).join('')
-            +'</div>';
-        }
-      })();
-      var gAge='';
-      if(m.guildGeneratedAt){ var gsec=Math.max(0,Math.round((Date.now()-new Date(m.guildGeneratedAt).getTime())/1000)); gAge=gsec<60?(gsec+'s'):(Math.floor(gsec/60)+'min'); }
-      html+='<div class="catleg"><span><i style="background:#35c46a"></i>Pronto</span><span><i style="background:#e2b95e"></i>Online, fora da call</span><span><i style="background:#e08a3c"></i>Na call, fora da PT</span><span><i style="background:#d9534f"></i>Pingou, offline</span><span><i style="background:#9a6cff"></i>PT errada</span></div>';
-      if(m.guildGeneratedAt) html+='<div class="preview"><b>PRESENÇA DA GUILDA:</b> '+(m.guildOnline||0)+' online confirmados · '+(m.guildOnlineStale||0)+' online não confirmados · '+(m.guildActiveObservers||0)+' observer(s) ativo(s) · '+(m.guildRecentStates||0)+' estados recentes'+(gAge?' · último dado '+gAge+' atrás':'')+'. Estado stale não é tratado como OFFLINE.</div>';
-      if(!groups.length){
-        html+='<div class="panel"><div class="empty-note">Ainda não há uma party observada para comparar com a escala.</div></div>';
-      } else {
-        groups.forEach(function(g){
-          var missing=g.missing||[], wrong=g.intruders||[], correct=g.correct||[];
-          var problems=missing.length+wrong.length;
-          html+='<div class="panel auditpt"><div class="audithead"><h3>PT '+g.party+'</h3><span class="'+(problems?'auditbad':'auditgood')+'">'+correct.length+' corretos · '+problems+' divergências</span></div>'
-            +'<div class="auditsplit">'
-            +partyColumn('Slots 01–10',correct.filter(function(x){return (x.slot||99)<=10;}),'correct','Nenhum confirmado')
-            +partyColumn('Slots 11–20',correct.filter(function(x){return (x.slot||99)>10;}),'correct','Nenhum confirmado')
-            +'</div>';
-          if(problems){
-            html+='<div class="auditsplit">'
-              +partyColumn('Não vistos na PT',missing,'missing','Ninguém')
-              +partyColumn('Jogadores na PT errada',wrong,'intruder','Ninguém')
-              +'</div>';
-          }
-          html+='</div>';
-        });
-      }
+      var partyCards='';
+      groups.forEach(function(g){
+        var s=partyStats(g), color=ringColor(s.score);
+        partyCards+='<div class="cv2-party '+(s.problems?'problem':'')+'"><div class="cv2-party-head"><div><div class="cv2-party-name">PT '+g.party+'</div>'
+          +'<div class="cv2-party-meta"><span>'+s.correct+' corretos</span><span>'+s.missing+' não vistos</span><span>'+s.intruders+' intrusos</span></div></div>'
+          +'<div class="cv2-party-score" style="color:'+color+'">'+s.correct+'/20</div></div>'
+          +'<div class="cv2-ring-wrap"><div class="cv2-ring" style="background:conic-gradient('+color+' '+clamp(s.score)+'%,#202b3a 0)"><b>'+s.score+'%</b></div></div>'
+          +slotMap(g)+'</div>';
+      });
+      if(!partyCards) partyCards='<div class="empty-note">Ainda não há party observada suficiente para montar o painel das PTs.</div>';
 
+      var parties='<div class="cv2-party-grid">'+partyCards+'</div>'
+        +'<div class="cv2-legend"><span><i style="background:#1d7446;border:1px solid #2d9c5c"></i>correto</span>'
+        +'<span><i style="background:#614817;border:1px solid #a77b26"></i>não visto</span>'
+        +'<span><i style="background:#71242c;border:1px solid #b23741"></i>offline</span>'
+        +'<span><i style="background:#4b2d73;border:1px solid #8052ba"></i>PT errada</span>'
+        +'<span><i style="background:#1c2632;border:1px solid #334052"></i>sem dado</span></div>';
+
+      var tableRows=allRows.map(function(x){
+        var planned=x.plannedParty!=null?('PT '+x.plannedParty):'Reserva';
+        var actual=x.actualPartyLabel||'Não visto';
+        return '<tr><td><span class="cv2-player">'+esc(x.n)+'</span><br><span class="cv2-muted">'+esc(x.arma||'')+'</span></td>'
+          +'<td>'+esc(x.slot==null?'—':(''+x.slot))+'</td><td>'+esc(planned)+'</td>'
+          +'<td class="'+(x.st==='wrong'?'cv2-purple':x.game?'cv2-good':'cv2-warn')+'">'+esc(actual)+'</td>'
+          +'<td>'+discordPill(!!x.discord)+'</td><td>'+albionPill(x.albion||'unknown')+'</td><td>'+statusPill(x)+'</td>'
+          +'<td class="'+textClass(x)+'">'+esc(x.obs||'—')+'</td></tr>';
+      }).join('');
+      if(!tableRows) tableRows='<tr><td colspan="8" class="cv2-muted" style="text-align:center;padding:22px">Nenhum jogador inscrito neste CTA.</td></tr>';
+
+      var table='<div class="cv2-panel"><div class="cv2-panel-head"><h3>Jogadores inscritos</h3><small>estado consolidado</small></div><div class="cv2-tablebox"><table class="cv2-table">'
+        +'<thead><tr><th>JOGADOR</th><th>SLOT</th><th>ESCALA</th><th>JOGO</th><th>DISCORD</th><th>ALBION</th><th>ESTADO</th><th>OBSERVAÇÃO</th></tr></thead>'
+        +'<tbody>'+tableRows+'</tbody></table></div></div>';
+
+      var attention=[], seen={};
+      function addAttention(key,item){ if(seen[key]) return; seen[key]=true; attention.push(item); }
+      groups.forEach(function(g){
+        (g.intruders||[]).forEach(function(x){
+          addAttention('wrong:'+String(x.n).toLowerCase(),{icon:'↔',title:x.n+' está na PT errada',detail:'Está '+(x.actualPartyLabel||('PT '+g.party))+' · deveria PT '+(x.plannedParty||'?'),severity:'CRÍTICO',weight:0});
+        });
+        (g.missing||[]).forEach(function(x){
+          if(x.actualParty!=null&&x.plannedParty!=null&&Number(x.actualParty)!==Number(x.plannedParty)) return;
+          if(x.categoria==='off_pingou'||x.albion==='offline'){
+            addAttention('off:'+String(x.n).toLowerCase(),{icon:'✖',title:x.n+' pingou e está offline',detail:'Escalado para PT '+g.party,severity:'CRÍTICO',weight:0});
+          }else{
+            addAttention('missing:'+String(x.n).toLowerCase(),{icon:'!',title:x.n+' não foi visto na PT',detail:'Escalado para PT '+g.party,severity:'ALTO',weight:1});
+          }
+        });
+      });
+      allRows.forEach(function(x){
+        if(x.categoria==='online_fora_call'){
+          addAttention('call:'+String(x.n).toLowerCase(),{icon:'🎧',title:x.n+' está fora da call',detail:x.actualPartyLabel?('Detectado em '+x.actualPartyLabel):'Online no Albion',severity:'MÉDIO',weight:2});
+        }else if(x.categoria==='fora_pt'){
+          addAttention('forapt:'+String(x.n).toLowerCase(),{icon:'!',title:x.n+' está na call, mas fora da PT',detail:'Escalado para PT '+(x.plannedParty||'?'),severity:'ALTO',weight:1});
+        }
+      });
+      attention.sort(function(a,b){ return a.weight-b.weight||String(a.title).localeCompare(String(b.title)); });
+
+      var attentionHtml=attention.length?attention.slice(0,12).map(function(it){
+        return '<div class="cv2-attention"><div class="cv2-attention-icon">'+esc(it.icon)+'</div><div><b>'+esc(it.title)+'</b><small>'+esc(it.detail)+'</small></div>'
+          +'<span class="cv2-severity '+(it.severity==='MÉDIO'?'medium':'')+'">'+esc(it.severity)+'</span></div>';
+      }).join(''):'<div class="auditok" style="padding:14px">✅ Nenhuma divergência crítica detectada.</div>';
+
+      function indicator(label,value,color){
+        return '<div class="cv2-indicator"><div class="cv2-indicator-top"><span>'+esc(label)+'</span><b>'+esc(value||0)+'</b></div>'
+          +'<div class="cv2-indicator-bar"><i style="width:'+pct(value,total)+'%;background:'+color+'"></i></div></div>';
+      }
+      var side='<div class="cv2-panel"><div class="cv2-panel-head danger"><h3>⚠ Precisa de atenção</h3><span class="cv2-count">'+attention.length+'</span></div>'+attentionHtml+'</div>'
+        +'<div class="cv2-panel"><div class="cv2-panel-head"><h3>Indicadores gerais</h3><small>'+esc(String(r.inscritos||0))+' inscritos</small></div>'
+        +indicator('Na call Discord',r.discord||0,'#4a97ff')
+        +indicator('Detectados nas PTs',r.jogo||0,'#42c77a')
+        +indicator('Na PT correta',r.corretos||0,'#d9aa52')
+        +indicator('Na PT errada',r.ptErrada||0,'#9a6cff')
+        +indicator('Não vistos em PT',r.foraParty||0,'#ef6672')+'</div>';
+
+      var extras='';
       if((d.discordNoPing||[]).length){
-        html+='<div class="panel"><h3>Na call sem inscrição</h3><div class="auditgrid">'+(d.discordNoPing||[]).map(function(l){return '<div class="auditline missing"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM PING')+albionPill(l.albion||'unknown')+'</span><span class="auditdetail">'+(l.game?esc(l.actualPartyLabel||'no jogo'):'somente na call')+'</span></div>';}).join('')+'</div></div>';
+        extras+='<div class="cv2-panel cv2-extra"><h3>Na call sem inscrição · '+d.discordNoPing.length+'</h3><div class="cv2-extra-grid">'
+          +(d.discordNoPing||[]).map(function(x){ return '<div class="cv2-extra-player"><b>'+esc(x.n)+'</b><br><span class="cv2-muted">'+esc(x.actualPartyLabel||'somente na call')+'</span></div>'; }).join('')
+          +'</div></div>';
       }
       if((d.gameNoSignup||[]).length){
-        html+='<div class="panel"><h3>Na PT sem escala</h3><div class="auditgrid">'+(d.gameNoSignup||[]).map(function(l){return '<div class="auditline intruder"><span class="num">--</span><b>'+esc(l.n)+'</b><span class="auditstatus">'+pill('extra','SEM ESCALA')+albionPill(l.albion||'unknown')+'</span><span class="auditdetail">'+esc(l.actualPartyLabel||'detectado')+'</span></div>';}).join('')+'</div></div>';
+        extras+='<div class="cv2-panel cv2-extra"><h3>Na PT sem escala · '+d.gameNoSignup.length+'</h3><div class="cv2-extra-grid">'
+          +(d.gameNoSignup||[]).map(function(x){ return '<div class="cv2-extra-player"><b>'+esc(x.n)+'</b><br><span class="cv2-muted">'+esc(x.actualPartyLabel||'detectado no jogo')+'</span></div>'; }).join('')
+          +'</div></div>';
       }
-      if(m.note) html+='<div class="note">'+esc(m.note)+'</div>';
+      if(extras) extras='<div class="cv2-extras">'+extras+'</div>';
+
+      var html='<div class="cv2-shell">'+head+kpis+'<div class="cv2-layout"><div class="cv2-main">'+dist+parties+table+extras+'</div><aside class="cv2-side">'+side+'</aside></div></div>';
       setView('view-confirm',html);
     }).catch(function(e){
-      document.getElementById('view-confirm').innerHTML='<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>';
+      setView('view-confirm','<div class="modhead">🎯 Validação do CTA</div><div class="empty-note">Erro ao carregar auditoria: '+esc(e.message)+'</div>');
     });
   }
 
