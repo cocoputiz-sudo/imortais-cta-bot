@@ -1274,6 +1274,11 @@ const PAGE = `<!doctype html>
           var a=d.audit||{};
           var devices=a.devices||[];
           var maps=d.maps||[];
+          var battleMin=(d.meta&&d.meta.battleMinRelevantEvents)||5;
+          var observerHist=a.observedDeathObserverHistogram||{};
+          var observerHistText=Object.keys(observerHist).sort(function(x,y){return Number(x)-Number(y);}).map(function(k){
+            return k+' observer'+(Number(k)===1?'':'s')+': '+observerHist[k];
+          }).join(' · ');
           var deathObserver=!!(d.meta&&d.meta.zergDeathObserver);
           var killLabel=deathObserver?'Kills da zerg':'Kills candidatas';
           var deathLabel=deathObserver?'Mortes da zerg':'Mortes candidatas';
@@ -1324,8 +1329,8 @@ const PAGE = `<!doctype html>
               +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(mr.deathsCandidate||0)+'</div></div></div>'
               +'<div class="split"><div><h3>🏆 Top DPS do mapa · dedup.</h3>'+topList(m.topDmgDedup||m.topDmg||[],fmtS)+'</div>'
               +'<div><h3>☠️ Top Kills do mapa</h3>'+topList(m.topKillsCandidate||[],fmtS)+'</div></div>'
-              +'<div class="note">Bruto do mapa: '+fmtS(mr.damage||0)+' dano · '+fmtS(mr.healing||0)+' cura. '+fmtS(ma.rawCombatDeltaEvents||0)+' deltas → '+fmtS(ma.canonicalDeltaEvents||0)+' preservados; '+fmtS(ma.collapsedCombatDeltaEvents||0)+' colapsados. '+fmtS(m.totalEvents||0)+' eventos totais · '+fmtS((m.observers||[]).length)+' observer(s) · '+fmtS(fights.length)+' luta(s) candidata(s).</div>'
-              +(fights.length?fights.map(renderFightBlock).join(''):'<div class="empty-note">Nenhuma luta candidata segmentada neste mapa.</div>')
+              +'<div class="note">Bruto do mapa: '+fmtS(mr.damage||0)+' dano · '+fmtS(mr.healing||0)+' cura. '+fmtS(ma.rawCombatDeltaEvents||0)+' deltas → '+fmtS(ma.canonicalDeltaEvents||0)+' preservados; '+fmtS(ma.collapsedCombatDeltaEvents||0)+' colapsados. '+fmtS(m.totalEvents||0)+' eventos totais · '+fmtS((m.observers||[]).length)+' observer(s) · '+fmtS(ma.reportableFights==null?fights.length:ma.reportableFights)+' Battle Report(s) exibidos'+(ma.suppressedFights?(' · '+fmtS(ma.suppressedFights)+' confronto(s) pequeno(s) ocultado(s)'):'')+'.</div>'
+              +(fights.length?fights.map(renderFightBlock).join(''):'<div class="empty-note">Nenhuma batalha atingiu o volume mínimo para Battle Report.</div>')
               +'</div>';
           }
           var rd=d.resumoDedup||r;
@@ -1334,7 +1339,7 @@ const PAGE = `<!doctype html>
             +'<div class="stat r"><div class="k">Dano dedup. · conservador</div><div class="v">'+fmtS(rd.damage||0)+'</div></div>'
             +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(rd.healing||0)+'</div></div>'
             +'<div class="stat a"><div class="k">'+esc(deathObserver?'Mortes da zerg':'Mortes candidatas · legado')+'</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
-            +'<div class="stat b"><div class="k">'+esc(deathObserver?'Kills da zerg':'Kills candidatas · legado')+'</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div></div>'            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e, dentro dele, o sistema abre uma nova luta candidata após mais de 2 minutos sem eventos de combate. Eventos anteriores ao Combat Client v0.5.4 aparecem em “Mapa desconhecido”.</div></div>'
+            +'<div class="stat b"><div class="k">'+esc(deathObserver?'Kills da zerg':'Kills candidatas · legado')+'</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div></div>'            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e uma nova luta é segmentada após mais de 2 minutos sem eventos de combate. Para evitar histórico fantasma, só é exibido Battle Report quando kills da nossa zerg + mortes da nossa zerg somam pelo menos '+fmtS(battleMin)+'. Eventos anteriores ao Combat Client v0.5.4 podem aparecer em “Mapa desconhecido”.</div></div>'
             +(maps.length?maps.map(renderMapBlock).join(''):'<div class="panel"><div class="empty-note">Ainda não há eventos de combate com mapa neste CTA.</div></div>')
             +'<div class="panel"><h3>Resumo por PT · bruto</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
             +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
@@ -1342,14 +1347,18 @@ const PAGE = `<!doctype html>
             +'<div class="split"><div class="panel"><h3>🏆 Top DPS · dedup. conservador</h3>'+topList(d.topDmgDedup||d.topDmg||[],fmtS)+'</div>'
             +'<div class="panel"><h3>💚 Top Heal · dedup. conservador</h3>'+topList(d.topHealDedup||d.topHeal||[],fmtS)+'</div></div>'
             +'<div class="split"><div class="panel"><h3>☠️ Top Kills · candidato</h3>'+topList(d.topKillsCandidate||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>🧪 Auditoria de abates</h3>'
+            +'<div class="panel"><h3>🧪 Auditoria de mortes/abates</h3>'
             +'<div class="srow">DiedEvent observados brutos: <b>'+(a.rawObservedDeaths||0)+'</b></div>'
+            +'<div class="srow">Mortes canônicas vindas de DiedEvent: <b>'+(a.canonicalObservedDeaths==null?'—':a.canonicalObservedDeaths)+'</b></div>'
+            +'<div class="srow">Cópias de DiedEvent colapsadas: <b>'+(a.collapsedObservedDeathCopies==null?'—':a.collapsedObservedDeathCopies)+'</b></div>'
+            +'<div class="srow">Mortes vistas por mais de 1 observer: <b>'+(a.multiObserverObservedDeaths==null?'—':a.multiObserverObservedDeaths)+'</b></div>'
+            +(observerHistText?'<div class="srow">Distribuição por observers: <b>'+esc(observerHistText)+'</b></div>':'')
             +'<div class="srow">Eventos kill/death totais: <b>'+(a.rawKillLikeEvents||0)+'</b></div>'
-            +'<div class="srow">Abates únicos candidatos: <b>'+(a.uniqueKillCandidates||0)+'</b></div>'
+            +'<div class="srow">Mortes/abates canônicos candidatos: <b>'+(a.uniqueKillCandidates||0)+'</b></div>'
             +'<div class="srow">'+esc(deathObserver?'Kills da nossa zerg':'Kills candidatas da nossa zerg')+': <b>'+(a.ourKillCandidates||0)+'</b></div>'
             +'<div class="srow">'+esc(deathObserver?'Mortes da nossa zerg':'Mortes candidatas da nossa zerg')+': <b>'+(a.ourDeathCandidates||0)+'</b></div>'
-            +'<div class="srow">Eventos repetidos estimados: <b>'+(a.duplicateKillLikeEvents||0)+'</b></div>'
-            +'<div class="srow">Abates vistos por mais de 1 observer: <b>'+(a.multiObserverKillCandidates||0)+'</b></div>'
+            +'<div class="srow">Eventos kill/death repetidos colapsados: <b>'+(a.duplicateKillLikeEvents||0)+'</b></div>'
+            +'<div class="note">A mesma morte é fundida por mapa + vítima quando occurred_at ou received_at cai na janela de '+fmtS(Math.round((a.deathDedupWindowMs||30000)/1000))+'s. victimObjectId é usado como evidência forte quando disponível; o killer não é usado como identidade obrigatória da morte.</div>'
             +'</div></div>'
             +'<div class="panel"><h3>🧮 Auditoria de dano/cura</h3>'
             +'<div class="srow">Deltas brutos: <b>'+fmtS(a.rawCombatDeltaEvents||0)+'</b></div>'

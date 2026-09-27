@@ -10,6 +10,8 @@ const CONFIRM_TTL_MS = 2000;
 const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRESH_MS) || 10 * 60 * 1000);
 const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
 const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
+const COMBAT_DEATH_DEDUP_MS = Math.max(5_000, Number(process.env.COMBAT_DEATH_DEDUP_MS) || 30_000);
+const COMBAT_BATTLE_MIN_EVENTS = Math.max(1, Number(process.env.COMBAT_BATTLE_MIN_EVENTS) || 5);
 
 function normName(v) {
   let out = String(v || "").trim();
@@ -770,6 +772,8 @@ async function getLoot(db, eventId) {
     itens,
     meta: {
       totalEventos: rows.length,
+      battleMinRelevantEvents: COMBAT_BATTLE_MIN_EVENTS,
+      deathDedupWindowMs: COMBAT_DEATH_DEDUP_MS,
       eventosConsiderados: rows.length - ignorados,
       eventosIgnorados: ignorados,
       guildConsiderados,
@@ -912,28 +916,89 @@ async function getCombat(db, eventId) {
     touchWindow(fight, at);
     return fight;
   }
-  function deathCandidateFor(cluster, killer, victim, occurredAt, map, fight) {
-    const baseKey = [cluster, normName(killer), normName(victim)].join("|");
+  function deathCandidateFor(cluster, killer, victim, occurredAt, receivedAt, map, fight, payload = {}) {
+    // Identidade canônica da morte:
+    // - mapa + vítima são a chave principal;
+    // - victimObjectId é usado como evidência forte quando disponível;
+    // - o mesmo óbito é fundido quando occurred_at OU received_at cai na janela.
+    //
+    // Não usamos killer na chave. Observers diferentes podem atribuir o golpe final
+    // de forma diferente, mas a mesma vítima não consegue morrer duas vezes em poucos
+    // segundos no mesmo mapa. Isso também permite fundir CombatResult legado com DiedEvent.
+    const victimKey = normName(victim);
+    const baseKey = [cluster, victimKey].join("|");
     if (!killCandidatesByPair.has(baseKey)) killCandidatesByPair.set(baseKey, []);
     const arr = killCandidatesByPair.get(baseKey);
-    const atMs = new Date(occurredAt).getTime();
-    let k = arr.length ? arr[arr.length - 1] : null;
-    if (!k || !Number.isFinite(atMs) || atMs - k.lastSeenMs > 3000) {
-      const id = baseKey + "|" + String(Number.isFinite(atMs) ? atMs : Date.now()) + "|" + String(arr.length + 1);
+
+    const occurredMs = new Date(occurredAt).getTime();
+    const receivedMs = new Date(receivedAt).getTime();
+    const victimObjectId = num(payload.victimObjectId, 0) > 0 ? String(payload.victimObjectId) : null;
+    const killerObjectId = num(payload.killerObjectId, 0) > 0 ? String(payload.killerObjectId) : null;
+
+    let k = null;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const candidate = arr[i];
+
+      const occurredClose =
+        Number.isFinite(occurredMs) &&
+        Number.isFinite(candidate.lastOccurredMs) &&
+        Math.abs(occurredMs - candidate.lastOccurredMs) <= COMBAT_DEATH_DEDUP_MS;
+
+      const receivedClose =
+        Number.isFinite(receivedMs) &&
+        Number.isFinite(candidate.lastReceivedMs) &&
+        Math.abs(receivedMs - candidate.lastReceivedMs) <= COMBAT_DEATH_DEDUP_MS;
+
+      const objectCompatible =
+        !victimObjectId ||
+        candidate.victimObjectIds.size === 0 ||
+        candidate.victimObjectIds.has(victimObjectId);
+
+      if (objectCompatible && (occurredClose || receivedClose)) {
+        k = candidate;
+        break;
+      }
+
+      // Como os eventos chegam ordenados, depois de duas janelas inteiras de distância
+      // não há motivo para continuar procurando para trás.
+      const newestKnown = Math.max(
+        Number.isFinite(candidate.lastOccurredMs) ? candidate.lastOccurredMs : 0,
+        Number.isFinite(candidate.lastReceivedMs) ? candidate.lastReceivedMs : 0
+      );
+      const currentKnown = Math.max(
+        Number.isFinite(occurredMs) ? occurredMs : 0,
+        Number.isFinite(receivedMs) ? receivedMs : 0
+      );
+      if (newestKnown && currentKnown && currentKnown - newestKnown > COMBAT_DEATH_DEDUP_MS * 2) break;
+    }
+
+    if (!k) {
+      const anchorMs = Number.isFinite(occurredMs)
+        ? occurredMs
+        : (Number.isFinite(receivedMs) ? receivedMs : Date.now());
+      const id = baseKey + "|" + String(anchorMs) + "|" + String(arr.length + 1);
       k = {
         id,
         map: cluster,
         killer,
         victim,
         occurredAt,
-        lastSeenMs: Number.isFinite(atMs) ? atMs : Date.now(),
+        receivedAt,
+        firstOccurredMs: Number.isFinite(occurredMs) ? occurredMs : null,
+        lastOccurredMs: Number.isFinite(occurredMs) ? occurredMs : null,
+        firstReceivedMs: Number.isFinite(receivedMs) ? receivedMs : null,
+        lastReceivedMs: Number.isFinite(receivedMs) ? receivedMs : null,
         devices: new Set(),
         sourceTypes: new Set(),
+        killerNames: new Set(),
         killerGuilds: new Set(),
         victimGuilds: new Set(),
+        victimObjectIds: new Set(),
+        killerObjectIds: new Set(),
         rawEvents: 0,
+        observedDeathEvents: 0,
         killerInRoster: rosterKeys.has(normName(killer)),
-        victimInRoster: rosterKeys.has(normName(victim)),
+        victimInRoster: rosterKeys.has(victimKey),
         killerInFamily: false,
         victimInFamily: false,
         mapBucket: map,
@@ -943,9 +1008,20 @@ async function getCombat(db, eventId) {
       killCandidates.set(id, k);
       map.killCandidates.set(id, k);
       fight.killCandidates.set(id, k);
-    } else if (Number.isFinite(atMs)) {
-      k.lastSeenMs = Math.max(k.lastSeenMs, atMs);
     }
+
+    if (Number.isFinite(occurredMs)) {
+      k.firstOccurredMs = k.firstOccurredMs == null ? occurredMs : Math.min(k.firstOccurredMs, occurredMs);
+      k.lastOccurredMs = k.lastOccurredMs == null ? occurredMs : Math.max(k.lastOccurredMs, occurredMs);
+    }
+    if (Number.isFinite(receivedMs)) {
+      k.firstReceivedMs = k.firstReceivedMs == null ? receivedMs : Math.min(k.firstReceivedMs, receivedMs);
+      k.lastReceivedMs = k.lastReceivedMs == null ? receivedMs : Math.max(k.lastReceivedMs, receivedMs);
+    }
+    if (killer) k.killerNames.add(String(killer).trim());
+    if (victimObjectId) k.victimObjectIds.add(victimObjectId);
+    if (killerObjectId) k.killerObjectIds.add(killerObjectId);
+
     return k;
   }
 
@@ -1044,8 +1120,18 @@ async function getCombat(db, eventId) {
           d.observedDeaths++;
         }
 
-        const k = deathCandidateFor(cluster, killer, victim, r.occurred_at, map, fight);
+        const k = deathCandidateFor(
+          cluster,
+          killer,
+          victim,
+          r.occurred_at,
+          r.received_at,
+          map,
+          fight,
+          p
+        );
         k.rawEvents++;
+        if (r.type === "player_death_observed") k.observedDeathEvents++;
         k.devices.add(String(r.device_id || "sem-device"));
         k.sourceTypes.add(r.type);
         if (p.killerGuild) k.killerGuilds.add(String(p.killerGuild).trim());
@@ -1102,6 +1188,12 @@ async function getCombat(db, eventId) {
   }
 
   const canonicalKills = [...killCandidates.values()];
+  const canonicalObservedDeaths = canonicalKills.filter(k => k.observedDeathEvents > 0);
+  const observedDeathObserverHistogram = canonicalObservedDeaths.reduce((acc, k) => {
+    const observers = Math.max(1, k.devices.size);
+    acc[observers] = (acc[observers] || 0) + 1;
+    return acc;
+  }, {});
   for (const k of canonicalKills) {
     k.killerIsOurs = k.killerInFamily || k.killerInRoster;
     k.victimIsOurs = k.victimInFamily || k.victimInRoster;
@@ -1174,12 +1266,15 @@ async function getCombat(db, eventId) {
     const kills = [...bucket.killCandidates.values()];
     const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
     const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
+    const relevantDeathEvents = ourKills.length + ourDeaths.length;
     return {
       n: bucket.n,
       firstAt: bucket.firstAt,
       lastAt: bucket.lastAt,
       totalEvents: bucket.totalEvents,
       observers: [...bucket.devices],
+      relevantDeathEvents,
+      reportable: relevantDeathEvents >= COMBAT_BATTLE_MIN_EVENTS,
       resumo: {
         damage: list.reduce((a, x) => a + x.dmg, 0),
         healing: list.reduce((a, x) => a + x.heal, 0),
@@ -1215,6 +1310,8 @@ async function getCombat(db, eventId) {
     const kills = [...bucket.killCandidates.values()];
     const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
     const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
+    const serializedFights = bucket.fights.map(serializeFight);
+    const reportableFights = serializedFights.filter(f => f.reportable);
     return {
       map: bucket.map,
       firstAt: bucket.firstAt,
@@ -1239,8 +1336,12 @@ async function getCombat(db, eventId) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills),
-      fights: bucket.fights.map(serializeFight),
+      fights: reportableFights,
       audit: {
+        candidateFights: serializedFights.length,
+        reportableFights: reportableFights.length,
+        suppressedFights: Math.max(0, serializedFights.length - reportableFights.length),
+        battleMinRelevantEvents: COMBAT_BATTLE_MIN_EVENTS,
         rawCombatDeltaEvents: bucket.rawCombatDeltaEvents,
         canonicalDeltaEvents: bucket.canonicalDeltaEvents,
         collapsedCombatDeltaEvents: bucket.collapsedCombatDeltaEvents,
@@ -1262,6 +1363,7 @@ async function getCombat(db, eventId) {
   const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
   const maps = [...mapAgg.values()]
     .map(serializeMap)
+    .filter(m => (m.fights || []).length > 0)
     .sort((a, b) => {
       if (a.map === "Mapa desconhecido" && b.map !== "Mapa desconhecido") return 1;
       if (b.map === "Mapa desconhecido" && a.map !== "Mapa desconhecido") return -1;
@@ -1297,11 +1399,16 @@ async function getCombat(db, eventId) {
       multiObserverDeltaCandidates,
       rawKillLikeEvents,
       rawObservedDeaths,
+      canonicalObservedDeaths: canonicalObservedDeaths.length,
+      collapsedObservedDeathCopies: Math.max(0, rawObservedDeaths - canonicalObservedDeaths.length),
+      observedDeathObserverHistogram,
       uniqueKillCandidates: kills.length,
       ourKillCandidates: ourKills.length,
       ourDeathCandidates: ourDeaths.length,
       duplicateKillLikeEvents: Math.max(0, rawKillLikeEvents - kills.length),
       multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+      multiObserverObservedDeaths: canonicalObservedDeaths.filter(k => k.devices.size > 1).length,
+      deathDedupWindowMs: COMBAT_DEATH_DEDUP_MS,
       combatDeltaFingerprints: deltaFingerprints.size,
       overlappingDeltaFingerprints,
       devices,
@@ -1312,9 +1419,22 @@ async function getCombat(db, eventId) {
         victim: k.victim,
         victimGuilds: [...k.victimGuilds],
         occurredAt: k.occurredAt,
+        receivedAt: k.receivedAt,
         rawEvents: k.rawEvents,
+        observedDeathEvents: k.observedDeathEvents,
         observers: k.devices.size,
+        observerDevices: [...k.devices],
         sourceTypes: [...k.sourceTypes],
+        victimObjectIds: [...k.victimObjectIds],
+        killerObjectIds: [...k.killerObjectIds],
+        observedOccurredSpanMs:
+          k.firstOccurredMs != null && k.lastOccurredMs != null
+            ? Math.max(0, k.lastOccurredMs - k.firstOccurredMs)
+            : null,
+        observedReceivedSpanMs:
+          k.firstReceivedMs != null && k.lastReceivedMs != null
+            ? Math.max(0, k.lastReceivedMs - k.firstReceivedMs)
+            : null,
         killerInRoster: k.killerInRoster,
         victimInRoster: k.victimInRoster,
         killerInFamily: k.killerInFamily,
