@@ -1214,7 +1214,7 @@ async function getCombat(db, eventId) {
       duplicates += Math.max(0, Number(count) - 1);
     }
     return sum + duplicates;
-  }, {});
+  }, 0);
   for (const k of canonicalKills) {
     k.killerIsOurs = k.killerInFamily || k.killerInRoster;
     k.victimIsOurs = k.victimInFamily || k.victimInRoster;
