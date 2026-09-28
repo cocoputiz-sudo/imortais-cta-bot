@@ -1017,6 +1017,11 @@ const navigationRefreshTimers = new Map();
 const navigationMessageFingerprints = new Map();
 const NODE_RARITIES = new Set(["4.4", "5.4", "6.4", "7.4", "8.4"]);
 const COLOR_RARITIES = new Set(["ROXO", "AZUL", "AMARELO", "VERDE", "VERMELHO"]);
+const VORTEX_ZONES = new Map([
+  ["thunderrock upland", "Thunderrock Upland"],
+  ["rivercopse curve", "Rivercopse Curve"],
+  ["giantweald woods", "Giantweald Woods"],
+]);
 
 function fmtDurationShort(seconds) {
   if (seconds == null || !Number.isFinite(Number(seconds))) return "?";
@@ -1065,7 +1070,7 @@ function navigationDiscordText(state) {
   }
 
   lines.push("");
-  lines.push("**FILA DE OBJETIVOS**");
+  lines.push("**ORDEM OTIMIZADA DE OBJETIVOS**");
 
   const legs = state.itinerary?.legs || [];
   for (const leg of legs.slice(0, 6)) {
@@ -1090,7 +1095,8 @@ function navigationDiscordText(state) {
   if (legs.length > 6) lines.push(`… +${legs.length - 6} objetivo(s)`);
 
   lines.push("");
-  lines.push(`⏱️ estimativa inicial: **${state.itinerary?.secondsPerMap || 90}s por mapa**. O cálculo encadeia posição atual → objetivo 1 → objetivo 2 → ...`);
+  lines.push(`🧠 ordem automática: o bot tenta **não perder deadlines**, depois reduzir atraso e, em seguida, reduzir a distância total.`);
+  lines.push(`⏱️ estimativa inicial: **${state.itinerary?.secondsPerMap || 90}s por mapa**. O cálculo encadeia posição atual → objetivo escolhido → próximo objetivo otimizado → ...`);
 
   const zones = state.positions?.zones || [];
   if (zones.length > 1) {
@@ -1175,6 +1181,15 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
   }
 
   const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
+  if (type === "VORTEX") {
+    const allowed = VORTEX_ZONES.get(String(resolved.zone.name || "").trim().toLowerCase());
+    if (!allowed) {
+      return {
+        ok: false,
+        error: "VORTEX atualmente só pode ser cadastrado em Thunderrock Upland, Rivercopse Curve ou Giantweald Woods.",
+      };
+    }
+  }
   const rarityCheck = validateObjectiveRarity(type, input.rarity);
   if (!rarityCheck.ok) return rarityCheck;
 
@@ -1257,24 +1272,28 @@ async function slashNavigationObjective(interaction, ev) {
   }
 
   const state = result.state;
-  const count = state?.objectives?.length || 1;
+  const optimizedIndex = Math.max(
+    0,
+    (state?.objectives || []).findIndex(x => String(x.id) === String(result.objective.id))
+  ) + 1;
   const first = state?.instruction?.arrived
-    ? `Já estamos no primeiro destino, **${state.objective?.targetZoneName}**.`
+    ? `Já estamos no primeiro destino otimizado, **${state.objective?.targetZoneName}**.`
     : state?.instruction
       ? `Próxima saída: **${state.instruction.exit} → ${state.instruction.next?.name}**.`
       : "Aguardando o Combat Client informar o mapa atual.";
 
   return interaction.editReply({
-    content: `✅ Objetivo #${count} adicionado à rota: **${navigationObjectiveLabel({
+    content: `✅ Objetivo adicionado: **${navigationObjectiveLabel({
       type: result.objective.objective_type,
       rarity: result.objective.rarity
-    })} · ${result.objective.target_zone_name}**. ${first}`
+    })} · ${result.objective.target_zone_name}**. O bot recalculou a ordem por prazo + distância e colocou este objetivo na posição **#${optimizedIndex}**. ${first}`
   });
 }
 
 async function slashNavigationNext(interaction, ev) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const first = await db.getNavigationObjective(ev.id).catch(() => null);
+  const state = await telemetry.getNavigationState(db, ev.id).catch(() => null);
+  const first = state?.objective || null;
   if (!first) {
     return interaction.editReply({ content: "Não há objetivo pendente na rota." });
   }
