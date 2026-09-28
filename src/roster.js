@@ -324,9 +324,14 @@ function weaponRole(weapon) {
   return (WEAPONS[U(weapon)] || {}).role || null;
 }
 
-function consolidate(signups, numParties = 4, partyList = null) {
+function consolidate(signups, numParties = 4, partyList = null, opts = {}) {
   const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
-  const base = reallocate(signups, numParties, partyList);
+  const lockedParties = new Set(
+    opts.lockedParties instanceof Set
+      ? [...opts.lockedParties].map(Number).filter(Number.isInteger)
+      : (Array.isArray(opts.lockedParties) ? opts.lockedParties : []).map(Number).filter(Number.isInteger)
+  );
+  const base = reallocate(signups, numParties, partyList, opts);
   const taken = new Set();
   for (const r of base) if (r.partyIndex != null) taken.add(`${r.partyIndex}:${r.slotIndex}`);
 
@@ -340,6 +345,7 @@ function consolidate(signups, numParties = 4, partyList = null) {
     // percorre as PTs da party_list, PULANDO a primeira (PT1 intocável)
     for (let pi = 1; pi < parties.length && !colocado; pi++) {
       const p = parties[pi];
+      if (lockedParties.has(p)) continue;
       for (let i = 0; i < PARTIES[p].slots.length; i++) {
         if (taken.has(`${p}:${i}`)) continue;
         if (PARTIES[p].slots[i].locked) continue;
