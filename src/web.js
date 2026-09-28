@@ -601,8 +601,36 @@ const PAGE = `<!doctype html>
   .cv2-distitem i{width:8px;height:8px;border-radius:50%}
   .cv2-distitem b{color:var(--text);font-size:10px}
   .cv2-party-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-top:10px}
-  .cv2-party{padding:11px;border:1px solid var(--line);border-radius:11px;background:linear-gradient(180deg,#111923,#0d131b)}
+  .cv2-party{position:relative;padding:11px;border:1px solid var(--line);border-radius:11px;background:linear-gradient(180deg,#111923,#0d131b);cursor:pointer;transition:border-color .12s ease,opacity .12s ease,box-shadow .12s ease,transform .12s ease}
+  .cv2-party:hover{transform:translateY(-1px);border-color:#4a6688}
   .cv2-party.problem{border-color:#573034}
+  .cv2-party.selected{border-color:#4a97ff!important;box-shadow:0 0 0 1px rgba(74,151,255,.30) inset}
+  .cv2-party.dim{opacity:.42}
+  .cv2-party-badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border:1px solid #6b2a31;border-radius:999px;background:#2d1115;color:#ff8790;font:900 8px var(--sans);vertical-align:middle}
+  .cv2-party-badge.ok{border-color:#25593b;background:#0d281a;color:#7fe3a4}
+  .cv2-filterbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0}
+  .cv2-filterbtn{appearance:none;border:1px solid #2b3a50;border-radius:8px;background:#101822;color:#93a3b8;padding:7px 11px;font:800 9px var(--sans);cursor:pointer}
+  .cv2-filterbtn:hover{border-color:#53709a;color:#dbe7f5}
+  .cv2-filterbtn.on{border-color:#4a97ff;background:#16283c;color:#82bfff;box-shadow:0 0 0 1px rgba(74,151,255,.14) inset}
+  .cv2-filterhint{margin-left:auto;color:var(--muted);font-size:9px}
+  .cv2-pt-stack{display:grid;gap:11px;margin:10px 0 12px}
+  .cv2-pt-audit{overflow:hidden;border:1px solid #2a3a50;border-radius:11px;background:linear-gradient(180deg,#111923,#0d131b)}
+  .cv2-pt-audit.selected{border-color:#4a97ff;box-shadow:0 0 0 1px rgba(74,151,255,.18) inset}
+  .cv2-pt-audit-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border-bottom:1px solid #243244;background:#111a25}
+  .cv2-pt-audit-head h3{margin:0;font-family:var(--disp);font-size:17px}
+  .cv2-pt-audit-meta{display:flex;gap:9px;flex-wrap:wrap;color:var(--muted);font-size:8px}
+  .cv2-pt-audit-meta b{color:var(--text)}
+  .cv2-pt-audit-tablebox{overflow-x:auto}
+  .cv2-pt-audit-table{width:100%;min-width:850px;border-collapse:collapse;font-size:10px}
+  .cv2-pt-audit-table th{text-align:left;padding:7px 9px;color:var(--muted);font-size:8px;letter-spacing:.05em;background:#101823;border-bottom:1px solid #223044}
+  .cv2-pt-audit-table td{padding:8px 9px;border-bottom:1px solid #1b2736;vertical-align:middle}
+  .cv2-pt-audit-table tr:last-child td{border-bottom:0}
+  .cv2-pt-audit-player b{display:block;font-size:10px}.cv2-pt-audit-player span{display:block;margin-top:2px;color:var(--muted);font-size:8px}
+  .cv2-pt-status{display:inline-block;padding:3px 6px;border-radius:999px;font-size:8px;font-weight:900;white-space:nowrap}
+  .cv2-pt-status.ok{background:#10351f;color:#7ee3a4;border:1px solid #28633f}
+  .cv2-pt-status.miss{background:#3a2b0d;color:#f2ca70;border:1px solid #6f551c}
+  .cv2-pt-status.wrong{background:#35194f;color:#cda2ff;border:1px solid #613b85}
+  .cv2-pt-status.intruder{background:#3b1519;color:#ff9299;border:1px solid #733038}
   .cv2-party-head{display:flex;align-items:flex-start;justify-content:space-between;gap:7px}
   .cv2-party-name{font-family:var(--disp);font-size:17px;font-weight:900}
   .cv2-party-score{font-size:14px;font-weight:900}
@@ -749,6 +777,7 @@ const PAGE = `<!doctype html>
   var _viewCache={};
   function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
   var combatSelectedEvent=null;
+  var confirmPartySelection={};
   var telemetryRefreshTimer=null, telemetryRefreshPending=false, confirmPollTimer=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
@@ -1005,9 +1034,29 @@ const PAGE = `<!doctype html>
 
     fetchTelemetry('/api/telemetry/confirm?event='+encodeURIComponent(current)).then(function(d){
       var r=d.resumo||{}, m=d.meta||{}, evt=d.event||{};
-      var groups=d.issuesByParty||[];
+      var groups=(d.issuesByParty||[]).slice().sort(function(a,b){return Number(a.party)-Number(b.party);});
       var allRows=[];
       (d.pts||[]).forEach(function(g){ (g.linhas||[]).forEach(function(x){ allRows.push(x); }); });
+
+      var filterKey=String(current);
+      if(!Object.prototype.hasOwnProperty.call(confirmPartySelection,filterKey)){
+        var stored=null;
+        try{ stored=sessionStorage.getItem('imortais:confirm-party-filter:'+filterKey); }catch(_e){}
+        confirmPartySelection[filterKey]=(stored&&stored!=='all'&&Number.isFinite(Number(stored)))?Number(stored):null;
+      }
+      var selectedParty=confirmPartySelection[filterKey];
+      var availableParties=groups.map(function(g){return Number(g.party);}).filter(function(p){return Number.isFinite(p);});
+      if(selectedParty!=null&&availableParties.indexOf(Number(selectedParty))<0){
+        selectedParty=null;
+        confirmPartySelection[filterKey]=null;
+      }
+      function savePartyFilter(value){
+        confirmPartySelection[filterKey]=value==null?null:Number(value);
+        try{ sessionStorage.setItem('imortais:confirm-party-filter:'+filterKey,value==null?'all':String(value)); }catch(_e){}
+      }
+      var filteredRows=selectedParty==null
+        ? allRows
+        : allRows.filter(function(x){return Number(x.plannedParty)===Number(selectedParty)||Number(x.actualParty)===Number(selectedParty);});
 
       function clamp(v){ return Math.max(0,Math.min(100,Number(v)||0)); }
       function pct(v,total){ return total?clamp(Math.round((Number(v)||0)/total*100)):0; }
@@ -1105,23 +1154,80 @@ const PAGE = `<!doctype html>
         +'<div class="cv2-distitem"><i style="background:#53637a"></i><span>Outros estados</span><b>'+esc(residual)+'</b></div>'
         +'</div></div></div>';
 
+      function ptSituation(x,party){
+        if(Number(x.plannedParty)===party&&Number(x.actualParty)===party) return {label:'CORRETO',cls:'ok',order:0};
+        if(Number(x.plannedParty)===party&&x.actualParty==null) return {label:'DEVERIA ESTAR AQUI · NÃO VISTO',cls:'miss',order:1};
+        if(Number(x.plannedParty)===party&&Number(x.actualParty)!==party) return {label:'DEVERIA ESTAR AQUI · ESTÁ '+esc(x.actualPartyLabel||('PT '+x.actualParty)),cls:'wrong',order:2};
+        if(Number(x.actualParty)===party&&Number(x.plannedParty)!==party) return {label:'NÃO DEVERIA ESTAR AQUI · '+(x.plannedParty!=null?('ESCALADO PT '+x.plannedParty):'SEM ESCALA'),cls:'intruder',order:3};
+        return {label:'—',cls:'',order:9};
+      }
+      function ptAuditSection(g){
+        var party=Number(g.party), seen={}, rows=[];
+        function push(x){
+          if(!x||!x.n) return;
+          var key=String(x.n).toLowerCase()+'|'+String(x.plannedParty)+'|'+String(x.actualParty);
+          if(seen[key]) return;
+          seen[key]=1; rows.push(x);
+        }
+        (g.correct||[]).forEach(push);
+        (g.missing||[]).forEach(push);
+        (g.intruders||[]).forEach(push);
+        (d.gameNoSignup||[]).forEach(function(x){if(Number(x.actualParty)===party) push(x);});
+        rows.sort(function(a,b){
+          var sa=ptSituation(a,party), sb=ptSituation(b,party);
+          if(sa.order!==sb.order) return sa.order-sb.order;
+          var as=Number(a.slot), bs=Number(b.slot);
+          if(Number.isFinite(as)&&Number.isFinite(bs)&&as!==bs) return as-bs;
+          return String(a.n).localeCompare(String(b.n),'pt-BR');
+        });
+        var planned=allRows.filter(function(x){return Number(x.plannedParty)===party;});
+        var correct=planned.filter(function(x){return Number(x.actualParty)===party;}).length;
+        var missing=planned.filter(function(x){return x.actualParty==null;}).length;
+        var wrong=planned.filter(function(x){return x.actualParty!=null&&Number(x.actualParty)!==party;}).length;
+        var intruders=rows.filter(function(x){return Number(x.actualParty)===party&&Number(x.plannedParty)!==party;}).length;
+        var body=rows.length?rows.map(function(x){
+          var s=ptSituation(x,party);
+          return '<tr><td class="cv2-pt-audit-player"><b>'+esc(x.n)+'</b><span>'+esc(x.arma||'')+'</span></td>'
+            +'<td>'+esc(x.slot==null?'—':x.slot)+'</td>'
+            +'<td>'+esc(x.plannedParty!=null?('PT '+x.plannedParty):'SEM ESCALA')+'</td>'
+            +'<td>'+esc(x.actualPartyLabel||'NÃO VISTO')+'</td>'
+            +'<td><span class="cv2-pt-status '+s.cls+'">'+s.label+'</span></td>'
+            +'<td>'+discordPill(!!x.discord)+'</td><td>'+albionPill(x.albion||'unknown')+'</td></tr>';
+        }).join(''):'<tr><td colspan="7" class="cv2-muted" style="padding:14px">Nenhum jogador relacionado a esta PT.</td></tr>';
+        return '<section class="cv2-pt-audit '+(selectedParty===party?'selected':'')+'"><div class="cv2-pt-audit-head"><h3>PT '+party+'</h3>'
+          +'<div class="cv2-pt-audit-meta"><span>Escalados <b>'+planned.length+'</b></span><span>Corretos <b>'+correct+'</b></span>'
+          +'<span>Não vistos <b>'+missing+'</b></span><span>Em outra PT <b>'+wrong+'</b></span><span>Intrusos <b>'+intruders+'</b></span></div></div>'
+          +'<div class="cv2-pt-audit-tablebox"><table class="cv2-pt-audit-table"><thead><tr><th>JOGADOR</th><th>SLOT</th><th>DEVERIA</th><th>ESTÁ</th><th>SITUAÇÃO</th><th>DISCORD</th><th>ALBION</th></tr></thead><tbody>'+body+'</tbody></table></div></section>';
+      }
+
       var partyCards='';
       groups.forEach(function(g){
-        var s=partyStats(g), color=ringColor(s.score);
-        partyCards+='<div class="cv2-party '+(s.problems?'problem':'')+'"><div class="cv2-party-head"><div><div class="cv2-party-name">PT '+g.party+'</div>'
-          +'<div class="cv2-party-meta"><span>'+s.correct+' corretos</span><span>'+s.missing+' não vistos</span><span>'+s.intruders+' intrusos</span></div></div>'
+        var s=partyStats(g), color=ringColor(s.score), party=Number(g.party);
+        var extraIntruders=(d.gameNoSignup||[]).filter(function(x){return Number(x.actualParty)===party;}).length;
+        var problemCount=s.missing+s.intruders+extraIntruders;
+        var selected=selectedParty!=null&&Number(selectedParty)===party;
+        partyCards+='<div class="cv2-party '+(s.problems||extraIntruders?'problem ':'')+(selected?'selected ':'')+(selectedParty!=null&&!selected?'dim':'')+'" data-confirm-party="'+party+'"><div class="cv2-party-head"><div><div class="cv2-party-name">PT '+party+' <span class="cv2-party-badge '+(problemCount?'':'ok')+'">'+problemCount+'</span></div>'
+          +'<div class="cv2-party-meta"><span>'+s.correct+' corretos</span><span>'+s.missing+' não vistos</span><span>'+(s.intruders+extraIntruders)+' intrusos</span></div></div>'
           +'<div class="cv2-party-score" style="color:'+color+'">'+s.correct+'/20</div></div>'
           +'<div class="cv2-ring-wrap"><div class="cv2-ring" style="background:conic-gradient('+color+' '+clamp(s.score)+'%,#202b3a 0)"><b>'+s.score+'%</b></div></div>'
           +slotMap(g)+'</div>';
       });
       if(!partyCards) partyCards='<div class="empty-note">Ainda não há party observada suficiente para montar o painel das PTs.</div>';
 
-      var parties='<div class="cv2-party-grid">'+partyCards+'</div>'
+      var filterbar='<div class="cv2-filterbar"><button class="cv2-filterbtn '+(selectedParty==null?'on':'')+'" data-confirm-party-all="1">TODAS</button>'
+        +availableParties.map(function(p){return '<button class="cv2-filterbtn '+(Number(selectedParty)===p?'on':'')+'" data-confirm-party-btn="'+p+'">PT '+p+'</button>';}).join('')
+        +'<span class="cv2-filterhint">TODAS: PT1, depois PT2, depois PT3 · clique numa PT apenas para isolar</span></div>';
+
+      var auditGroups=selectedParty==null?groups:groups.filter(function(g){return Number(g.party)===Number(selectedParty);});
+      var partyAudit='<div class="cv2-pt-stack">'+auditGroups.map(ptAuditSection).join('')+'</div>';
+
+      var parties=filterbar+'<div class="cv2-party-grid">'+partyCards+'</div>'
         +'<div class="cv2-legend"><span><i style="background:#1d7446;border:1px solid #2d9c5c"></i>correto</span>'
         +'<span><i style="background:#614817;border:1px solid #a77b26"></i>não visto</span>'
         +'<span><i style="background:#71242c;border:1px solid #b23741"></i>offline</span>'
         +'<span><i style="background:#4b2d73;border:1px solid #8052ba"></i>PT errada</span>'
-        +'<span><i style="background:#1c2632;border:1px solid #334052"></i>sem dado</span></div>';
+        +'<span><i style="background:#1c2632;border:1px solid #334052"></i>sem dado</span></div>'
+        +partyAudit;
 
       var equipmentByPlayer={};
       allRows.forEach(function(x){
@@ -1140,7 +1246,7 @@ const PAGE = `<!doctype html>
         return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
       }
 
-      var tableRows=allRows.map(function(x){
+      var tableRows=filteredRows.map(function(x){
         var planned=x.plannedParty!=null?('PT '+x.plannedParty):'Reserva';
         var actual=x.actualPartyLabel||'Não visto';
         var equipKey=String(x.n||'').trim().toLowerCase();
@@ -1156,32 +1262,34 @@ const PAGE = `<!doctype html>
       }).join('');
       if(!tableRows) tableRows='<tr><td colspan="8" class="cv2-muted" style="text-align:center;padding:22px">Nenhum jogador inscrito neste CTA.</td></tr>';
 
-      var table='<div class="cv2-panel"><div class="cv2-panel-head"><h3>Jogadores inscritos</h3><small>estado consolidado</small></div><div class="cv2-tablebox"><table class="cv2-table">'
+      var table='<div class="cv2-panel"><div class="cv2-panel-head"><h3>'+(selectedParty==null?'Tabela completa · TODAS AS PTS':'Tabela completa · PT '+selectedParty)+'</h3><small>'+(selectedParty==null?'detalhes completos e equipamento':'escalados ou detectados nesta PT')+'</small></div><div class="cv2-tablebox"><table class="cv2-table">'
         +'<thead><tr><th>JOGADOR</th><th>SLOT</th><th>ESCALA</th><th>JOGO</th><th>DISCORD</th><th>ALBION</th><th>ESTADO</th><th>OBSERVAÇÃO</th></tr></thead>'
         +'<tbody>'+tableRows+'</tbody></table></div></div>';
 
       var attention=[], seen={};
       function addAttention(key,item){ if(seen[key]) return; seen[key]=true; attention.push(item); }
       groups.forEach(function(g){
+        var party=Number(g.party);
         (g.intruders||[]).forEach(function(x){
-          addAttention('wrong:'+String(x.n).toLowerCase(),{icon:'↔',title:x.n+' está na PT errada',detail:'Está '+(x.actualPartyLabel||('PT '+g.party))+' · deveria PT '+(x.plannedParty||'?'),severity:'CRÍTICO',weight:0});
+          addAttention('wrong:'+String(x.n).toLowerCase(),{party:Number(x.plannedParty)||party,icon:'↔',title:x.n+' está na PT errada',detail:'Está '+(x.actualPartyLabel||('PT '+party))+' · deveria PT '+(x.plannedParty||'?'),severity:'CRÍTICO',weight:0});
         });
         (g.missing||[]).forEach(function(x){
           if(x.actualParty!=null&&x.plannedParty!=null&&Number(x.actualParty)!==Number(x.plannedParty)) return;
           if(x.categoria==='off_pingou'||x.albion==='offline'){
-            addAttention('off:'+String(x.n).toLowerCase(),{icon:'✖',title:x.n+' pingou e está offline',detail:'Escalado para PT '+g.party,severity:'CRÍTICO',weight:0});
+            addAttention('off:'+String(x.n).toLowerCase(),{party:party,icon:'✖',title:x.n+' pingou e está offline',detail:'Escalado para PT '+party,severity:'CRÍTICO',weight:0});
           }else{
-            addAttention('missing:'+String(x.n).toLowerCase(),{icon:'!',title:x.n+' não foi visto na PT',detail:'Escalado para PT '+g.party,severity:'ALTO',weight:1});
+            addAttention('missing:'+String(x.n).toLowerCase(),{party:party,icon:'!',title:x.n+' não foi visto na PT',detail:'Escalado para PT '+party,severity:'ALTO',weight:1});
           }
         });
       });
       allRows.forEach(function(x){
         if(x.categoria==='online_fora_call'){
-          addAttention('call:'+String(x.n).toLowerCase(),{icon:'🎧',title:x.n+' está fora da call',detail:x.actualPartyLabel?('Detectado em '+x.actualPartyLabel):'Online no Albion',severity:'MÉDIO',weight:2});
+          addAttention('call:'+String(x.n).toLowerCase(),{party:x.plannedParty,icon:'🎧',title:x.n+' está fora da call',detail:x.actualPartyLabel?('Detectado em '+x.actualPartyLabel):'Online no Albion',severity:'MÉDIO',weight:2});
         }else if(x.categoria==='fora_pt'){
-          addAttention('forapt:'+String(x.n).toLowerCase(),{icon:'!',title:x.n+' está na call, mas fora da PT',detail:'Escalado para PT '+(x.plannedParty||'?'),severity:'ALTO',weight:1});
+          addAttention('forapt:'+String(x.n).toLowerCase(),{party:x.plannedParty,icon:'!',title:x.n+' está na call, mas fora da PT',detail:'Escalado para PT '+(x.plannedParty||'?'),severity:'ALTO',weight:1});
         }
       });
+      if(selectedParty!=null) attention=attention.filter(function(x){return Number(x.party)===Number(selectedParty);});
       attention.sort(function(a,b){ return a.weight-b.weight||String(a.title).localeCompare(String(b.title)); });
 
       var attentionHtml=attention.length?attention.slice(0,12).map(function(it){
@@ -1193,7 +1301,7 @@ const PAGE = `<!doctype html>
         return '<div class="cv2-indicator"><div class="cv2-indicator-top"><span>'+esc(label)+'</span><b>'+esc(value||0)+'</b></div>'
           +'<div class="cv2-indicator-bar"><i style="width:'+pct(value,total)+'%;background:'+color+'"></i></div></div>';
       }
-      var side='<div class="cv2-panel"><div class="cv2-panel-head danger"><h3>⚠ Precisa de atenção</h3><span class="cv2-count">'+attention.length+'</span></div>'+attentionHtml+'</div>'
+      var side='<div class="cv2-panel"><div class="cv2-panel-head danger"><h3>⚠ Precisa de atenção'+(selectedParty==null?'':' · PT '+selectedParty)+'</h3><span class="cv2-count">'+attention.length+'</span></div>'+attentionHtml+'</div>'
         +'<div class="cv2-panel"><div class="cv2-panel-head"><h3>Indicadores gerais</h3><small>'+esc(String(r.inscritos||0))+' inscritos</small></div>'
         +indicator('Na call Discord',r.discord||0,'#4a97ff')
         +indicator('Detectados nas PTs',r.jogo||0,'#42c77a')
@@ -1202,12 +1310,12 @@ const PAGE = `<!doctype html>
         +indicator('Não vistos em PT',r.foraParty||0,'#ef6672')+'</div>';
 
       var extras='';
-      if((d.discordNoPing||[]).length){
+      if(selectedParty==null&&(d.discordNoPing||[]).length){
         extras+='<div class="cv2-panel cv2-extra"><h3>Na call sem inscrição · '+d.discordNoPing.length+'</h3><div class="cv2-extra-grid">'
           +(d.discordNoPing||[]).map(function(x){ return '<div class="cv2-extra-player"><b>'+esc(x.n)+'</b><br><span class="cv2-muted">'+esc(x.actualPartyLabel||'somente na call')+'</span></div>'; }).join('')
           +'</div></div>';
       }
-      if((d.gameNoSignup||[]).length){
+      if(selectedParty==null&&(d.gameNoSignup||[]).length){
         extras+='<div class="cv2-panel cv2-extra"><h3>Na PT sem escala · '+d.gameNoSignup.length+'</h3><div class="cv2-extra-grid">'
           +(d.gameNoSignup||[]).map(function(x){ return '<div class="cv2-extra-player"><b>'+esc(x.n)+'</b><br><span class="cv2-muted">'+esc(x.actualPartyLabel||'detectado no jogo')+'</span></div>'; }).join('')
           +'</div></div>';
@@ -1216,6 +1324,23 @@ const PAGE = `<!doctype html>
 
       var html='<div class="cv2-shell">'+head+kpis+'<div class="cv2-layout"><div class="cv2-main">'+dist+parties+table+extras+'</div><aside class="cv2-side">'+side+'</aside></div></div>';
       setView('view-confirm',html);
+
+      Array.prototype.forEach.call(document.querySelectorAll('[data-confirm-party],[data-confirm-party-btn]'),function(el){
+        el.onclick=function(){
+          var raw=el.getAttribute('data-confirm-party')||el.getAttribute('data-confirm-party-btn');
+          var p=Number(raw);
+          if(!Number.isFinite(p)) return;
+          savePartyFilter(p);
+          renderConfirm(true);
+        };
+      });
+      var allBtn=document.querySelector('[data-confirm-party-all]');
+      if(allBtn){
+        allBtn.onclick=function(){
+          savePartyFilter(null);
+          renderConfirm(true);
+        };
+      }
 
       function equipmentTier(uniqueName){
         var id=String(uniqueName||'');
@@ -1635,7 +1760,6 @@ const PAGE = `<!doctype html>
   setInterval(checkConnection,10000);
   setInterval(function(){ if(authState.member){ loadEvents(); loadNews(); } }, 20000);
 </script>
-<script src="/assets/confirm-party-filter.js?v=2"></script>
 </body>
 </html>`;
 
