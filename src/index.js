@@ -1271,6 +1271,24 @@ async function slashNavigationObjective(interaction, ev) {
   });
 }
 
+async function slashNavigationNext(interaction, ev) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const first = await db.getNavigationObjective(ev.id).catch(() => null);
+  if (!first) {
+    return interaction.editReply({ content: "Não há objetivo pendente na rota." });
+  }
+  const result = await completeNavigationObjectiveCore(ev, first.id);
+  if (!result.ok) {
+    return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível concluir o objetivo.") });
+  }
+  const next = result.state?.objective;
+  return interaction.editReply({
+    content: next
+      ? `✅ Objetivo concluído. Próximo: **${navigationObjectiveLabel(next)} · ${next.targetZoneName}**.`
+      : "✅ Objetivo concluído. A fila ficou vazia."
+  });
+}
+
 async function slashNavigationClear(interaction, ev) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const result = await clearNavigationObjectiveCore(ev);
@@ -1333,6 +1351,7 @@ async function onSlash(interaction) {
   if (name === "cta_finish") return slashFinish(interaction, ev);
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
   if (name === "objetivo") return slashNavigationObjective(interaction, ev);
+  if (name === "objetivo_proximo") return slashNavigationNext(interaction, ev);
   if (name === "objetivo_limpar") return slashNavigationClear(interaction, ev);
 }
 
