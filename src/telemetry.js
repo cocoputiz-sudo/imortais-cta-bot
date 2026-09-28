@@ -1021,22 +1021,38 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
 
   const insertionOrder = new Map(pending.map((o, i) => [String(o.id), i]));
 
-  function addTransitionScore(score, transition, objective, elapsedBefore, position, totalCount) {
+  function isTransportPickupAt(current, objective) {
+    if (!transportDeliveryZoneNames(objective?.objective_type).length) return false;
+    const pickupId = objective?.target_zone_id || objective?.target_zone_name;
+    const pickupLeg = edge(current, pickupId);
+    return !!pickupLeg?.ok && Number(pickupLeg.maps || 0) === 0;
+  }
+
+  function addTransitionScore(
+    score,
+    transition,
+    objective,
+    elapsedBefore,
+    position,
+    totalCount,
+    localPickupDeferred = false
+  ) {
     const next = { ...score };
     if (!transition?.ok) {
       next.impossible++;
       return next;
     }
 
-    const pickupArrivalSeconds = elapsedBefore + Number(transition.deadlineTravelSeconds || 0);
+    const timing = navTransitionTiming(objective, transition, elapsedBefore, nowMs);
     const deadline = navDeadlineMs(objective);
     if (deadline != null) {
-      const late = Math.max(0, Math.floor((nowMs + pickupArrivalSeconds * 1000 - deadline) / 1000));
+      const late = Math.max(0, Math.floor(Number(timing.lateSeconds || 0)));
       if (late > 0) next.missed++;
       next.lateSeconds += late;
       next.deadlineTie += (totalCount - position + 1) *
         Math.max(0, Math.floor((deadline - nowMs) / 1000));
     }
+    if (localPickupDeferred) next.localPickupDeferrals++;
     next.travelSeconds += Number(transition.totalSeconds || 0);
     return next;
   }
@@ -1046,6 +1062,9 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     if (score.impossible !== best.impossible) return score.impossible > best.impossible;
     if (score.missed !== best.missed) return score.missed > best.missed;
     if (score.lateSeconds !== best.lateSeconds) return score.lateSeconds > best.lateSeconds;
+    if (score.localPickupDeferrals !== best.localPickupDeferrals) {
+      return score.localPickupDeferrals > best.localPickupDeferrals;
+    }
     return false;
   }
 
@@ -1081,10 +1100,19 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
         return;
       }
 
+      const localPickupIndexes = new Set();
+      for (let j = 0; j < pending.length; j++) {
+        if (!used[j] && isTransportPickupAt(current, pending[j])) {
+          localPickupIndexes.add(j);
+        }
+      }
+
       for (let i = 0; i < pending.length; i++) {
         if (used[i]) continue;
         const objective = pending[i];
         const options = transitionOptions(current, objective);
+        const localPickupDeferred =
+          localPickupIndexes.size > 0 && !localPickupIndexes.has(i);
 
         for (const transition of options) {
           const position = prefixPlan.length + plan.length + 1;
@@ -1095,15 +1123,15 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
             objective,
             elapsed,
             position,
-            totalCount
+            totalCount,
+            localPickupDeferred
           );
           if (partialDefinitelyWorse(nextScore, bestScore)) continue;
 
           used[i] = true;
           plan.push({ objective, transition });
-          const nextElapsed = transition?.ok
-            ? elapsed + Number(transition.totalSeconds || 0)
-            : elapsed;
+          const timing = navTransitionTiming(objective, transition, elapsed, nowMs);
+          const nextElapsed = transition?.ok ? timing.elapsedAfter : elapsed;
           const nextCurrent = transition?.ok ? transition.end : current;
           walk(nextCurrent, nextElapsed, nextScore);
           plan.pop();
