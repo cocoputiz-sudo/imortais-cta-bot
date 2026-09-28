@@ -753,11 +753,25 @@ async function getConfirm(db, eventId) {
   };
 }
 
-const VORTEX_DELIVERY_ZONE_NAMES = [
-  "Thunderrock Upland",
-  "Rivercopse Curve",
-  "Giantweald Woods",
-];
+const TRANSPORT_DELIVERY_ZONE_NAMES = Object.freeze({
+  VORTEX: [
+    "Thunderrock Upland",
+    "Rivercopse Curve",
+    "Giantweald Woods",
+    "Deepwood Pines",
+  ],
+  ORBS: [
+    "Thunderrock Upland",
+    "Deepwood Pines",
+    "Murdergulch Trail",
+    "Sandmount Ascent",
+    "Timberscar Copse",
+  ],
+});
+
+function transportDeliveryZoneNames(type) {
+  return TRANSPORT_DELIVERY_ZONE_NAMES[String(type || "").toUpperCase()] || [];
+}
 
 function navDeadlineMs(objective) {
   const t = objective?.expires_at ? new Date(objective.expires_at).getTime() : NaN;
@@ -810,10 +824,18 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
   }
 
   const routeCache = new Map();
-  const deliveryZones = VORTEX_DELIVERY_ZONE_NAMES
-    .map(name => navigation.resolveZone(name).zone)
-    .filter(Boolean)
-    .map(zone => navigation.zoneDisplay(zone));
+  const deliveryZoneCache = new Map();
+
+  function deliveryZonesForType(type) {
+    const key = String(type || "").toUpperCase();
+    if (deliveryZoneCache.has(key)) return deliveryZoneCache.get(key);
+    const zones = transportDeliveryZoneNames(key)
+      .map(name => navigation.resolveZone(name).zone)
+      .filter(Boolean)
+      .map(zone => navigation.zoneDisplay(zone));
+    deliveryZoneCache.set(key, zones);
+    return zones;
+  }
 
   function edge(from, to) {
     const key = String(from || "") + "=>" + String(to || "");
@@ -861,7 +883,8 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     const pickupId = objective.target_zone_id || objective.target_zone_name;
     const pickup = edge(from, pickupId);
 
-    if (type !== "VORTEX") {
+    const deliveryZones = deliveryZonesForType(type);
+    if (!deliveryZones.length) {
       return [{
         objective,
         stage: "pending",
@@ -900,8 +923,8 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
         deliveryTravelSeconds: carry.seconds,
         totalMaps: ok ? Number(pickupMaps || 0) + Number(deliveryMaps || 0) : null,
         totalSeconds: ok ? Number(pickup.seconds || 0) + Number(carry.seconds || 0) : null,
-        // O deadline do Vortex é o horário para CHEGAR/PEGAR no mapa onde ele está.
-        // O transporte até o mapa de entrega conta para os próximos objetivos.
+        // O deadline de um objetivo transportável é o horário para CHEGAR/PEGAR
+        // no mapa onde ele está. O transporte até a entrega conta para os próximos objetivos.
         deadlineTravelSeconds: pickup.seconds,
         end: drop.id || drop.name,
       };
@@ -913,7 +936,7 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
   let prefixElapsed = 0;
   let prefixScore = { ...baseScore };
 
-  // Se já estamos carregando um Vortex, a entrega é obrigatória antes de reorganizar
+  // Se já estamos carregando Vortex/Orb, a entrega é obrigatória antes de reorganizar
   // os objetivos que ainda não foram pegos.
   for (const objective of carrying) {
     const transition = transitionOptions(prefixSource, objective)[0];
@@ -969,9 +992,23 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
   let bestPlan = null;
   let bestScore = null;
 
-  // Com até 6 objetivos ainda não pegos, testamos ordem + os 3 possíveis mapas de
-  // entrega de cada Vortex. 6! * 3^6 = 524.880 cenários no pior caso.
-  if (pending.length <= 6) {
+  // Teste exato enquanto o espaço de busca ainda é pequeno. Vortex tem 4 entregas e
+  // Orb tem 5; o limite evita explosão combinatória (por exemplo, 6 Orbs = 11.250.000).
+  const EXACT_SCENARIO_LIMIT = 750000;
+  let estimatedScenarios = 1;
+  for (let n = 2; n <= pending.length; n++) {
+    estimatedScenarios *= n;
+    if (estimatedScenarios > EXACT_SCENARIO_LIMIT) break;
+  }
+  if (estimatedScenarios <= EXACT_SCENARIO_LIMIT) {
+    for (const objective of pending) {
+      const branches = Math.max(1, transportDeliveryZoneNames(objective.objective_type).length);
+      estimatedScenarios *= branches;
+      if (estimatedScenarios > EXACT_SCENARIO_LIMIT) break;
+    }
+  }
+
+  if (pending.length <= 8 && estimatedScenarios <= EXACT_SCENARIO_LIMIT) {
     const used = new Array(pending.length).fill(false);
     const plan = [];
 
@@ -1026,11 +1063,12 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
       objectives: full.map(x => x.objective),
       mode: "exact",
       score: bestScore || prefixScore,
+      estimatedScenarios,
     };
   }
 
   // Filas maiores: escolhe iterativamente o objetivo com menor folga para o deadline;
-  // para Vortex, também testa os três mapas de entrega e usa distância total no desempate.
+  // para Vortex/Orb, testa os mapas de entrega válidos e usa distância total no desempate.
   const remaining = pending.slice();
   const greedyPlan = [];
   let current = prefixSource;
@@ -1081,6 +1119,7 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     objectives: full.map(x => x.objective),
     mode: "greedy",
     score,
+    estimatedScenarios,
   };
 }
 
@@ -1307,11 +1346,13 @@ async function getNavigationState(db, eventId) {
       secondsPerMap,
       totalPending: activeOut.length,
       totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
-      vortexDeliveryZones: VORTEX_DELIVERY_ZONE_NAMES.slice(),
+      vortexDeliveryZones: transportDeliveryZoneNames("VORTEX").slice(),
+      orbsDeliveryZones: transportDeliveryZoneNames("ORBS").slice(),
       optimization: {
         mode: optimized.mode,
         score: optimized.score,
-        rule: "hit pickup deadlines first; include Vortex delivery travel; then minimize lateness and map travel"
+        estimatedScenarios: optimized.estimatedScenarios ?? null,
+        rule: "hit pickup deadlines first; include transport delivery travel; then minimize lateness and map travel"
       },
       legs,
     },

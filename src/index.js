@@ -1017,12 +1017,20 @@ const navigationRefreshTimers = new Map();
 const navigationMessageFingerprints = new Map();
 const NODE_RARITIES = new Set(["4.4", "5.4", "6.4", "7.4", "8.4"]);
 const COLOR_RARITIES = new Set(["ROXO", "AZUL", "AMARELO", "VERDE", "VERMELHO"]);
+const TRANSPORT_OBJECTIVE_TYPES = new Set(["VORTEX", "ORBS"]);
 const VORTEX_DELIVERY_ZONES = [
   "Thunderrock Upland",
   "Rivercopse Curve",
   "Giantweald Woods",
+  "Deepwood Pines",
 ];
-const ORBS_HO_ZONE = "Thunderrock Upland";
+const ORBS_DELIVERY_ZONES = [
+  "Thunderrock Upland",
+  "Deepwood Pines",
+  "Murdergulch Trail",
+  "Sandmount Ascent",
+  "Timberscar Copse",
+];
 
 function fmtDurationShort(seconds) {
   if (seconds == null || !Number.isFinite(Number(seconds))) return "?";
@@ -1053,6 +1061,14 @@ function navigationObjectiveLabel(objective) {
   return `${emoji} ${type}${rarity ? " " + rarity : ""}`;
 }
 
+function isTransportObjectiveType(type) {
+  return TRANSPORT_OBJECTIVE_TYPES.has(String(type || "").trim().toUpperCase());
+}
+
+function transportObjectiveName(type) {
+  return String(type || "").trim().toUpperCase() === "ORBS" ? "ORB" : "VORTEX";
+}
+
 function navigationDiscordText(state) {
   const queue = state?.objectives || [];
   if (!state || !queue.length) return `🧭 **NAVEGAÇÃO · CTA ${state?.event?.time || "?"}** — sem objetivo pendente.`;
@@ -1068,8 +1084,9 @@ function navigationDiscordText(state) {
   const first = queue[0];
   const firstLeg = state.itinerary?.legs?.[0] || null;
   if (state.instruction?.arrived) {
-    if (String(first?.type || "").toUpperCase() === "VORTEX" && String(first?.status || "").toLowerCase() === "pending") {
-      lines.push(`🔮 **CHEGAMOS AO VORTEX EM ${first.targetZoneName}** · quando pegar, use **/objetivo_proximo** para iniciar o transporte.`);
+    const firstType = String(first?.type || "").toUpperCase();
+    if (isTransportObjectiveType(firstType) && String(first?.status || "").toLowerCase() === "pending") {
+      lines.push(`🔮 **CHEGAMOS AO OBJETIVO ${transportObjectiveName(firstType)} EM ${first.targetZoneName}** · quando pegar, use **/objetivo_proximo** para iniciar o transporte.`);
     } else if (String(first?.status || "").toLowerCase() === "carrying") {
       lines.push(`📦 **CHEGAMOS AO MAPA DE ENTREGA: ${first.deliveryZoneName || firstLeg?.delivery?.zoneName || "?"}** · após entregar, use **/objetivo_proximo**.`);
     } else {
@@ -1086,11 +1103,12 @@ function navigationDiscordText(state) {
   const legs = state.itinerary?.legs || [];
   for (const leg of legs.slice(0, 6)) {
     const o = leg.objective;
-    const isVortex = String(o.type || "").toUpperCase() === "VORTEX";
+    const objectiveType = String(o.type || "").toUpperCase();
+    const isTransport = isTransportObjectiveType(objectiveType);
     const carrying = String(o.status || "").toLowerCase() === "carrying";
     const deadline = o.expiresAt ? Math.floor(new Date(o.expiresAt).getTime() / 1000) : null;
 
-    if (isVortex && carrying) {
+    if (isTransport && carrying) {
       lines.push(`**#${leg.index} · 📦 CARREGANDO ${navigationObjectiveLabel(o)}**`);
       lines.push(`↳ entrega em **${o.deliveryZoneName || leg.delivery?.zoneName || "?"}**`);
       if (leg.delivery?.maps != null) {
@@ -1099,8 +1117,8 @@ function navigationDiscordText(state) {
     } else {
       lines.push(`**#${leg.index} · ${navigationObjectiveLabel(o)} · ${o.targetZoneName}**`);
       if (deadline) lines.push(`⏳ horário do objetivo <t:${deadline}:R> · <t:${deadline}:T>`);
-      if (isVortex) {
-        lines.push(`🔮 pegar em **${o.targetZoneName}** → depois carregar para **${o.deliveryZoneName || leg.delivery?.zoneName || "?"}**`);
+      if (isTransport) {
+        lines.push(`🔮 pegar ${transportObjectiveName(objectiveType)} em **${o.targetZoneName}** → depois carregar para **${o.deliveryZoneName || leg.delivery?.zoneName || "?"}**`);
         if (leg.pickup?.maps != null || leg.delivery?.maps != null) {
           lines.push(`🛣️ buscar: ${leg.pickup?.maps ?? "?"} mapa(s) · transportar: ${leg.delivery?.maps ?? "?"} mapa(s) · total ~${fmtDurationShort(leg.travelSeconds)}`);
         }
@@ -1124,7 +1142,7 @@ function navigationDiscordText(state) {
   if (legs.length > 6) lines.push(`… +${legs.length - 6} objetivo(s)`);
 
   lines.push("");
-  lines.push("🧠 Para VORTEX, o mapa cadastrado é **onde ele está**. Depois de pego, o tempo de transporte até Thunderrock Upland, Rivercopse Curve ou Giantweald Woods entra no cálculo dos próximos objetivos.");
+  lines.push("🧠 VORTEX e ORB: o mapa cadastrado é **onde o objetivo está**. Vortex entrega em Thunderrock Upland, Rivercopse Curve, Giantweald Woods ou Deepwood Pines. Orb entrega nos HOs de Thunderrock Upland, Deepwood Pines, Murdergulch Trail, Sandmount Ascent ou Timberscar Copse. O transporte entra no cálculo dos próximos objetivos.");
   lines.push(`⏱️ estimativa inicial: **${state.itinerary?.secondsPerMap || 90}s por mapa**.`);
 
   const zones = state.positions?.zones || [];
@@ -1201,9 +1219,7 @@ function validateObjectiveRarity(type, rarity) {
 
 async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
   const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
-  const requestedTarget = type === "ORBS"
-    ? ORBS_HO_ZONE
-    : (input.targetZone || input.targetZoneName || input.targetZoneId);
+  const requestedTarget = input.targetZone || input.targetZoneName || input.targetZoneId;
 
   if (!requestedTarget) {
     return { ok: false, error: "Informe o mapa de destino." };
@@ -1243,7 +1259,7 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
 
 async function startNavigationCarryCore(ev, waypointId, deliveryZoneId, deliveryZoneName) {
   if (!deliveryZoneId || !deliveryZoneName) {
-    return { ok: false, error: "Mapa de entrega do Vortex não foi calculado." };
+    return { ok: false, error: "Mapa de entrega do objetivo transportável não foi calculado." };
   }
   const picked = await db.startNavigationCarry(
     ev.id,
@@ -1251,7 +1267,7 @@ async function startNavigationCarryCore(ev, waypointId, deliveryZoneId, delivery
     deliveryZoneId,
     deliveryZoneName
   ).catch(() => null);
-  if (!picked) return { ok: false, error: "Não foi possível marcar o Vortex como pego." };
+  if (!picked) return { ok: false, error: "Não foi possível marcar o objetivo como pego." };
   navigationMessageFingerprints.delete(String(ev.id));
   const state = await refreshNavigationMessage(ev.id, { force: true });
   return { ok: true, objective: picked, state };
@@ -1330,7 +1346,7 @@ async function slashNavigationObjective(interaction, ev) {
     content: `✅ Objetivo adicionado: **${navigationObjectiveLabel({
       type: result.objective.objective_type,
       rarity: result.objective.rarity
-    })} · ${result.objective.target_zone_name}**${result.objective.objective_type === "ORBS" ? " (HO)" : ""}. O bot recalculou a ordem por prazo + distância e colocou este objetivo na posição **#${optimizedIndex}**. ${first}`
+    })} · ${result.objective.target_zone_name}**. O bot recalculou a ordem por prazo + distância e colocou este objetivo na posição **#${optimizedIndex}**. ${first}`
   });
 }
 
@@ -1343,17 +1359,18 @@ async function slashNavigationNext(interaction, ev) {
     return interaction.editReply({ content: "Não há objetivo pendente na rota." });
   }
 
-  if (String(first.type || "").toUpperCase() === "VORTEX" && String(first.status || "pending").toLowerCase() === "pending") {
+  const firstType = String(first.type || "").toUpperCase();
+  if (isTransportObjectiveType(firstType) && String(first.status || "pending").toLowerCase() === "pending") {
     const delivery = firstLeg?.delivery;
     if (!delivery?.zoneId || !delivery?.zoneName) {
-      return interaction.editReply({ content: "⚠️ Ainda não consegui calcular o mapa de entrega deste Vortex." });
+      return interaction.editReply({ content: `⚠️ Ainda não consegui calcular o mapa de entrega desta ${transportObjectiveName(firstType)}.` });
     }
     const result = await startNavigationCarryCore(ev, first.id, delivery.zoneId, delivery.zoneName);
     if (!result.ok) {
-      return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível marcar o Vortex como pego.") });
+      return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível marcar o objetivo como pego.") });
     }
     return interaction.editReply({
-      content: `🔮 Vortex marcado como **PEGO**. Agora o Waze vai levar a massa até **${delivery.zoneName}** para entrega.`
+      content: `🔮 Objetivo ${transportObjectiveName(firstType)} marcado como **PEGO**. Agora o Waze vai levar a massa até **${delivery.zoneName}** para entrega.`
     });
   }
 

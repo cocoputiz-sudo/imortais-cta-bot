@@ -727,7 +727,7 @@ async function startNavigationCarry(eventId, waypointId, deliveryZoneId, deliver
             updated_at=now()
       WHERE cta_event_id=$1
         AND id=$2
-        AND objective_type='VORTEX'
+        AND objective_type IN ('VORTEX','ORBS')
         AND status='pending'
       RETURNING *`,
     [eventId, waypointId, String(deliveryZoneId || "").trim(), String(deliveryZoneName || "").trim()]
