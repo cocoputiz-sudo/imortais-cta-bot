@@ -1155,8 +1155,9 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     };
   }
 
-  // Filas maiores: escolhe iterativamente o objetivo com menor folga para o deadline;
-  // para Vortex/Orb, testa os mapas de entrega válidos e usa distância total no desempate.
+  // Filas maiores usam heurística, mas preservam a mesma regra operacional:
+  // evitar perdas primeiro e, se isso não piorar a viabilidade, coletar Vortex/Orb
+  // que já esteja no mapa atual antes de sair dele.
   const remaining = pending.slice();
   const greedyPlan = [];
   let current = prefixSource;
@@ -1164,24 +1165,65 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
   let score = { ...prefixScore };
 
   while (remaining.length) {
+    const hasLocalPickup = remaining.some(objective =>
+      isTransportPickupAt(current, objective)
+    );
     const candidates = [];
+
     for (const objective of remaining) {
       for (const transition of transitionOptions(current, objective)) {
+        const timing = navTransitionTiming(objective, transition, elapsed, nowMs);
         const deadline = navDeadlineMs(objective);
-        const pickupTravel = transition?.ok ? Number(transition.deadlineTravelSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000;
-        const pickupArrival = nowMs + (elapsed + pickupTravel) * 1000;
-        const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - pickupArrival) / 1000;
+        const pickupArrival = timing.pickupArrivalSeconds == null
+          ? Number.POSITIVE_INFINITY
+          : nowMs + timing.pickupArrivalSeconds * 1000;
+        const slack = deadline == null
+          ? Number.POSITIVE_INFINITY
+          : (deadline - pickupArrival) / 1000;
+        const localPickup = isTransportPickupAt(current, objective);
+
+        let projectedMisses = Number(timing.lateSeconds || 0) > 0 ? 1 : 0;
+        if (transition?.ok) {
+          const nextCurrent = transition.end;
+          const nextElapsed = timing.elapsedAfter;
+          for (const other of remaining) {
+            if (other === objective) continue;
+            const otherDeadline = navDeadlineMs(other);
+            if (otherDeadline == null) continue;
+            const otherOptions = transitionOptions(nextCurrent, other);
+            const otherTransition = otherOptions.find(x => x?.ok) || otherOptions[0];
+            if (!otherTransition?.ok) {
+              projectedMisses++;
+              continue;
+            }
+            const otherPickupTravel = Number(
+              otherTransition.deadlineTravelSeconds ??
+              otherTransition.pickupTravelSeconds ??
+              0
+            ) || 0;
+            const otherArrivalMs = nowMs + (nextElapsed + otherPickupTravel) * 1000;
+            if (otherArrivalMs > otherDeadline) projectedMisses++;
+          }
+        }
+
         candidates.push({
           objective,
           transition,
+          timing,
+          localPickup,
+          projectedMisses,
           slack,
-          total: transition?.ok ? Number(transition.totalSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000,
+          total: transition?.ok
+            ? Number(transition.totalSeconds || 0)
+            : Number.MAX_SAFE_INTEGER / 1000,
         });
       }
     }
 
     candidates.sort((a, b) => {
       if (!!a.transition?.ok !== !!b.transition?.ok) return a.transition?.ok ? -1 : 1;
+      if (a.projectedMisses !== b.projectedMisses) return a.projectedMisses - b.projectedMisses;
+      if (hasLocalPickup && a.localPickup !== b.localPickup) return a.localPickup ? -1 : 1;
       if (a.slack !== b.slack) return a.slack - b.slack;
       if (a.total !== b.total) return a.total - b.total;
       return (insertionOrder.get(String(a.objective.id)) || 0) -
@@ -1191,11 +1233,20 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     const pick = candidates[0];
     const position = prefixPlan.length + greedyPlan.length + 1;
     const totalCount = prefixPlan.length + pending.length;
-    score = addTransitionScore(score, pick.transition, pick.objective, elapsed, position, totalCount);
+    const localPickupDeferred = hasLocalPickup && !pick.localPickup;
+    score = addTransitionScore(
+      score,
+      pick.transition,
+      pick.objective,
+      elapsed,
+      position,
+      totalCount,
+      localPickupDeferred
+    );
     greedyPlan.push({ objective: pick.objective, transition: pick.transition });
 
     if (pick.transition?.ok) {
-      elapsed += Number(pick.transition.totalSeconds || 0);
+      elapsed = pick.timing.elapsedAfter;
       current = pick.transition.end;
     }
     remaining.splice(remaining.indexOf(pick.objective), 1);
