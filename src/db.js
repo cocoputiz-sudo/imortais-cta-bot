@@ -176,6 +176,36 @@ async function init() {
     );
     CREATE INDEX IF NOT EXISTS idx_cta_nav_expiry
       ON cta_navigation_objectives(expires_at);
+
+    CREATE TABLE IF NOT EXISTS cta_navigation_waypoints (
+      id                 BIGSERIAL PRIMARY KEY,
+      cta_event_id       BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
+      position           INT NOT NULL,
+      objective_type     TEXT NOT NULL,
+      rarity             TEXT,
+      target_zone_id     TEXT NOT NULL,
+      target_zone_name   TEXT NOT NULL,
+      expires_at         TIMESTAMPTZ,
+      created_by         TEXT,
+      status             TEXT NOT NULL DEFAULT 'pending',
+      completed_at       TIMESTAMPTZ,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (cta_event_id, position)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cta_nav_waypoints_event
+      ON cta_navigation_waypoints(cta_event_id, status, position);
+    CREATE INDEX IF NOT EXISTS idx_cta_nav_waypoints_expiry
+      ON cta_navigation_waypoints(expires_at);
+
+    CREATE TABLE IF NOT EXISTS cta_navigation_sessions (
+      cta_event_id       BIGINT PRIMARY KEY REFERENCES cta_events(id) ON DELETE CASCADE,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
+      seconds_per_map    INT NOT NULL DEFAULT 90,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
@@ -187,6 +217,30 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_departure TEXT;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_tier TEXT;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_count INT;`);
+
+  // Migração compatível: transforma o objetivo único antigo no primeiro waypoint.
+  await pool.query(`
+    INSERT INTO cta_navigation_waypoints
+      (cta_event_id, position, objective_type, rarity, target_zone_id, target_zone_name,
+       expires_at, created_by, created_at, updated_at)
+    SELECT o.cta_event_id, 1, o.objective_type, o.rarity, o.target_zone_id, o.target_zone_name,
+           o.expires_at, o.created_by, o.created_at, o.updated_at
+      FROM cta_navigation_objectives o
+     WHERE NOT EXISTS (
+       SELECT 1 FROM cta_navigation_waypoints w WHERE w.cta_event_id=o.cta_event_id
+     )
+    ON CONFLICT (cta_event_id, position) DO NOTHING
+  `);
+  await pool.query(`
+    INSERT INTO cta_navigation_sessions
+      (cta_event_id, discord_channel_id, discord_message_id, updated_at)
+    SELECT o.cta_event_id, o.discord_channel_id, o.discord_message_id, o.updated_at
+      FROM cta_navigation_objectives o
+    ON CONFLICT (cta_event_id) DO UPDATE SET
+      discord_channel_id=COALESCE(EXCLUDED.discord_channel_id, cta_navigation_sessions.discord_channel_id),
+      discord_message_id=COALESCE(EXCLUDED.discord_message_id, cta_navigation_sessions.discord_message_id),
+      updated_at=GREATEST(cta_navigation_sessions.updated_at, EXCLUDED.updated_at)
+  `);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10, brief = {} }) {
@@ -572,7 +626,7 @@ async function getCasteloPresence(casteloId) {
 }
 
 // ---- CTA NAVIGATION / WAZE ----
-async function setNavigationObjective({
+async function addNavigationObjective({
   eventId,
   objectiveType,
   rarity = null,
@@ -580,51 +634,122 @@ async function setNavigationObjective({
   targetZoneName,
   expiresAt = null,
   createdBy = null,
-  discordChannelId = null,
-  discordMessageId = null,
 }) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `INSERT INTO cta_navigation_waypoints
+         (cta_event_id, position, objective_type, rarity, target_zone_id, target_zone_name,
+          expires_at, created_by, status, updated_at)
+       SELECT $1,
+              COALESCE(MAX(position),0)+1,
+              $2,$3,$4,$5,$6,$7,'pending',now()
+         FROM cta_navigation_waypoints
+        WHERE cta_event_id=$1
+       RETURNING *`,
+      [
+        eventId,
+        String(objectiveType || "OBJETIVO").trim().slice(0, 80),
+        rarity ? String(rarity).trim().slice(0, 40) : null,
+        String(targetZoneId || "").trim(),
+        String(targetZoneName || "").trim(),
+        expiresAt || null,
+        createdBy || null,
+      ]
+    );
+    await client.query(
+      `INSERT INTO cta_navigation_sessions(cta_event_id, updated_at)
+       VALUES ($1,now())
+       ON CONFLICT (cta_event_id) DO UPDATE SET updated_at=now()`,
+      [eventId]
+    );
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function getNavigationObjectives(eventId, { includeDone = true } = {}) {
+  const params = [eventId];
+  const statusWhere = includeDone ? "" : "AND status='pending'";
   const { rows } = await pool.query(
-    `INSERT INTO cta_navigation_objectives
-       (cta_event_id, objective_type, rarity, target_zone_id, target_zone_name,
-        expires_at, created_by, discord_channel_id, discord_message_id, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
-     ON CONFLICT (cta_event_id) DO UPDATE SET
-       objective_type=EXCLUDED.objective_type,
-       rarity=EXCLUDED.rarity,
-       target_zone_id=EXCLUDED.target_zone_id,
-       target_zone_name=EXCLUDED.target_zone_name,
-       expires_at=EXCLUDED.expires_at,
-       created_by=EXCLUDED.created_by,
-       discord_channel_id=COALESCE(EXCLUDED.discord_channel_id, cta_navigation_objectives.discord_channel_id),
-       discord_message_id=COALESCE(EXCLUDED.discord_message_id, cta_navigation_objectives.discord_message_id),
-       updated_at=now()
-     RETURNING *`,
-    [
-      eventId,
-      String(objectiveType || "OBJETIVO").trim().slice(0, 80),
-      rarity ? String(rarity).trim().slice(0, 40) : null,
-      String(targetZoneId || "").trim(),
-      String(targetZoneName || "").trim(),
-      expiresAt || null,
-      createdBy || null,
-      discordChannelId || null,
-      discordMessageId || null,
-    ]
+    `SELECT * FROM cta_navigation_waypoints
+      WHERE cta_event_id=$1
+        ${statusWhere}
+      ORDER BY position ASC, id ASC`,
+    params
   );
-  return rows[0];
+  return rows;
 }
 
 async function getNavigationObjective(eventId) {
+  const rows = await getNavigationObjectives(eventId, { includeDone: false });
+  return rows[0] || null;
+}
+
+// Compatibilidade: chamadas antigas de "set" agora acrescentam um objetivo à fila.
+async function setNavigationObjective(input) {
+  return addNavigationObjective(input);
+}
+
+async function removeNavigationObjective(eventId, waypointId) {
   const { rows } = await pool.query(
-    `SELECT * FROM cta_navigation_objectives WHERE cta_event_id=$1 LIMIT 1`,
-    [eventId]
+    `DELETE FROM cta_navigation_waypoints
+      WHERE cta_event_id=$1 AND id=$2
+      RETURNING *`,
+    [eventId, waypointId]
+  );
+  if (rows[0]) await compactNavigationPositions(eventId);
+  return rows[0] || null;
+}
+
+async function completeNavigationObjective(eventId, waypointId) {
+  const { rows } = await pool.query(
+    `UPDATE cta_navigation_waypoints
+        SET status='done', completed_at=now(), updated_at=now()
+      WHERE cta_event_id=$1 AND id=$2
+      RETURNING *`,
+    [eventId, waypointId]
   );
   return rows[0] || null;
 }
 
-async function clearNavigationObjective(eventId) {
+async function compactNavigationPositions(eventId) {
+  await pool.query(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (ORDER BY position,id)::int AS new_pos
+         FROM cta_navigation_waypoints
+        WHERE cta_event_id=$1
+     )
+     UPDATE cta_navigation_waypoints w
+        SET position=r.new_pos, updated_at=now()
+       FROM ranked r
+      WHERE w.id=r.id AND w.position<>r.new_pos`,
+    [eventId]
+  );
+}
+
+async function clearNavigationObjectives(eventId) {
   const { rows } = await pool.query(
-    `DELETE FROM cta_navigation_objectives WHERE cta_event_id=$1 RETURNING *`,
+    `DELETE FROM cta_navigation_waypoints WHERE cta_event_id=$1 RETURNING *`,
+    [eventId]
+  );
+  return rows;
+}
+
+async function clearNavigationObjective(eventId) {
+  const rows = await clearNavigationObjectives(eventId);
+  return rows[0] || null;
+}
+
+async function getNavigationSession(eventId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_navigation_sessions WHERE cta_event_id=$1 LIMIT 1`,
     [eventId]
   );
   return rows[0] || null;
@@ -632,15 +757,31 @@ async function clearNavigationObjective(eventId) {
 
 async function setNavigationObjectiveMessage(eventId, channelId, messageId) {
   const { rows } = await pool.query(
-    `UPDATE cta_navigation_objectives
-        SET discord_channel_id=$2,
-            discord_message_id=$3,
-            updated_at=now()
-      WHERE cta_event_id=$1
-      RETURNING *`,
+    `INSERT INTO cta_navigation_sessions
+       (cta_event_id, discord_channel_id, discord_message_id, updated_at)
+     VALUES ($1,$2,$3,now())
+     ON CONFLICT (cta_event_id) DO UPDATE SET
+       discord_channel_id=EXCLUDED.discord_channel_id,
+       discord_message_id=EXCLUDED.discord_message_id,
+       updated_at=now()
+     RETURNING *`,
     [eventId, channelId || null, messageId || null]
   );
   return rows[0] || null;
+}
+
+async function setNavigationSecondsPerMap(eventId, secondsPerMap) {
+  const value = Math.max(20, Math.min(600, Number(secondsPerMap) || 90));
+  const { rows } = await pool.query(
+    `INSERT INTO cta_navigation_sessions(cta_event_id, seconds_per_map, updated_at)
+     VALUES ($1,$2,now())
+     ON CONFLICT (cta_event_id) DO UPDATE SET
+       seconds_per_map=EXCLUDED.seconds_per_map,
+       updated_at=now()
+     RETURNING *`,
+    [eventId, value]
+  );
+  return rows[0];
 }
 
 async function getOpenNavigationObjectives(guildId = null) {
@@ -651,12 +792,13 @@ async function getOpenNavigationObjectives(guildId = null) {
     guildWhere = `AND e.guild_id=$${params.length}`;
   }
   const { rows } = await pool.query(
-    `SELECT n.*, e.guild_id, e.channel_id, e.thread_id, e.time_label, e.status, e.caller_id
-       FROM cta_navigation_objectives n
-       JOIN cta_events e ON e.id=n.cta_event_id
+    `SELECT w.*, e.guild_id, e.channel_id, e.thread_id, e.time_label, e.status AS event_status, e.caller_id
+       FROM cta_navigation_waypoints w
+       JOIN cta_events e ON e.id=w.cta_event_id
       WHERE e.status='open'
+        AND w.status='pending'
         ${guildWhere}
-      ORDER BY n.updated_at DESC`,
+      ORDER BY w.cta_event_id, w.position`,
     params
   );
   return rows;
@@ -731,8 +873,10 @@ module.exports = {
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
-  setNavigationObjective, getNavigationObjective, clearNavigationObjective,
-  setNavigationObjectiveMessage, getOpenNavigationObjectives,
+  addNavigationObjective, setNavigationObjective, getNavigationObjective, getNavigationObjectives,
+  removeNavigationObjective, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
+  compactNavigationPositions, getNavigationSession, setNavigationObjectiveMessage,
+  setNavigationSecondsPerMap, getOpenNavigationObjectives,
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
   upsertRoamingSignup, getRoamingSignups, deleteRoamingSignup,
   roamingVoiceJoin, roamingVoiceLeave, roamingCloseAllOpen, getRoamingPresence,
