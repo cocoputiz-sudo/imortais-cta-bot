@@ -1390,6 +1390,57 @@ async function getCombat(db, eventId) {
     }
     return [...byPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, limit);
   }
+
+  function enemyGuildName(guilds) {
+    for (const raw of (guilds || [])) {
+      const guild = String(raw || "").trim();
+      if (guild && !isImortaisFamilyGuild(guild)) return guild;
+    }
+    return "Sem guilda";
+  }
+
+  function killScoreFor(kills) {
+    const byGuild = new Map();
+
+    function scoreRow(guild) {
+      const display = String(guild || "").trim() || "Sem guilda";
+      const key = display === "Sem guilda" ? "__sem_guilda__" : (normGuild(display) || "__sem_guilda__");
+      if (!byGuild.has(key)) {
+        byGuild.set(key, { guild: display, weKilledThem: 0, theyKilledUs: 0 });
+      }
+      return byGuild.get(key);
+    }
+
+    for (const k of kills) {
+      const killerIsOurs = !!(k.killerInRoster || k.killerInFamily);
+      const victimIsOurs = !!(k.victimInRoster || k.victimInFamily);
+
+      // Ignora friendly fire e mortes entre dois inimigos.
+      if (killerIsOurs === victimIsOurs) continue;
+
+      if (killerIsOurs) {
+        scoreRow(enemyGuildName(k.victimGuilds)).weKilledThem++;
+      } else {
+        scoreRow(enemyGuildName(k.killerGuilds)).theyKilledUs++;
+      }
+    }
+
+    const rows = [...byGuild.values()]
+      .filter(x => x.weKilledThem > 0 || x.theyKilledUs > 0)
+      .sort((a, b) =>
+        (b.weKilledThem + b.theyKilledUs) - (a.weKilledThem + a.theyKilledUs) ||
+        b.weKilledThem - a.weKilledThem ||
+        a.guild.localeCompare(b.guild, "pt-BR")
+      );
+
+    return {
+      byGuild: rows,
+      totals: {
+        weKilled: rows.reduce((sum, x) => sum + x.weKilledThem, 0),
+        wereKilled: rows.reduce((sum, x) => sum + x.theyKilledUs, 0)
+      }
+    };
+  }
   function serializeFight(bucket) {
     const list = [...bucket.players.values()];
     const canonicalList = [...bucket.canonicalPlayers.values()];
@@ -1422,6 +1473,7 @@ async function getCombat(db, eventId) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 10).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 10).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills, 10),
+      killScore: killScoreFor(kills),
       audit: {
         rawCombatDeltaEvents: bucket.rawCombatDeltaEvents,
         canonicalDeltaEvents: bucket.canonicalDeltaEvents,
@@ -1466,6 +1518,7 @@ async function getCombat(db, eventId) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills),
+      killScore: killScoreFor(kills),
       fights: reportableFights,
       audit: {
         candidateFights: serializedFights.length,
@@ -1521,6 +1574,7 @@ async function getCombat(db, eventId) {
     topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
     topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
     topKillsCandidate: killRanking(kills),
+    killScore: killScoreFor(kills),
     audit: {
       rosterPlayers: rosterKeys.size,
       rawCombatDeltaEvents,
