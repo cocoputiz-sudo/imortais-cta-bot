@@ -1297,6 +1297,13 @@ const PAGE = `<!doctype html>
     var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':type==='NODE'?'💎':type==='ORBS'?'🔮':'🎯';
     return emoji+' '+esc(type)+(rarity?' '+esc(rarity):'');
   }
+  function navIsTransport(type){
+    var t=String(type||'').toUpperCase();
+    return t==='VORTEX'||t==='ORBS';
+  }
+  function navTransportName(type){
+    return String(type||'').toUpperCase()==='ORBS'?'ORB':'VORTEX';
+  }
   function navRarityChoices(type,selected){
     var t=String(type||'').toUpperCase();
     var arr=t==='NODE'
@@ -1324,13 +1331,8 @@ const PAGE = `<!doctype html>
     if(!type||!target||!dl) return;
     var t=String(type.value||'').toUpperCase();
     target.disabled=false;
-    if(t==='ORBS'){
-      target.value='Thunderrock Upland';
-      target.placeholder='HO · Thunderrock Upland';
-      target.disabled=true;
-      dl.innerHTML='<option value="Thunderrock Upland"></option>';
-    } else if(t==='VORTEX'){
-      target.placeholder='Mapa onde o Vortex está, ex.: Flammog Fork';
+    if(navIsTransport(t)){
+      target.placeholder='Mapa onde '+navTransportName(t)+' está, ex.: Flammog Fork';
       if(clearInvalid) target.value='';
       dl.innerHTML='';
     } else {
@@ -1349,8 +1351,6 @@ const PAGE = `<!doctype html>
     if(target){
       target.oninput=function(){
         keepDraft();
-        var liveType=document.getElementById('nav-type');
-        if(liveType && String(liveType.value||'').toUpperCase()==='ORBS') return;
         if(navZoneSearchTimer) clearTimeout(navZoneSearchTimer);
         navZoneSearchTimer=setTimeout(function(){
           var liveTarget=document.getElementById('nav-target');
@@ -1380,9 +1380,7 @@ const PAGE = `<!doctype html>
     if(set) set.onclick=function(){
       if(!current) return;
       var selectedType=document.getElementById('nav-type').value;
-      var dest=String(selectedType||'').toUpperCase()==='ORBS'
-        ? 'Thunderrock Upland'
-        : (document.getElementById('nav-target').value||'').trim();
+      var dest=(document.getElementById('nav-target').value||'').trim();
       if(!dest){ flash('● informe o destino','var(--red)'); return; }
       var payload={
         event:current,
@@ -1424,7 +1422,7 @@ const PAGE = `<!doctype html>
           event:current,waypoint:id,deliveryZoneId:deliveryId,deliveryZoneName:deliveryName
         })})
           .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
-          .then(function(){flash('● Vortex pego · iniciando transporte','var(--green)');renderNavigation();})
+          .then(function(){flash('● objetivo pego · iniciando transporte','var(--green)');renderNavigation();})
           .catch(function(e){flash('● '+e.message,'var(--red)');});
       };
     });
@@ -1469,7 +1467,7 @@ const PAGE = `<!doctype html>
           +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="'+esc(draft.seconds==null?'0':draft.seconds)+'"></div></div>'
           +'<div class="nav2-actions"><button class="btn primary" id="nav-set">＋ Adicionar à rota</button>'
           +(queue.length?'<button class="btn danger" id="nav-clear">Limpar fila</button>':'')+'</div>'
-          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX: informe o mapa onde ele está; depois de pego ele será carregado para Thunderrock Upland, Rivercopse Curve ou Giantweald Woods, escolhido pelo bot. ORBS: destino fixo no HO em Thunderrock Upland. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O bot decide a ordem por prazo + distância total. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
+          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX/ORB: informe o mapa onde o objetivo foi encontrado. Vortex entrega em Thunderrock Upland, Rivercopse Curve, Giantweald Woods ou Deepwood Pines. Orb entrega nos HOs de Thunderrock Upland, Deepwood Pines, Murdergulch Trail, Sandmount Ascent ou Timberscar Copse. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O bot decide a ordem por prazo + distância total. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
           +'</div></div>'
         : '';
 
@@ -1480,13 +1478,13 @@ const PAGE = `<!doctype html>
 
       var next='';
       if(o&&cur){
-        var firstLeg=legs[0]||{}, firstIsVortex=String(o.type||'').toUpperCase()==='VORTEX', firstCarrying=String(o.status||'').toLowerCase()==='carrying';
+        var firstLeg=legs[0]||{}, firstType=String(o.type||'').toUpperCase(), firstTransport=navIsTransport(firstType), firstName=navTransportName(firstType), firstCarrying=String(o.status||'').toLowerCase()==='carrying';
         if(inst&&inst.arrived){
-          if(firstIsVortex&&!firstCarrying) next='<div class="nav2-next"><small>VORTEX #1</small><strong>🔮 PEGAR EM '+esc(o.targetZoneName)+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Depois clique em “Vortex pego”; o Waze muda para a rota de entrega em '+esc(o.deliveryZoneName||firstLeg.delivery&&firstLeg.delivery.zoneName||'?')+'.</div></div>';
-          else if(firstCarrying) next='<div class="nav2-next"><small>ENTREGA DO VORTEX</small><strong>📦 '+esc(o.deliveryZoneName||firstLeg.delivery&&firstLeg.delivery.zoneName||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Depois de entregar, marque “Vortex entregue”.</div></div>';
+          if(firstTransport&&!firstCarrying) next='<div class="nav2-next"><small>'+esc(firstName)+' #1</small><strong>🔮 PEGAR EM '+esc(o.targetZoneName)+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Depois clique em “'+esc(firstName)+' pego”; o Waze muda para a rota de entrega em '+esc(o.deliveryZoneName||firstLeg.delivery&&firstLeg.delivery.zoneName||'?')+'.</div></div>';
+          else if(firstCarrying) next='<div class="nav2-next"><small>ENTREGA · '+esc(firstName)+'</small><strong>📦 '+esc(o.deliveryZoneName||firstLeg.delivery&&firstLeg.delivery.zoneName||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Depois de entregar, marque como entregue.</div></div>';
           else next='<div class="nav2-next"><small>OBJETIVO #1</small><strong>✅ '+esc(o.targetZoneName)+'</strong></div>';
         } else if(inst) {
-          next='<div class="nav2-next"><small>'+(firstCarrying?'TRANSPORTANDO VORTEX':'PRÓXIMA SAÍDA')+'</small><strong>'+esc(inst.exit)+' → '+esc(inst.next&&inst.next.name||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">'+esc(inst.mapsRemaining)+' mapa(s) restantes nesta etapa</div></div>';
+          next='<div class="nav2-next"><small>'+(firstCarrying?'TRANSPORTANDO '+esc(firstName):'PRÓXIMA SAÍDA')+'</small><strong>'+esc(inst.exit)+' → '+esc(inst.next&&inst.next.name||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">'+esc(inst.mapsRemaining)+' mapa(s) restantes nesta etapa</div></div>';
         } else next='<div class="nav2-next"><small>ROTA</small><strong>⚠️ AGUARDANDO POSIÇÃO/ROTA</strong></div>';
       }
 
@@ -1510,36 +1508,38 @@ const PAGE = `<!doctype html>
                 : '<span>✅ '+esc(s.zone&&s.zone.name||'?')+'</span>';
             }).join('')+'</div></div>';
           }
-          var isVortex=String(obj.type||'').toUpperCase()==='VORTEX';
+          var objectiveType=String(obj.type||'').toUpperCase();
+          var isTransport=navIsTransport(objectiveType);
+          var transportName=navTransportName(objectiveType);
           var carrying=String(obj.status||'').toLowerCase()==='carrying';
           var routeSteps='';
-          if(isVortex&&!carrying){
-            routeSteps=stepHtml(leg.pickup&&leg.pickup.route,'1. BUSCAR: '+(leg.from||'posição atual')+' → '+obj.targetZoneName)
-              +stepHtml(leg.delivery&&leg.delivery.route,'2. CARREGAR: '+obj.targetZoneName+' → '+((leg.delivery&&leg.delivery.zoneName)||obj.deliveryZoneName||'?'));
+          if(isTransport&&!carrying){
+            routeSteps=stepHtml(leg.pickup&&leg.pickup.route,'1. BUSCAR '+transportName+': '+(leg.from||'posição atual')+' → '+obj.targetZoneName)
+              +stepHtml(leg.delivery&&leg.delivery.route,'2. CARREGAR '+transportName+': '+obj.targetZoneName+' → '+((leg.delivery&&leg.delivery.zoneName)||obj.deliveryZoneName||'?'));
           } else if(carrying){
-            routeSteps=stepHtml(leg.delivery&&leg.delivery.route,'TRANSPORTAR: '+(leg.from||'posição atual')+' → '+((leg.delivery&&leg.delivery.zoneName)||obj.deliveryZoneName||'?'));
+            routeSteps=stepHtml(leg.delivery&&leg.delivery.route,'TRANSPORTAR '+transportName+': '+(leg.from||'posição atual')+' → '+((leg.delivery&&leg.delivery.zoneName)||obj.deliveryZoneName||'?'));
           } else {
             routeSteps=stepHtml(leg.route,'TRAJETO: '+(leg.from||'posição atual')+' → '+(leg.to||'?'));
           }
           var acts='';
           if(authState.canEdit){
-            if(isVortex&&!carrying&&leg.delivery&&leg.delivery.zoneId){
-              acts='<div class="nav2-qactions"><button class="btn primary" data-nav-pickup="'+esc(obj.id)+'" data-delivery-id="'+esc(leg.delivery.zoneId)+'" data-delivery-name="'+esc(leg.delivery.zoneName)+'">🔮 Vortex pego</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+            if(isTransport&&!carrying&&leg.delivery&&leg.delivery.zoneId){
+              acts='<div class="nav2-qactions"><button class="btn primary" data-nav-pickup="'+esc(obj.id)+'" data-delivery-id="'+esc(leg.delivery.zoneId)+'" data-delivery-name="'+esc(leg.delivery.zoneName)+'">🔮 '+esc(transportName)+' pego</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
             } else {
-              acts='<div class="nav2-qactions"><button class="btn ghost" data-nav-complete="'+esc(obj.id)+'">'+(carrying?'✓ Vortex entregue':'✓ Concluído')+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+              acts='<div class="nav2-qactions"><button class="btn ghost" data-nav-complete="'+esc(obj.id)+'">'+(carrying?'✓ Entregue':'✓ Concluído')+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
             }
           }
-          var targetLine=isVortex
-            ? (carrying?'📦 Entregar em '+esc(obj.deliveryZoneName||leg.delivery&&leg.delivery.zoneName||'?'):'🔮 Buscar em '+esc(obj.targetZoneName)+' → entregar em '+esc(obj.deliveryZoneName||leg.delivery&&leg.delivery.zoneName||'?'))
+          var targetLine=isTransport
+            ? (carrying?'📦 Entregar em '+esc(obj.deliveryZoneName||leg.delivery&&leg.delivery.zoneName||'?'):'🔮 Buscar '+esc(transportName)+' em '+esc(obj.targetZoneName)+' → entregar em '+esc(obj.deliveryZoneName||leg.delivery&&leg.delivery.zoneName||'?'))
             : esc(obj.targetZoneName);
-          var vortexMeta=isVortex
+          var transportMeta=isTransport
             ? (carrying
                 ? '<span>📦 '+esc(leg.delivery&&leg.delivery.maps!=null?leg.delivery.maps:'?')+' mapa(s) de transporte</span>'
                 : '<span>🔎 '+esc(leg.pickup&&leg.pickup.maps!=null?leg.pickup.maps:'?')+' buscar + 📦 '+esc(leg.delivery&&leg.delivery.maps!=null?leg.delivery.maps:'?')+' transportar</span>')
             : '';
           return '<div class="nav2-qitem"><div class="nav2-qtop"><span class="nav2-qnum">'+esc(leg.index)+'</span><div class="nav2-qmain">'
             +'<div class="nav2-qkind">'+navKind(obj)+(carrying?' · CARREGANDO':'')+'</div><div class="nav2-qtarget">'+targetLine+'</div>'
-            +'<div class="nav2-qmeta">'+(carrying?'':deadline)+vortexMeta
+            +'<div class="nav2-qmeta">'+(carrying?'':deadline)+transportMeta
             +(leg.maps!=null?'<span>🗺️ total '+esc(leg.maps)+' mapa(s)</span>':'')
             +(leg.travelSeconds!=null?'<span>🚕 ~'+navDelta(leg.travelSeconds)+'</span>':'')
             +(leg.slackSeconds!=null?'<span>margem '+navDelta(leg.slackSeconds)+'</span>':'')
@@ -1558,7 +1558,7 @@ const PAGE = `<!doctype html>
         : '';
 
       var opt=(d.itinerary&&d.itinerary.optimization)||{};
-      var optimizerNote='<div style="margin:0 0 10px;padding:8px 9px;border:1px solid #3a4b61;border-radius:8px;background:#0d151f;color:#9fb4cd;font-size:9px">🧠 <b>ORDEM AUTOMÁTICA</b> · Vortex = ir ao mapa onde ele está + carregar até Upland/Curve/Giantweald. Esse transporte entra no custo antes do próximo objetivo. O bot tenta cumprir os horários e reduzir o total de mapas.</div>';
+      var optimizerNote='<div style="margin:0 0 10px;padding:8px 9px;border:1px solid #3a4b61;border-radius:8px;background:#0d151f;color:#9fb4cd;font-size:9px">🧠 <b>ORDEM AUTOMÁTICA</b> · Vortex e Orb = buscar no mapa cadastrado + transportar até um destino permitido. O transporte entra no custo antes do próximo objetivo. O bot tenta cumprir os horários e reduzir o total de mapas.</div>';
       var right='<div class="nav2-card"><h3>ROTA OTIMIZADA</h3>'+optimizerNote+currentHtml+next+queueHtml+spreadHtml+'</div>';
       var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Você cadastra os objetivos sem ordenar. O bot escolhe a sequência usando deadline e distância entre mapas.</p></div>'
         +'<span class="nav2-status">'+esc(queue.length)+' objetivo(s) · '+esc((d.graph&&d.graph.zones)||0)+' mapas</span></div>'
