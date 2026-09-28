@@ -1108,7 +1108,7 @@ async function refreshNavigationMessage(eventId, { force = false } = {}) {
     console.error("navigation state:", e);
     return null;
   });
-  if (!state || !(state.objectives || []).length) return state;
+  if (!state) return null;
 
   const content = navigationDiscordText(state);
   if (!force && navigationMessageFingerprints.get(String(eventId)) === content) return state;
