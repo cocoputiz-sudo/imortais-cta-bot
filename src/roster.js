@@ -144,6 +144,11 @@ function countWeaponInParty(assignment, weapon, partyIndex) {
 function solve(signups, numParties = 4, partyList = null, opts = {}) {
   // partyList: lista específica de índices de PT (ex castelo [4,0,1]). Se null, usa 0..numParties.
   const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
+  const lockedParties = new Set(
+    opts.lockedParties instanceof Set
+      ? [...opts.lockedParties].map(Number).filter(Number.isInteger)
+      : (Array.isArray(opts.lockedParties) ? opts.lockedParties : []).map(Number).filter(Number.isInteger)
+  );
   const cells = [];
   for (const p of parties) {
     for (let i = 0; i < PARTIES[p].slots.length; i++) {
@@ -169,6 +174,30 @@ function solve(signups, numParties = 4, partyList = null, opts = {}) {
       usedCells.add(`${su.party_index}:${su.slot_index}`);
       weaponCount[U(su.weapon)] = (weaponCount[U(su.weapon)] || 0) + 1;
     }
+  }
+
+  // ---- TRAVA DE REALOCAÇÃO POR PT (caller / War Room) ----
+  // Quem já está numa PT travada fica exatamente na vaga atual. Isso é diferente
+  // do "manual": a trava vale para a PT inteira e pode ser ligada/desligada pelo caller.
+  // Vagas vazias da PT travada ainda podem receber NOVOS inscritos/reservas, mas o
+  // motor não rouba alguém que já esteja alocado em outra PT para preenchê-las.
+  for (const su of signups) {
+    if (usedUsers.has(su.user_id)) continue;
+    if (su.party_index == null || su.slot_index == null) continue;
+    if (!lockedParties.has(Number(su.party_index))) continue;
+    if (!parties.includes(Number(su.party_index))) continue;
+    if (!PARTIES[su.party_index]?.slots?.[su.slot_index]) continue;
+
+    assignment.set(su.user_id, {
+      partyIndex: su.party_index,
+      slotIndex: su.slot_index,
+      kind: "party-lock",
+      _weapon: su.weapon,
+      _ip: su.ip,
+    });
+    usedUsers.add(su.user_id);
+    usedCells.add(`${su.party_index}:${su.slot_index}`);
+    weaponCount[U(su.weapon)] = (weaponCount[U(su.weapon)] || 0) + 1;
   }
 
   // ---- TRAVA AUTOMÁTICA (/cta_add e /cta_move) ----
@@ -212,6 +241,9 @@ function solve(signups, numParties = 4, partyList = null, opts = {}) {
         for (const su of signups) {
           if (usedUsers.has(su.user_id)) continue;
           if (U(su.weapon) === "LOOTER") continue;
+          // PT travada não recebe alguém que já estava alocado em outra PT.
+          // Somente reservas/novos inscritos podem ocupar buracos ainda vazios nela.
+          if (lockedParties.has(cell.p) && su.party_index != null) continue;
           const sc = affinityScore(cell.slot, su.weapon, ctx);
           if (!sc || sc.kind !== pass) continue;
           const cap = capFor(su.weapon, numParties, parties);
@@ -292,9 +324,14 @@ function weaponRole(weapon) {
   return (WEAPONS[U(weapon)] || {}).role || null;
 }
 
-function consolidate(signups, numParties = 4, partyList = null) {
+function consolidate(signups, numParties = 4, partyList = null, opts = {}) {
   const parties = partyList || Array.from({ length: numParties }, (_, k) => k);
-  const base = reallocate(signups, numParties, partyList);
+  const lockedParties = new Set(
+    opts.lockedParties instanceof Set
+      ? [...opts.lockedParties].map(Number).filter(Number.isInteger)
+      : (Array.isArray(opts.lockedParties) ? opts.lockedParties : []).map(Number).filter(Number.isInteger)
+  );
+  const base = reallocate(signups, numParties, partyList, opts);
   const taken = new Set();
   for (const r of base) if (r.partyIndex != null) taken.add(`${r.partyIndex}:${r.slotIndex}`);
 
@@ -308,6 +345,7 @@ function consolidate(signups, numParties = 4, partyList = null) {
     // percorre as PTs da party_list, PULANDO a primeira (PT1 intocável)
     for (let pi = 1; pi < parties.length && !colocado; pi++) {
       const p = parties[pi];
+      if (lockedParties.has(p)) continue;
       for (let i = 0; i < PARTIES[p].slots.length; i++) {
         if (taken.has(`${p}:${i}`)) continue;
         if (PARTIES[p].slots[i].locked) continue;

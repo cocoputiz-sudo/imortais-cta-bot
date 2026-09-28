@@ -59,6 +59,52 @@ function timeToTodayUTC(label) {
 }
 
 // contexto de encaixe do CTA: quem é core confirmado + se ainda falta >10min pro início
+function fichaLabel(count) {
+  const n = Math.max(1, Math.min(9, Number(count) || 1));
+  const words = {
+    1: "UMA FICHA",
+    2: "DUAS FICHAS",
+    3: "TRÊS FICHAS",
+    4: "QUATRO FICHAS",
+    5: "CINCO FICHAS",
+    6: "SEIS FICHAS",
+    7: "SETE FICHAS",
+    8: "OITO FICHAS",
+    9: "NOVE FICHAS",
+  };
+  return words[n] || `${n} FICHAS`;
+}
+
+function normalizeCtaBrief(input = {}) {
+  const departure = String(input.departure || "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/@/g, "＠")
+    .trim()
+    .slice(0, 120);
+  let gearTier = String(input.gearTier || "T8")
+    .replace(/[\r\n]+/g, "")
+    .trim()
+    .toUpperCase()
+    .slice(0, 16);
+  if (gearTier && !gearTier.startsWith("T")) gearTier = "T" + gearTier;
+  const gearCount = Math.max(1, Math.min(9, Number(input.gearCount) || 2));
+  return {
+    departure: input.useDeparture && departure ? departure : null,
+    gearTier: input.useGear && gearTier ? gearTier : null,
+    gearCount,
+  };
+}
+
+function ctaBriefText(input = {}) {
+  const brief = normalizeCtaBrief(input);
+  const lines = [];
+  if (brief.departure) lines.push(`# SAÍDA DE ${brief.departure.toUpperCase()}`);
+  if (brief.gearTier) lines.push(`# GEAR ${brief.gearTier}, ${fichaLabel(brief.gearCount)}`);
+  lines.push("# FOOD .2");
+  lines.push("# POÇÃO: GIGANTIFICADORA T7");
+  return lines.join("\n");
+}
+
 async function ctaOpts(ev) {
   const ping = timeToTodayUTC(ev.time_label);
   // a batalha começa ~40min depois do ping (horário cheio seguinte). O privilégio
@@ -72,7 +118,8 @@ async function ctaOpts(ev) {
       coreIds = new Set(r.rows.map((x) => String(x.user_id)));
     } catch (_) { /* players pode não existir ainda */ }
   }
-  return { coreIds, corePrivilege };
+  const lockedParties = new Set(db.parseReallocationLocks(ev));
+  return { coreIds, corePrivilege, lockedParties };
 }
 
 // ======================  1) GATILHO  =======================================
@@ -380,9 +427,10 @@ async function criarCTA(channel, guild, guildId, callerId, time, opts = {}) {
   await db.setThread(ev.id, thread.id);
 
   const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+  const briefText = ctaBriefText(opts.brief || {});
   const header = opts.flashmass
     ? `${mention} ⚡🚨 **FLASHMASS ${time} UTC** — massa relâmpago, loga AGORA e escolhe tua arma 👇`
-    : `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\nEscolhe tua arma abaixo 👇`;
+    : `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\n\n${briefText}\n\nEscolhe tua arma abaixo 👇`;
   await thread.send({ content: header, components: buildRolePicker(ev.id) });
 
   const chunks = rosterChunks([], 1, [0]); // começa só com a PT1
@@ -398,7 +446,7 @@ async function criarCTA(channel, guild, guildId, callerId, time, opts = {}) {
       const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
       const txt = opts.flashmass
         ? `${mention} ⚡ **FLASHMASS — ${time} UTC!** Loga e pinga tua função AGORA.\n👉 ${link}`
-        : `${mention} 🗡️ **Saiu CTA — ${time} UTC!** Loga e pinga tua função.\n👉 ${link}`;
+        : `${mention} 🗡️ **Saiu CTA — ${time} UTC!**\n\n${briefText}\n\nLoga e pinga tua função.\n👉 ${link}`;
       await cch.send({ content: txt, ...allow }).catch(() => {});
     }
   }
@@ -928,6 +976,11 @@ async function removePTCore(ev, visualPt, actor) {
   );
   pl.splice(v - 1, 1);
   await db.setPartyList(fresh.id, pl);
+  const locks = new Set(db.parseReallocationLocks(fresh));
+  if (locks.delete(raw)) {
+    await db.setReallocationLocks(fresh.id, [...locks]);
+    fresh.realloc_lock_parties = [...locks].join(",");
+  }
   const guild = client.guilds.cache.get(fresh.guild_id) || null;
   await applyReallocation(fresh, guild, null);
   return { ok: true, movidos: upd.rowCount || 0, pt: v };
@@ -1001,7 +1054,7 @@ async function applyConsolidation(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = consolidate(signups, pl.length, pl);
+  const result = consolidate(signups, pl.length, pl, await ctaOpts(fresh));
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
@@ -2442,18 +2495,34 @@ const webActions = {
     const guild = client.guilds.cache.get(ev.guild_id) || null;
     await applyReallocation(ev, guild, null);
   },
-  openCTA: async (time, actorId, imageBase64) => {
+  openCTA: async (time, actorId, imageBase64, briefInput = {}) => {
     const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
     if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
+
+    const brief = normalizeCtaBrief(briefInput);
+    const info = ctaBriefText(briefInput);
+    const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+    const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+    const payload = {
+      content: `${mention} 🛡️ **CTA ${time} UTC** — chamado!\n\n${info}\n\nLoga e pinga tua função na thread 👇`,
+      ...allow,
+    };
+
     if (imageBase64) {
       try {
         const b = Buffer.from(String(imageBase64).replace(/^data:[^;]+;base64,/, ""), "base64");
-        const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-        const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-        await ch.send({ content: `${mention} 🛡️ **CTA ${time} UTC** — chamado! Loga e pinga tua função na thread 👇`, files: [{ attachment: b, name: "cta.png" }], ...allow }).catch(() => {});
+        payload.files = [{ attachment: b, name: "cta.png" }];
       } catch (_) { /* ignora imagem inválida */ }
     }
-    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time);
+
+    await ch.send(payload).catch(() => {});
+    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time, { brief: {
+      useDeparture: !!brief.departure,
+      departure: brief.departure,
+      useGear: !!brief.gearTier,
+      gearTier: brief.gearTier,
+      gearCount: brief.gearCount,
+    } });
     return { ok: true };
   },
   flashmass: async (time, actorId) => {
@@ -2486,6 +2555,37 @@ const webActions = {
     const ev = await db.getEvent(eventId).catch(() => null);
     if (!ev) return { ok: false, error: "CTA não encontrado." };
     return removePTCore(ev, visualPt, `<@${actorId}>`);
+  },
+  setPartyReallocationLock: async (eventId, visualPt, locked, actorId) => {
+    const fresh = await db.getEvent(eventId).catch(() => null);
+    if (!fresh) return { ok: false, error: "CTA não encontrado." };
+    if (fresh.status !== "open") return { ok: false, error: "CTA não está aberto." };
+
+    const visual = Number(visualPt);
+    if (![1, 2].includes(visual)) return { ok: false, error: "A trava está disponível somente para PT1 e PT2." };
+
+    const pl = db.parsePartyList(fresh);
+    const rawParty = pl[visual - 1];
+    if (rawParty == null) return { ok: false, error: `PT${visual} ainda não está aberta.` };
+
+    const locks = new Set(db.parseReallocationLocks(fresh));
+    if (locked) locks.add(rawParty);
+    else locks.delete(rawParty);
+    await db.setReallocationLocks(fresh.id, [...locks]);
+
+    fresh.realloc_lock_parties = [...locks].join(",");
+    const guild = client.guilds.cache.get(fresh.guild_id) || null;
+    if (locked) {
+      refreshRoster(fresh);
+    } else {
+      await applyReallocation(fresh, guild, null);
+    }
+
+    await logStaff(
+      guild,
+      `${locked ? "🔒" : "🔓"} <@${actorId}> ${locked ? "travou" : "destravou"} a realocação automática da **PT${visual}** · CTA ${fresh.time_label}`
+    );
+    return { ok: true, party: visual, locked: !!locked };
   },
 };
 
