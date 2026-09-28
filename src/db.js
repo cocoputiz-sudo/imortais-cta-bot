@@ -188,6 +188,9 @@ async function init() {
       expires_at         TIMESTAMPTZ,
       created_by         TEXT,
       status             TEXT NOT NULL DEFAULT 'pending',
+      delivery_zone_id   TEXT,
+      delivery_zone_name TEXT,
+      picked_at          TIMESTAMPTZ,
       completed_at       TIMESTAMPTZ,
       created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -217,6 +220,9 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_departure TEXT;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_tier TEXT;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_count INT;`);
+  await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS delivery_zone_id TEXT;`);
+  await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS delivery_zone_name TEXT;`);
+  await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS picked_at TIMESTAMPTZ;`);
 
   // Migração compatível: transforma o objetivo único antigo no primeiro waypoint.
   await pool.query(`
@@ -679,7 +685,7 @@ async function addNavigationObjective({
 
 async function getNavigationObjectives(eventId, { includeDone = true } = {}) {
   const params = [eventId];
-  const statusWhere = includeDone ? "" : "AND status='pending'";
+  const statusWhere = includeDone ? "" : "AND status IN ('pending','carrying')";
   const { rows } = await pool.query(
     `SELECT * FROM cta_navigation_waypoints
       WHERE cta_event_id=$1
@@ -708,6 +714,24 @@ async function removeNavigationObjective(eventId, waypointId) {
     [eventId, waypointId]
   );
   if (rows[0]) await compactNavigationPositions(eventId);
+  return rows[0] || null;
+}
+
+async function startNavigationCarry(eventId, waypointId, deliveryZoneId, deliveryZoneName) {
+  const { rows } = await pool.query(
+    `UPDATE cta_navigation_waypoints
+        SET status='carrying',
+            delivery_zone_id=$3,
+            delivery_zone_name=$4,
+            picked_at=COALESCE(picked_at,now()),
+            updated_at=now()
+      WHERE cta_event_id=$1
+        AND id=$2
+        AND objective_type='VORTEX'
+        AND status='pending'
+      RETURNING *`,
+    [eventId, waypointId, String(deliveryZoneId || "").trim(), String(deliveryZoneName || "").trim()]
+  );
   return rows[0] || null;
 }
 
@@ -799,7 +823,7 @@ async function getOpenNavigationObjectives(guildId = null) {
        FROM cta_navigation_waypoints w
        JOIN cta_events e ON e.id=w.cta_event_id
       WHERE e.status='open'
-        AND w.status='pending'
+        AND w.status IN ('pending','carrying')
         ${guildWhere}
       ORDER BY w.cta_event_id, w.position`,
     params
@@ -877,7 +901,7 @@ module.exports = {
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
   addNavigationObjective, setNavigationObjective, getNavigationObjective, getNavigationObjectives,
-  removeNavigationObjective, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
+  removeNavigationObjective, startNavigationCarry, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
   compactNavigationPositions, getNavigationSession, setNavigationObjectiveMessage,
   setNavigationSecondsPerMap, getOpenNavigationObjectives,
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
