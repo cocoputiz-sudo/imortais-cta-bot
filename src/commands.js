@@ -53,14 +53,14 @@ function commandDefs() {
       .addStringOption(ctaOpt)
       .addStringOption((o) => o.setName("tipo").setDescription("Tipo do objetivo").setRequired(true).addChoices(
         { name: "Vortex", value: "VORTEX" },
-        { name: "Orbs (HO Thunderrock Upland)", value: "ORBS" },
+        { name: "Orbs", value: "ORBS" },
         { name: "Node", value: "NODE" },
         { name: "Território", value: "TERRITÓRIO" },
         { name: "Castelo", value: "CASTELO" },
         { name: "Outpost", value: "OUTPOST" },
         { name: "Outro", value: "OBJETIVO" }
       ))
-      .addStringOption((o) => o.setName("destino").setDescription("Mapa onde o objetivo está; ORBS usa o HO automaticamente").setRequired(false).setAutocomplete(true))
+      .addStringOption((o) => o.setName("destino").setDescription("Mapa onde o objetivo está para ser buscado").setRequired(false).setAutocomplete(true))
       .addStringOption((o) => o.setName("raridade").setDescription("Cor do objetivo ou tier do Node").addChoices(
         { name: "Roxo", value: "ROXO" },
         { name: "Azul", value: "AZUL" },
@@ -75,7 +75,7 @@ function commandDefs() {
       ))
       .addIntegerOption((o) => o.setName("minutos").setDescription("Tempo restante do objetivo").setMinValue(0).setMaxValue(240))
       .addIntegerOption((o) => o.setName("segundos").setDescription("Segundos adicionais").setMinValue(0).setMaxValue(59)),
-    new SlashCommandBuilder().setName("objetivo_proximo").setDescription("(staff) Avança o objetivo: Vortex pego/entregue ou conclui o atual")
+    new SlashCommandBuilder().setName("objetivo_proximo").setDescription("(staff) Avança o objetivo transportável ou conclui o atual")
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("objetivo_limpar").setDescription("(staff) Limpa toda a fila de objetivos do CTA")
       .addStringOption(ctaOpt),
@@ -183,10 +183,6 @@ async function handleAutocomplete(interaction) {
   }
   if (focused.name === "destino") {
     const q = String(focused.value || "");
-    const type = String(interaction.options.getString("tipo") || "").toUpperCase();
-    if (type === "ORBS") {
-      return interaction.respond([{ name: "Thunderrock Upland · HO", value: "Thunderrock Upland" }]);
-    }
     const zones = navigation.searchZones(q, { limit: 25, blackOnly: true });
     return interaction.respond(zones.map((z) => ({
       name: `${z.name}${z.tier ? ` (T${z.tier})` : ""}`,
