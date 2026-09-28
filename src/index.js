@@ -1086,7 +1086,7 @@ function navigationDiscordText(state) {
   if (state.instruction?.arrived) {
     const firstType = String(first?.type || "").toUpperCase();
     if (isTransportObjectiveType(firstType) && String(first?.status || "").toLowerCase() === "pending") {
-      lines.push(`🔮 **CHEGAMOS À ${transportObjectiveName(firstType)} EM ${first.targetZoneName}** · quando pegar, use **/objetivo_proximo** para iniciar o transporte.`);
+      lines.push(`🔮 **CHEGAMOS AO OBJETIVO ${transportObjectiveName(firstType)} EM ${first.targetZoneName}** · quando pegar, use **/objetivo_proximo** para iniciar o transporte.`);
     } else if (String(first?.status || "").toLowerCase() === "carrying") {
       lines.push(`📦 **CHEGAMOS AO MAPA DE ENTREGA: ${first.deliveryZoneName || firstLeg?.delivery?.zoneName || "?"}** · após entregar, use **/objetivo_proximo**.`);
     } else {
@@ -1370,7 +1370,7 @@ async function slashNavigationNext(interaction, ev) {
       return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível marcar o objetivo como pego.") });
     }
     return interaction.editReply({
-      content: `🔮 ${transportObjectiveName(firstType)} marcada como **PEGA**. Agora o Waze vai levar a massa até **${delivery.zoneName}** para entrega.`
+      content: `🔮 Objetivo ${transportObjectiveName(firstType)} marcado como **PEGO**. Agora o Waze vai levar a massa até **${delivery.zoneName}** para entrega.`
     });
   }
 
