@@ -1278,29 +1278,43 @@ const PAGE = `<!doctype html>
   function navKind(o){
     if(!o) return 'OBJETIVO';
     var rarity=String(o.rarity||'').toUpperCase(), type=String(o.type||'OBJETIVO').toUpperCase();
-    var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':type==='NODE'?'💎':'🎯';
+    var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':type==='NODE'?'💎':type==='ORBS'?'🔮':'🎯';
     return emoji+' '+esc(type)+(rarity?' '+esc(rarity):'');
   }
   var NAV_VORTEX_ZONES=['Thunderrock Upland','Rivercopse Curve','Giantweald Woods'];
   function navRarityChoices(type,selected){
-    var arr=String(type||'').toUpperCase()==='NODE'
+    var t=String(type||'').toUpperCase();
+    var arr=t==='NODE'
       ? ['4.4','5.4','6.4','7.4','8.4']
-      : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
+      : t==='ORBS'
+        ? []
+        : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
     return '<option value="">—</option>'+arr.map(function(x){return '<option'+(String(selected||'')===x?' selected':'')+'>'+x+'</option>';}).join('');
   }
   function syncNavRarityOptions(){
     var type=document.getElementById('nav-type'), rarity=document.getElementById('nav-rarity');
     if(!type||!rarity) return;
+    var t=String(type.value||'').toUpperCase();
     var old=rarity.value||'';
-    var valid=String(type.value).toUpperCase()==='NODE'
+    var valid=t==='NODE'
       ? ['4.4','5.4','6.4','7.4','8.4']
-      : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
+      : t==='ORBS'
+        ? []
+        : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
     rarity.innerHTML=navRarityChoices(type.value,valid.indexOf(old)>=0?old:'');
+    rarity.disabled=t==='ORBS';
   }
   function syncNavDestinationHints(clearInvalid){
     var type=document.getElementById('nav-type'), target=document.getElementById('nav-target'), dl=document.getElementById('nav-zone-list');
     if(!type||!target||!dl) return;
-    if(String(type.value||'').toUpperCase()==='VORTEX'){
+    var t=String(type.value||'').toUpperCase();
+    target.disabled=false;
+    if(t==='ORBS'){
+      target.value='Thunderrock Upland';
+      target.placeholder='HO · Thunderrock Upland';
+      target.disabled=true;
+      dl.innerHTML='<option value="Thunderrock Upland"></option>';
+    } else if(t==='VORTEX'){
       if(clearInvalid && target.value && NAV_VORTEX_ZONES.indexOf(target.value)<0) target.value='';
       target.placeholder='Thunderrock Upland / Rivercopse Curve / Giantweald Woods';
       dl.innerHTML=NAV_VORTEX_ZONES.map(function(name){return '<option value="'+esc(name)+'"></option>';}).join('');
@@ -1355,12 +1369,15 @@ const PAGE = `<!doctype html>
     var set=document.getElementById('nav-set');
     if(set) set.onclick=function(){
       if(!current) return;
-      var dest=(document.getElementById('nav-target').value||'').trim();
+      var selectedType=document.getElementById('nav-type').value;
+      var dest=String(selectedType||'').toUpperCase()==='ORBS'
+        ? 'Thunderrock Upland'
+        : (document.getElementById('nav-target').value||'').trim();
       if(!dest){ flash('● informe o destino','var(--red)'); return; }
       var payload={
         event:current,
         targetZone:dest,
-        type:document.getElementById('nav-type').value,
+        type:selectedType,
         rarity:document.getElementById('nav-rarity').value,
         minutes:Number(document.getElementById('nav-min').value||0),
         seconds:Number(document.getElementById('nav-sec').value||0)
@@ -1422,13 +1439,13 @@ const PAGE = `<!doctype html>
         ? '<div class="nav2-card"><h3>ADICIONAR OBJETIVO À ROTA</h3><div class="nav2-form">'
           +'<div class="nav2-field"><label>Mapa de destino</label><input id="nav-target" list="nav-zone-list" placeholder="Ex.: Flammog Fork" value="'+esc(draft.targetZone||'')+'"><datalist id="nav-zone-list"></datalist></div>'
           +'<div class="nav2-row"><div class="nav2-field"><label>Tipo</label><select id="nav-type">'
-          +['VORTEX','NODE','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(String(draft.type||'VORTEX')===x?' selected':'')+'>'+x+'</option>';}).join('')
+          +['VORTEX','ORBS','NODE','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(String(draft.type||'VORTEX')===x?' selected':'')+'>'+x+'</option>';}).join('')
           +'</select></div><div class="nav2-field"><label>Raridade / tier</label><select id="nav-rarity">'+navRarityChoices(draft.type,draft.rarity)+'</select></div></div>'
           +'<div class="nav2-row"><div class="nav2-field"><label>Tempo restante: minutos</label><input id="nav-min" type="number" min="0" max="240" value="'+esc(draft.minutes==null?'':draft.minutes)+'"></div>'
           +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="'+esc(draft.seconds==null?'0':draft.seconds)+'"></div></div>'
           +'<div class="nav2-actions"><button class="btn primary" id="nav-set">＋ Adicionar à rota</button>'
           +(queue.length?'<button class="btn danger" id="nav-clear">Limpar fila</button>':'')+'</div>'
-          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX: Thunderrock Upland, Rivercopse Curve ou Giantweald Woods. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O bot decide a ordem por prazo + distância. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
+          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX: Thunderrock Upland, Rivercopse Curve ou Giantweald Woods. ORBS: destino fixo no HO em Thunderrock Upland. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O bot decide a ordem por prazo + distância. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
           +'</div></div>'
         : '';
 

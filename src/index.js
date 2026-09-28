@@ -1022,6 +1022,7 @@ const VORTEX_ZONES = new Map([
   ["rivercopse curve", "Rivercopse Curve"],
   ["giantweald woods", "Giantweald Woods"],
 ]);
+const ORBS_HO_ZONE = "Thunderrock Upland";
 
 function fmtDurationShort(seconds) {
   if (seconds == null || !Number.isFinite(Number(seconds))) return "?";
@@ -1047,6 +1048,7 @@ function navigationObjectiveLabel(objective) {
     : rarity === "VERDE" ? "🟢"
     : rarity === "VERMELHO" ? "🔴"
     : type === "NODE" ? "💎"
+    : type === "ORBS" ? "🔮"
     : "🎯";
   return `${emoji} ${type}${rarity ? " " + rarity : ""}`;
 }
@@ -1171,7 +1173,16 @@ function validateObjectiveRarity(type, rarity) {
 }
 
 async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
-  const resolved = navigation.resolveZone(input.targetZone || input.targetZoneName || input.targetZoneId);
+  const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
+  const requestedTarget = type === "ORBS"
+    ? ORBS_HO_ZONE
+    : (input.targetZone || input.targetZoneName || input.targetZoneId);
+
+  if (!requestedTarget) {
+    return { ok: false, error: "Informe o mapa de destino." };
+  }
+
+  const resolved = navigation.resolveZone(requestedTarget);
   if (!resolved.zone) {
     return {
       ok: false,
@@ -1180,7 +1191,6 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
     };
   }
 
-  const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
   if (type === "VORTEX") {
     const allowed = VORTEX_ZONES.get(String(resolved.zone.name || "").trim().toLowerCase());
     if (!allowed) {
@@ -1190,7 +1200,7 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
       };
     }
   }
-  const rarityCheck = validateObjectiveRarity(type, input.rarity);
+  const rarityCheck = validateObjectiveRarity(type, type === "ORBS" ? "" : input.rarity);
   if (!rarityCheck.ok) return rarityCheck;
 
   const minutes = Math.max(0, Math.min(240, Number(input.minutes) || 0));
@@ -1286,7 +1296,7 @@ async function slashNavigationObjective(interaction, ev) {
     content: `✅ Objetivo adicionado: **${navigationObjectiveLabel({
       type: result.objective.objective_type,
       rarity: result.objective.rarity
-    })} · ${result.objective.target_zone_name}**. O bot recalculou a ordem por prazo + distância e colocou este objetivo na posição **#${optimizedIndex}**. ${first}`
+    })} · ${result.objective.target_zone_name}**${result.objective.objective_type === "ORBS" ? " (HO)" : ""}. O bot recalculou a ordem por prazo + distância e colocou este objetivo na posição **#${optimizedIndex}**. ${first}`
   });
 }
 

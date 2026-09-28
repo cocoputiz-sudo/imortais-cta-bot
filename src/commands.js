@@ -53,13 +53,14 @@ function commandDefs() {
       .addStringOption(ctaOpt)
       .addStringOption((o) => o.setName("tipo").setDescription("Tipo do objetivo").setRequired(true).addChoices(
         { name: "Vortex", value: "VORTEX" },
+        { name: "Orbs (HO Thunderrock Upland)", value: "ORBS" },
         { name: "Node", value: "NODE" },
         { name: "Território", value: "TERRITÓRIO" },
         { name: "Castelo", value: "CASTELO" },
         { name: "Outpost", value: "OUTPOST" },
         { name: "Outro", value: "OBJETIVO" }
       ))
-      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino; ORBS usa o HO automaticamente").setRequired(false).setAutocomplete(true))
       .addStringOption((o) => o.setName("raridade").setDescription("Cor do objetivo ou tier do Node").addChoices(
         { name: "Roxo", value: "ROXO" },
         { name: "Azul", value: "AZUL" },
@@ -184,6 +185,9 @@ async function handleAutocomplete(interaction) {
     const q = String(focused.value || "");
     const type = String(interaction.options.getString("tipo") || "").toUpperCase();
     const vortexZones = ["Thunderrock Upland", "Rivercopse Curve", "Giantweald Woods"];
+    if (type === "ORBS") {
+      return interaction.respond([{ name: "Thunderrock Upland · HO", value: "Thunderrock Upland" }]);
+    }
     if (type === "VORTEX") {
       const needle = q.trim().toLowerCase();
       return interaction.respond(
