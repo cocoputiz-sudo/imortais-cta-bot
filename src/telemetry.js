@@ -2,6 +2,7 @@
 // IMORTAIS TELEMETRY — bridge entre o Combat Client e o CTA War Room
 // ============================================================================
 const crypto = require("crypto");
+const navigation = require("./navigation");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -12,6 +13,11 @@ const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER
 const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
 const COMBAT_DEATH_DEDUP_MS = Math.max(5_000, Number(process.env.COMBAT_DEATH_DEDUP_MS) || 30_000);
 const COMBAT_BATTLE_MIN_EVENTS = Math.max(1, Number(process.env.COMBAT_BATTLE_MIN_EVENTS) || 5);
+let zoneChangeHandler = null;
+
+function setZoneChangeHandler(handler) {
+  zoneChangeHandler = typeof handler === "function" ? handler : null;
+}
 
 function normName(v) {
   let out = String(v || "").trim();
@@ -744,6 +750,132 @@ async function getConfirm(db, eventId) {
       }, 0) || null,
       note: "A party exibida é o último estado conhecido de cada Combat Client. Falta de novo snapshot não zera a PT; somente um novo snapshot altera o estado."
     }
+  };
+}
+
+async function getNavigationState(db, eventId) {
+  const ev = await db.getEvent(eventId).catch(() => null);
+  if (!ev) return null;
+
+  const objective = await db.getNavigationObjective(eventId).catch(() => null);
+  const { rows } = await pool.query(`
+    WITH ranked AS (
+      SELECT device_id, player_name, payload, occurred_at, received_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY device_id
+               ORDER BY occurred_at DESC, received_at DESC
+             ) AS rn
+        FROM albion_telemetry_events
+       WHERE cta_event_id=$1
+         AND type='zone_change'
+         AND received_at >= now() - interval '15 minutes'
+    )
+    SELECT device_id, player_name, payload, occurred_at, received_at
+      FROM ranked
+     WHERE rn=1
+     ORDER BY received_at DESC
+  `, [eventId]);
+
+  const positions = [];
+  const byZone = new Map();
+
+  for (const row of rows) {
+    const payload = row.payload || {};
+    const rawName = String(
+      payload.clusterName ||
+      payload.zoneName ||
+      payload.cluster ||
+      payload.uniqueName ||
+      payload.clusterIndex ||
+      ""
+    ).trim();
+    const rawIndex = String(payload.clusterIndex || payload.index || "").trim();
+    const resolved = navigation.resolveZone(rawName || rawIndex);
+    const zone = resolved.zone ? navigation.zoneDisplay(resolved.zone) : null;
+
+    const position = {
+      deviceId: row.device_id,
+      playerName: row.player_name || null,
+      clusterName: rawName || null,
+      clusterIndex: rawIndex || null,
+      zone,
+      occurredAt: row.occurred_at,
+      receivedAt: row.received_at,
+    };
+    positions.push(position);
+
+    const key = zone?.id || (rawName ? "raw:" + navigation.norm(rawName) : "");
+    if (!key) continue;
+    if (!byZone.has(key)) {
+      byZone.set(key, {
+        key,
+        zone,
+        clusterName: zone?.name || rawName,
+        count: 0,
+        players: [],
+        latestAt: row.received_at,
+      });
+    }
+    const group = byZone.get(key);
+    group.count++;
+    if (position.playerName) group.players.push(position.playerName);
+    if (new Date(row.received_at) > new Date(group.latestAt)) group.latestAt = row.received_at;
+  }
+
+  const groups = [...byZone.values()].sort((a, b) =>
+    b.count - a.count ||
+    new Date(b.latestAt || 0) - new Date(a.latestAt || 0) ||
+    String(a.clusterName).localeCompare(String(b.clusterName))
+  );
+
+  const majority = groups[0] || null;
+  let route = null;
+  let instruction = null;
+
+  if (objective && majority) {
+    const source = majority.zone?.id || majority.clusterName;
+    route = navigation.shortestRoute(source, objective.target_zone_id || objective.target_zone_name);
+    instruction = navigation.nextInstruction(route);
+  }
+
+  const expiresMs = objective?.expires_at ? new Date(objective.expires_at).getTime() - Date.now() : null;
+  const objectiveOut = objective ? {
+    ctaEventId: String(objective.cta_event_id),
+    type: objective.objective_type,
+    rarity: objective.rarity || null,
+    targetZoneId: objective.target_zone_id,
+    targetZoneName: objective.target_zone_name,
+    expiresAt: objective.expires_at,
+    remainingSeconds: Number.isFinite(expiresMs) ? Math.max(0, Math.floor(expiresMs / 1000)) : null,
+    expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
+    createdBy: objective.created_by || null,
+    updatedAt: objective.updated_at,
+  } : null;
+
+  return {
+    event: { id: String(ev.id), time: ev.time_label, status: ev.status },
+    objective: objectiveOut,
+    current: majority ? {
+      zone: majority.zone,
+      clusterName: majority.clusterName,
+      observers: majority.count,
+      players: [...new Set(majority.players)].slice(0, 50),
+      latestAt: majority.latestAt,
+    } : null,
+    route,
+    instruction,
+    positions: {
+      observers: positions.length,
+      zones: groups.map(g => ({
+        zone: g.zone,
+        clusterName: g.clusterName,
+        count: g.count,
+        players: [...new Set(g.players)].slice(0, 50),
+        latestAt: g.latestAt,
+      })),
+      devices: positions,
+    },
+    graph: navigation.stats(),
   };
 }
 
@@ -2202,6 +2334,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         await client.query("BEGIN");
         try {
           const presenceProbes = [];
+          const zoneChanges = [];
           for (const e of events) {
             const eventId = String(e.eventId || e.EventId || "").trim();
             const type = String(e.type || e.Type || "").trim();
@@ -2218,6 +2351,15 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
               inserted++;
               if (type === "guild_presence_probe") {
                 presenceProbes.push({ payload, deviceId, occurredAt });
+              }
+              if (type === "zone_change") {
+                zoneChanges.push({
+                  ctaEventId,
+                  deviceId,
+                  playerName: playerName || device.playerName || null,
+                  payload,
+                  occurredAt
+                });
               }
             } else {
               duplicate++;
@@ -2237,6 +2379,14 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
           }
 
           await client.query("COMMIT");
+
+          if (zoneChangeHandler && zoneChanges.length) {
+            for (const change of zoneChanges) {
+              Promise.resolve(zoneChangeHandler(change)).catch((e) =>
+                console.error("zone_change handler:", e)
+              );
+            }
+          }
         } catch (e) {
           await client.query("ROLLBACK").catch(() => {});
           throw e;
@@ -2376,6 +2526,35 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     res.json(await getCombat(db, id).catch(e => { console.error("telemetry combat:", e); return { error: "server" }; }));
   });
 
+  app.get("/api/navigation/zones", async (req, res) => {
+    if (!requireMember(req, res)) return;
+    try {
+      const q = String(req.query.q || "").trim();
+      const blackOnly = String(req.query.blackOnly || "1") !== "0";
+      res.json({
+        zones: navigation.searchZones(q, { limit: 25, blackOnly }),
+        graph: navigation.stats(),
+      });
+    } catch (e) {
+      console.error("/api/navigation/zones:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/navigation/state", async (req, res) => {
+    if (!requireMember(req, res)) return;
+    try {
+      const id = String(req.query.event || "").trim();
+      if (!id) return res.status(400).json({ error: "event" });
+      const state = await getNavigationState(db, id);
+      if (!state) return res.status(404).json({ error: "event" });
+      res.json(state);
+    } catch (e) {
+      console.error("/api/navigation/state:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
   app.get("/api/telemetry/devices", async (req, res) => {
     if (!requireMember(req, res)) return;
     const { rows } = await pool.query(`SELECT device_id, player_name, version, first_seen, last_seen FROM albion_telemetry_devices ORDER BY last_seen DESC LIMIT 100`);
@@ -2401,4 +2580,15 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 }
 
-module.exports = { initSchema, installRoutes, notifyTelemetry, getConfirm, getLoot, getCombat, getGuildPresence, getGuildPresenceProbeDiagnostics };
+module.exports = {
+  initSchema,
+  installRoutes,
+  notifyTelemetry,
+  setZoneChangeHandler,
+  getNavigationState,
+  getConfirm,
+  getLoot,
+  getCombat,
+  getGuildPresence,
+  getGuildPresenceProbeDiagnostics
+};
