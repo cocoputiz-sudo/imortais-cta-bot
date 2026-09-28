@@ -16,6 +16,7 @@ const attendance = require("./attendance");
 const perfil = require("./perfil");
 const web = require("./web");
 const telemetry = require("./telemetry");
+const navigation = require("./navigation");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
@@ -1011,6 +1012,238 @@ async function onCallerNo(interaction) {
   await interaction.update({ content: `👍 Beleza. Você está em ${dest}.`, components: [] });
 }
 
+// ==================  NAVEGAÇÃO / "WAZE" DA BLACK  ==========================
+const navigationRefreshTimers = new Map();
+const navigationMessageFingerprints = new Map();
+
+function navigationObjectiveLabel(objective) {
+  if (!objective) return "OBJETIVO";
+  const rarity = String(objective.rarity || "").trim().toUpperCase();
+  const type = String(objective.type || objective.objective_type || "OBJETIVO").trim().toUpperCase();
+  const emoji = rarity === "ROXO" ? "🟣"
+    : rarity === "AZUL" ? "🔵"
+    : rarity === "AMARELO" ? "🟡"
+    : rarity === "VERDE" ? "🟢"
+    : rarity === "VERMELHO" ? "🔴"
+    : "🎯";
+  return `${emoji} ${type}${rarity ? " " + rarity : ""}`;
+}
+
+function navigationDiscordText(state) {
+  if (!state || !state.objective) return "🧭 **NAVEGAÇÃO** — sem objetivo ativo.";
+
+  const o = state.objective;
+  const lines = [
+    `🧭 **NAVEGAÇÃO · CTA ${state.event?.time || "?"}**`,
+    `${navigationObjectiveLabel(o)}`,
+    `🎯 Destino: **${o.targetZoneName}**`,
+  ];
+
+  if (o.expiresAt) {
+    const unix = Math.floor(new Date(o.expiresAt).getTime() / 1000);
+    if (Number.isFinite(unix)) {
+      lines.push(`⏳ Expira <t:${unix}:R> · <t:${unix}:T>`);
+    }
+  }
+
+  if (!state.current) {
+    lines.push("");
+    lines.push("📡 **Aguardando posição do zerg** pelo IMORTAIS Combat Client v0.5.8+.");
+    lines.push("Assim que um client zonar, a rota será calculada automaticamente.");
+    return lines.join("\n").slice(0, 1990);
+  }
+
+  lines.push("");
+  lines.push(`📍 Zerg: **${state.current.zone?.name || state.current.clusterName || "?"}** · ${state.current.observers} client(s)`);
+
+  if (state.instruction?.arrived) {
+    lines.push(`✅ **DESTINO ALCANÇADO: ${o.targetZoneName}**`);
+  } else if (state.instruction) {
+    lines.push(`➡️ **SAIR ${state.instruction.exit} → ${state.instruction.next?.name || "?"}**`);
+    lines.push(`🗺️ **${state.instruction.mapsRemaining} mapa(s)** restantes`);
+  } else {
+    lines.push("⚠️ Não consegui calcular a rota a partir do mapa atual.");
+  }
+
+  if (state.route?.ok && Array.isArray(state.route.steps)) {
+    lines.push("");
+    lines.push("**ROTA**");
+    lines.push(navigation.formatRoute(state.route, { maxSteps: 7 }));
+  }
+
+  const zones = state.positions?.zones || [];
+  if (zones.length > 1) {
+    const split = zones.slice(0, 4)
+      .map(z => `${z.clusterName}: ${z.count}`)
+      .join(" · ");
+    lines.push("");
+    lines.push(`👥 Zerg espalhado: ${split}`);
+  }
+
+  return lines.join("\n").slice(0, 1990);
+}
+
+async function refreshNavigationMessage(eventId, { force = false } = {}) {
+  const ev = await db.getEvent(eventId).catch(() => null);
+  if (!ev || ev.status !== "open") return null;
+
+  const objective = await db.getNavigationObjective(eventId).catch(() => null);
+  if (!objective) return null;
+
+  const state = await telemetry.getNavigationState(db, eventId).catch((e) => {
+    console.error("navigation state:", e);
+    return null;
+  });
+  if (!state) return null;
+
+  const content = navigationDiscordText(state);
+  const fingerprint = content;
+  if (!force && navigationMessageFingerprints.get(String(eventId)) === fingerprint) {
+    return state;
+  }
+
+  let channelId = objective.discord_channel_id || ev.thread_id || ev.channel_id;
+  let channel = channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
+  if (!channel && ev.thread_id) {
+    channelId = ev.thread_id;
+    channel = await client.channels.fetch(channelId).catch(() => null);
+  }
+  if (!channel || !channel.send) return state;
+
+  let message = null;
+  if (objective.discord_message_id && channel.messages?.fetch) {
+    message = await channel.messages.fetch(objective.discord_message_id).catch(() => null);
+  }
+
+  if (message) {
+    await message.edit({ content }).catch(() => null);
+  } else {
+    message = await channel.send({ content }).catch(() => null);
+    if (message) {
+      await db.setNavigationObjectiveMessage(eventId, channel.id, message.id).catch(() => null);
+    }
+  }
+
+  if (message) navigationMessageFingerprints.set(String(eventId), fingerprint);
+  return state;
+}
+
+function scheduleNavigationRefresh(eventId) {
+  const key = String(eventId || "");
+  if (!key) return;
+  const old = navigationRefreshTimers.get(key);
+  if (old) clearTimeout(old);
+  const timer = setTimeout(() => {
+    navigationRefreshTimers.delete(key);
+    refreshNavigationMessage(key).catch((e) => console.error("navigation refresh:", e));
+  }, 900);
+  navigationRefreshTimers.set(key, timer);
+}
+
+async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
+  const resolved = navigation.resolveZone(input.targetZone || input.targetZoneName || input.targetZoneId);
+  if (!resolved.zone) {
+    return {
+      ok: false,
+      error: "Mapa de destino não encontrado.",
+      matches: resolved.matches.map(navigation.zoneDisplay),
+    };
+  }
+
+  const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
+  const rarity = String(input.rarity || "").trim().toUpperCase().slice(0, 40) || null;
+  const minutes = Math.max(0, Math.min(240, Number(input.minutes) || 0));
+  const seconds = Math.max(0, Math.min(59, Number(input.seconds) || 0));
+  const durationSeconds = minutes * 60 + seconds;
+  const expiresAt = durationSeconds > 0
+    ? new Date(Date.now() + durationSeconds * 1000)
+    : null;
+
+  const saved = await db.setNavigationObjective({
+    eventId: ev.id,
+    objectiveType: type,
+    rarity,
+    targetZoneId: resolved.zone.id,
+    targetZoneName: resolved.zone.name,
+    expiresAt,
+    createdBy: actorId ? String(actorId) : null,
+  });
+
+  navigationMessageFingerprints.delete(String(ev.id));
+  const state = await refreshNavigationMessage(ev.id, { force: true });
+  return { ok: true, objective: saved, state };
+}
+
+async function clearNavigationObjectiveCore(ev) {
+  const previous = await db.getNavigationObjective(ev.id).catch(() => null);
+  if (!previous) return { ok: true, cleared: false };
+
+  let oldMessage = null;
+  if (previous.discord_channel_id && previous.discord_message_id) {
+    const ch = await client.channels.fetch(previous.discord_channel_id).catch(() => null);
+    oldMessage = ch?.messages?.fetch
+      ? await ch.messages.fetch(previous.discord_message_id).catch(() => null)
+      : null;
+  }
+
+  await db.clearNavigationObjective(ev.id);
+  navigationMessageFingerprints.delete(String(ev.id));
+  if (oldMessage) {
+    await oldMessage.edit({
+      content: `🧭 **NAVEGAÇÃO · CTA ${ev.time_label}**\n🏁 Objetivo removido.`
+    }).catch(() => null);
+  }
+  return { ok: true, cleared: true };
+}
+
+async function slashNavigationObjective(interaction, ev) {
+  const targetZone = interaction.options.getString("destino");
+  const type = interaction.options.getString("tipo");
+  const rarity = interaction.options.getString("raridade");
+  const minutes = interaction.options.getInteger("minutos") || 0;
+  const seconds = interaction.options.getInteger("segundos") || 0;
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const result = await setNavigationObjectiveCore(ev, {
+    targetZone, type, rarity, minutes, seconds
+  }, interaction.user.id);
+
+  if (!result.ok) {
+    const hint = result.matches?.length
+      ? "\nTalvez: " + result.matches.slice(0, 5).map(x => x.name).join(", ")
+      : "";
+    return interaction.editReply({ content: "⚠️ " + result.error + hint });
+  }
+
+  const state = result.state;
+  const next = state?.instruction?.arrived
+    ? `Já estamos em **${result.objective.target_zone_name}**.`
+    : state?.instruction
+      ? `Próxima saída: **${state.instruction.exit} → ${state.instruction.next?.name}**.`
+      : "Aguardando o Combat Client informar o mapa atual.";
+
+  return interaction.editReply({
+    content: `✅ Objetivo definido: **${navigationObjectiveLabel({
+      type: result.objective.objective_type,
+      rarity: result.objective.rarity
+    })} · ${result.objective.target_zone_name}**. ${next}`
+  });
+}
+
+async function slashNavigationClear(interaction, ev) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const result = await clearNavigationObjectiveCore(ev);
+  return interaction.editReply({
+    content: result.cleared ? "🏁 Objetivo de navegação removido." : "Não havia objetivo de navegação ativo."
+  });
+}
+
+// Cada zone_change novo recalcula a rota. O debounce evita editar a mensagem várias
+// vezes quando diversos clients do mesmo zerg zonam quase simultaneamente.
+telemetry.setZoneChangeHandler((change) => {
+  if (change?.ctaEventId) scheduleNavigationRefresh(change.ctaEventId);
+});
+
 // ==================  SLASH COMMANDS  ======================================
 async function onSlash(interaction) {
   const name = interaction.commandName;
@@ -1058,6 +1291,8 @@ async function onSlash(interaction) {
   if (name === "cta_change_time") return slashChangeTime(interaction, ev);
   if (name === "cta_finish") return slashFinish(interaction, ev);
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
+  if (name === "objetivo") return slashNavigationObjective(interaction, ev);
+  if (name === "objetivo_limpar") return slashNavigationClear(interaction, ev);
 }
 
 async function removePTCore(ev, visualPt, actor) {
@@ -2638,6 +2873,18 @@ const webActions = {
 
     await ch.send(payload).catch(() => {});
     return { ok: true };
+  },
+  navigationZones: (query) => navigation.searchZones(query, { limit: 25, blackOnly: true }),
+  navigationState: async (eventId) => telemetry.getNavigationState(db, eventId),
+  setNavigationObjective: async (eventId, input, actorId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
+    return setNavigationObjectiveCore(ev, input || {}, actorId);
+  },
+  clearNavigationObjective: async (eventId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev) return { ok: false, error: "CTA não encontrado." };
+    return clearNavigationObjectiveCore(ev);
   },
   flashmass: async (time, actorId) => {
     const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
