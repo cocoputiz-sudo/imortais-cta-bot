@@ -1425,9 +1425,10 @@ const PAGE = `<!doctype html>
         queueHtml='<div class="nav2-queue">'+legs.map(function(leg){
           var obj=leg.objective||{};
           var massClass=(leg.massInSeconds!=null&&Number(leg.massInSeconds)<=0)?' late':'';
+          var massClock=leg.massBy?new Date(leg.massBy).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
           var mass=leg.massInSeconds==null
             ? ''
-            : '<div class="nav2-mass'+massClass+'">'+(Number(leg.massInSeconds)<=0?'🚨 MASSAR/SAIR AGORA':'📣 MASSAR/SAIR EM '+navDelta(leg.massInSeconds))+'</div>';
+            : '<div class="nav2-mass'+massClass+'">'+(Number(leg.massInSeconds)<=0?'🚨 MASSAR/SAIR AGORA':'📣 MASSAR/SAIR EM '+navDelta(leg.massInSeconds)+(massClock?' · ATÉ '+esc(massClock):''))+'</div>';
           var deadline=obj.expiresAt
             ? '<span>⏳ '+(obj.expired?'EXPIRADO':navCountdown(obj.remainingSeconds))+'</span>'
             : '<span>⏳ sem limite</span>';
