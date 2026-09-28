@@ -1281,6 +1281,7 @@ const PAGE = `<!doctype html>
     var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':type==='NODE'?'💎':'🎯';
     return emoji+' '+esc(type)+(rarity?' '+esc(rarity):'');
   }
+  var NAV_VORTEX_ZONES=['Thunderrock Upland','Rivercopse Curve','Giantweald Woods'];
   function navRarityChoices(type,selected){
     var arr=String(type||'').toUpperCase()==='NODE'
       ? ['4.4','5.4','6.4','7.4','8.4']
@@ -1296,6 +1297,17 @@ const PAGE = `<!doctype html>
       : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
     rarity.innerHTML=navRarityChoices(type.value,valid.indexOf(old)>=0?old:'');
   }
+  function syncNavDestinationHints(clearInvalid){
+    var type=document.getElementById('nav-type'), target=document.getElementById('nav-target'), dl=document.getElementById('nav-zone-list');
+    if(!type||!target||!dl) return;
+    if(String(type.value||'').toUpperCase()==='VORTEX'){
+      if(clearInvalid && target.value && NAV_VORTEX_ZONES.indexOf(target.value)<0) target.value='';
+      target.placeholder='Thunderrock Upland / Rivercopse Curve / Giantweald Woods';
+      dl.innerHTML=NAV_VORTEX_ZONES.map(function(name){return '<option value="'+esc(name)+'"></option>';}).join('');
+    } else {
+      target.placeholder='Ex.: Flammog Fork';
+    }
+  }
   function bindNavigationForm(){
     var target=document.getElementById('nav-target');
     var type=document.getElementById('nav-type');
@@ -1308,6 +1320,13 @@ const PAGE = `<!doctype html>
     if(target){
       target.oninput=function(){
         keepDraft();
+        var liveType=document.getElementById('nav-type');
+        if(liveType && String(liveType.value||'').toUpperCase()==='VORTEX'){
+          var needle=String(target.value||'').toLowerCase();
+          var dl=document.getElementById('nav-zone-list');
+          if(dl) dl.innerHTML=NAV_VORTEX_ZONES.filter(function(name){return !needle||name.toLowerCase().indexOf(needle)>=0;}).map(function(name){return '<option value="'+esc(name)+'"></option>';}).join('');
+          return;
+        }
         if(navZoneSearchTimer) clearTimeout(navZoneSearchTimer);
         navZoneSearchTimer=setTimeout(function(){
           var liveTarget=document.getElementById('nav-target');
@@ -1321,7 +1340,12 @@ const PAGE = `<!doctype html>
         },180);
       };
     }
-    if(type) type.onchange=function(){ syncNavRarityOptions(); keepDraft(); };
+    if(type) type.onchange=function(){
+      syncNavRarityOptions();
+      syncNavDestinationHints(true);
+      keepDraft();
+    };
+    syncNavDestinationHints(false);
     [rarity,min,sec].forEach(function(el){
       if(!el) return;
       el.onchange=keepDraft;
@@ -1404,7 +1428,7 @@ const PAGE = `<!doctype html>
           +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="'+esc(draft.seconds==null?'0':draft.seconds)+'"></div></div>'
           +'<div class="nav2-actions"><button class="btn primary" id="nav-set">＋ Adicionar à rota</button>'
           +(queue.length?'<button class="btn danger" id="nav-clear">Limpar fila</button>':'')+'</div>'
-          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">NODE usa 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O ETA inicial considera '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
+          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX: Thunderrock Upland, Rivercopse Curve ou Giantweald Woods. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O bot decide a ordem por prazo + distância. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
           +'</div></div>'
         : '';
 
@@ -1464,8 +1488,10 @@ const PAGE = `<!doctype html>
           }).join('')+'</div>'
         : '';
 
-      var right='<div class="nav2-card"><h3>ROTA ENCADEADA</h3>'+currentHtml+next+queueHtml+spreadHtml+'</div>';
-      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Posição atual → objetivo 1 → objetivo 2 → objetivo 3, com horário-limite de saída.</p></div>'
+      var opt=(d.itinerary&&d.itinerary.optimization)||{};
+      var optimizerNote='<div style="margin:0 0 10px;padding:8px 9px;border:1px solid #3a4b61;border-radius:8px;background:#0d151f;color:#9fb4cd;font-size:9px">🧠 <b>ORDEM AUTOMÁTICA</b> · primeiro tenta não perder objetivos pelo tempo; depois reduz atraso; depois reduz o total de mapas. A ordem pode mudar conforme o zerg zona ou o tempo passa.</div>';
+      var right='<div class="nav2-card"><h3>ROTA OTIMIZADA</h3>'+optimizerNote+currentHtml+next+queueHtml+spreadHtml+'</div>';
+      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Você cadastra os objetivos sem ordenar. O bot escolhe a sequência usando deadline e distância entre mapas.</p></div>'
         +'<span class="nav2-status">'+esc(queue.length)+' objetivo(s) · '+esc((d.graph&&d.graph.zones)||0)+' mapas</span></div>'
         +'<div class="nav2-layout">'+form+right+'</div></div>';
       setView('view-navigation',html);
