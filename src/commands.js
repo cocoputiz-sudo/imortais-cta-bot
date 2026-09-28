@@ -49,9 +49,8 @@ function commandDefs() {
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
       .addStringOption(ctaOpt),
-    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Adiciona um objetivo à rota encadeada do CTA")
+    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Adiciona um objetivo e deixa o bot otimizar a ordem")
       .addStringOption(ctaOpt)
-      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("tipo").setDescription("Tipo do objetivo").setRequired(true).addChoices(
         { name: "Vortex", value: "VORTEX" },
         { name: "Node", value: "NODE" },
@@ -60,6 +59,7 @@ function commandDefs() {
         { name: "Outpost", value: "OUTPOST" },
         { name: "Outro", value: "OBJETIVO" }
       ))
+      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("raridade").setDescription("Cor do objetivo ou tier do Node").addChoices(
         { name: "Roxo", value: "ROXO" },
         { name: "Azul", value: "AZUL" },
