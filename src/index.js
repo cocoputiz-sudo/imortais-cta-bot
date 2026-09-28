@@ -105,6 +105,89 @@ function ctaBriefText(input = {}) {
   return lines.join("\n");
 }
 
+function ctaBriefFromEvent(ev = {}) {
+  const departure = String(ev.cta_departure || "").trim();
+  const gearTier = String(ev.cta_gear_tier || "").trim();
+  return {
+    useDeparture: !!departure,
+    departure,
+    useGear: !!gearTier,
+    gearTier,
+    gearCount: Number(ev.cta_gear_count) || 2,
+  };
+}
+
+function ctaThreadUrl(ev = {}) {
+  if (!ev.guild_id || !ev.thread_id) return "";
+  return `https://discord.com/channels/${ev.guild_id}/${ev.thread_id}`;
+}
+
+function ctaLinkedLabel(ev = {}) {
+  const label = `CTA ${String(ev.time_label || "").trim()}`;
+  const url = ctaThreadUrl(ev);
+  return url ? `**[${label}](${url})**` : `**${label}**`;
+}
+
+function fichaCountFromText(raw) {
+  const s = String(raw || "").toUpperCase();
+  const named = [
+    ["NOVE", 9], ["OITO", 8], ["SETE", 7], ["SEIS", 6], ["CINCO", 5],
+    ["QUATRO", 4], ["TRÊS", 3], ["TRES", 3], ["DUAS", 2], ["UMA", 1],
+  ];
+  for (const [word, n] of named) if (s.includes(word)) return n;
+  const m = /\b([1-9])\b/.exec(s);
+  return m ? Number(m[1]) : 2;
+}
+
+// CTAs que já estavam abertos antes de estes campos existirem ainda têm as
+// informações no primeiro aviso da thread. Recuperamos uma vez e persistimos.
+async function resolveCtaBrief(ev) {
+  let brief = ctaBriefFromEvent(ev);
+  if (brief.useDeparture || brief.useGear || !ev.thread_id) return brief;
+
+  try {
+    const thread = await client.channels.fetch(ev.thread_id).catch(() => null);
+    if (!thread || !thread.messages) return brief;
+    const messages = await thread.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!messages) return brief;
+
+    let departure = "";
+    let gearTier = "";
+    let gearCount = 2;
+
+    const ordered = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+    for (const msg of ordered) {
+      const text = String(msg.content || "");
+      if (!text.includes("# FOOD .2") && !text.includes("# POÇÃO: GIGANTIFICADORA T7")) continue;
+
+      const dep = /^#\s*SAÍDA DE\s+(.+)$/mi.exec(text);
+      const gear = /^#\s*GEAR\s+([^,\n]+),\s*(.+)$/mi.exec(text);
+      if (dep) departure = dep[1].trim();
+      if (gear) {
+        gearTier = gear[1].trim().toUpperCase();
+        gearCount = fichaCountFromText(gear[2]);
+      }
+      if (departure || gearTier) break;
+    }
+
+    if (departure || gearTier) {
+      const saved = await db.setEventBrief(ev.id, { departure, gearTier, gearCount }).catch(() => null);
+      if (saved) {
+        ev.cta_departure = saved.cta_departure;
+        ev.cta_gear_tier = saved.cta_gear_tier;
+        ev.cta_gear_count = saved.cta_gear_count;
+      } else {
+        ev.cta_departure = departure || null;
+        ev.cta_gear_tier = gearTier || null;
+        ev.cta_gear_count = gearTier ? gearCount : null;
+      }
+      brief = ctaBriefFromEvent(ev);
+    }
+  } catch (_) { /* fallback: somente linhas fixas */ }
+
+  return brief;
+}
+
 async function ctaOpts(ev) {
   const ping = timeToTodayUTC(ev.time_label);
   // a batalha começa ~40min depois do ping (horário cheio seguinte). O privilégio
@@ -418,19 +501,34 @@ async function criarCTA(channel, guild, guildId, callerId, time, opts = {}) {
     r30 = new Date(target.getTime() - 30 * 60000);
     r10 = new Date(target.getTime() - 10 * 60000);
   }
+  const normalizedBrief = normalizeCtaBrief(opts.brief || {});
   const ev = await db.createEvent({
-    guildId, channelId: channel.id, callerId, timeLabel: time, remind30: r30, remind10: r10,
+    guildId,
+    channelId: channel.id,
+    callerId,
+    timeLabel: time,
+    remind30: r30,
+    remind10: r10,
+    brief: normalizedBrief,
   });
   const thread = await channel.threads.create({
     name: `Planilha CTA ${time}`, type: ChannelType.PublicThread, autoArchiveDuration: 1440,
   });
   await db.setThread(ev.id, thread.id);
+  ev.thread_id = thread.id;
 
   const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
-  const briefText = ctaBriefText(opts.brief || {});
+  const briefText = ctaBriefText({
+    useDeparture: !!normalizedBrief.departure,
+    departure: normalizedBrief.departure,
+    useGear: !!normalizedBrief.gearTier,
+    gearTier: normalizedBrief.gearTier,
+    gearCount: normalizedBrief.gearCount,
+  });
+  const ctaLabel = ctaLinkedLabel(ev);
   const header = opts.flashmass
     ? `${mention} ⚡🚨 **FLASHMASS ${time} UTC** — massa relâmpago, loga AGORA e escolhe tua arma 👇`
-    : `${mention} 🗡️ **CTA ${time} UTC** — loga e luta.\n\n${briefText}\n\nEscolhe tua arma abaixo 👇`;
+    : `${mention} 🗡️ ${ctaLabel} UTC — loga e luta.\n\n${briefText}\n\nEscolhe tua arma abaixo 👇`;
   await thread.send({ content: header, components: buildRolePicker(ev.id) });
 
   const chunks = rosterChunks([], 1, [0]); // começa só com a PT1
@@ -442,11 +540,11 @@ async function criarCTA(channel, guild, guildId, callerId, time, opts = {}) {
   if (CFG.contentPingChannelId) {
     const cch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
     if (cch) {
-      const link = `https://discord.com/channels/${guildId}/${thread.id}`;
+      const link = ctaThreadUrl(ev);
       const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
       const txt = opts.flashmass
         ? `${mention} ⚡ **FLASHMASS — ${time} UTC!** Loga e pinga tua função AGORA.\n👉 ${link}`
-        : `${mention} 🗡️ **Saiu CTA — ${time} UTC!**\n\n${briefText}\n\nLoga e pinga tua função.\n👉 ${link}`;
+        : `${mention} 🗡️ Saiu ${ctaLabel} UTC!\n\n${briefText}\n\nLoga e pinga tua função.`;
       await cch.send({ content: txt, ...allow }).catch(() => {});
     }
   }
@@ -2303,9 +2401,8 @@ async function pingContentChannel(ev, text) {
   if (!CFG.contentPingChannelId || !ev.thread_id || !ev.guild_id) return;
   const ch = await client.channels.fetch(CFG.contentPingChannelId).catch(() => null);
   if (!ch) return;
-  const link = `https://discord.com/channels/${ev.guild_id}/${ev.thread_id}`;
   const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-  await ch.send({ content: `${text}\n👉 ${link}`, ...allow }).catch(() => {});
+  await ch.send({ content: text, ...allow }).catch(() => {});
 }
 
 async function checkReminders() {
@@ -2316,17 +2413,27 @@ async function checkReminders() {
       if (!thread) continue;
       const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
       const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+      const briefText = ctaBriefText(await resolveCtaBrief(ev));
+      const ctaLabel = ctaLinkedLabel(ev);
       const now = Date.now();
+
       if (!ev.sent_30 && ev.remind_30 && new Date(ev.remind_30).getTime() <= now) {
-        await thread.send({ content: `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 minutos!** Prepara o set e loga.`, ...allow }).catch(() => {});
-        await pingMainChannel(ev, `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 min!** Loga e entra na thread pra pingar tua função.`);
-        await pingContentChannel(ev, `${mention} ⏰ **CTA ${ev.time_label} UTC em 30 min!** Bora pro conteúdo.`);
+        const threadText = `${mention} ⏰ ${ctaLabel} UTC em 30 minutos! Prepara o set e loga.\n\n${briefText}`;
+        const mainText = `${mention} ⏰ ${ctaLabel} UTC em 30 min! Loga e entra na planilha pra pingar tua função.\n\n${briefText}`;
+        const contentText = `${mention} ⏰ ${ctaLabel} UTC em 30 min! Bora pro conteúdo.\n\n${briefText}`;
+        await thread.send({ content: threadText, ...allow }).catch(() => {});
+        await pingMainChannel(ev, mainText);
+        await pingContentChannel(ev, contentText);
         await db.markReminderSent(ev.id, 30);
       }
+
       if (!ev.sent_10 && ev.remind_10 && new Date(ev.remind_10).getTime() <= now) {
-        await thread.send({ content: `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 minutos!** Entra na call AGORA.`, ...allow }).catch(() => {});
-        await pingMainChannel(ev, `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 min!** Entra na call AGORA.`);
-        await pingContentChannel(ev, `${mention} 🚨 **CTA ${ev.time_label} UTC em 10 min!** Entra na call AGORA.`);
+        const threadText = `${mention} 🚨 ${ctaLabel} UTC em 10 minutos! Entra na call AGORA.\n\n${briefText}`;
+        const mainText = `${mention} 🚨 ${ctaLabel} UTC em 10 min! Entra na call AGORA.\n\n${briefText}`;
+        const contentText = `${mention} 🚨 ${ctaLabel} UTC em 10 min! Entra na call AGORA.\n\n${briefText}`;
+        await thread.send({ content: threadText, ...allow }).catch(() => {});
+        await pingMainChannel(ev, mainText);
+        await pingContentChannel(ev, contentText);
         await db.markReminderSent(ev.id, 10);
       }
     }
@@ -2349,29 +2456,32 @@ async function checkConsolidation() {
         const done = consolidWarned.get(String(ev.id)) || new Set();
 
         const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
+        const briefText = ctaBriefText(await resolveCtaBrief(ev));
+        const ctaLabel = ctaLinkedLabel(ev);
         const avisar = async (txt) => {
           const th = ev.thread_id ? await client.channels.fetch(ev.thread_id).catch(() => null) : null;
           const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
-          if (th) await th.send({ content: txt, ...allow }).catch(() => {});
-          await pingMainChannel(ev, txt);
+          const full = `${txt}\n\n${briefText}`;
+          if (th) await th.send({ content: full, ...allow }).catch(() => {});
+          await pingMainChannel(ev, full);
         };
 
         if (minAteSaida <= 25 && minAteSaida > 20 && !done.has(25)) {
-          await avisar(`${mention} ⚠️ **CTA ${ev.time_label}** — precisamos ajustar as vagas faltantes!`);
+          await avisar(`${mention} ⚠️ ${ctaLabel} — precisamos ajustar as vagas faltantes!`);
           done.add(25);
         }
         if (minAteSaida <= 20 && minAteSaida > 15 && !done.has(20)) {
-          await avisar(`${mention} ⚠️ **CTA ${ev.time_label}** — ajustem o quanto antes pra não haver lacunas na sua equipe!`);
+          await avisar(`${mention} ⚠️ ${ctaLabel} — ajustem o quanto antes pra não haver lacunas na sua equipe!`);
           done.add(20);
         }
         if (minAteSaida <= 15 && minAteSaida > 10 && !done.has(15)) {
-          await avisar(`${mention} 🧲 **CTA ${ev.time_label}** — amontoamento de participantes disparado.`);
+          await avisar(`${mention} 🧲 ${ctaLabel} — amontoamento de participantes disparado.`);
           done.add(15);
         }
         if (minAteSaida <= 10 && minAteSaida > -5 && !done.has(10)) {
           await applyConsolidation(ev, client.guilds.cache.get(gid));
           ctaFrozen.add(String(ev.id));
-          await avisar(`${mention} 🔒 **CTA ${ev.time_label}** — formação consolidada e travada. Entrem nas suas vagas!`);
+          await avisar(`${mention} 🔒 ${ctaLabel} — formação consolidada e travada. Entrem nas suas vagas!`);
           done.add(10);
         }
         consolidWarned.set(String(ev.id), done);
@@ -2501,10 +2611,19 @@ const webActions = {
 
     const brief = normalizeCtaBrief(briefInput);
     const info = ctaBriefText(briefInput);
+    const thread = await criarCTA(ch, ch.guild, ch.guild.id, actorId, time, { brief: {
+      useDeparture: !!brief.departure,
+      departure: brief.departure,
+      useGear: !!brief.gearTier,
+      gearTier: brief.gearTier,
+      gearCount: brief.gearCount,
+    } });
+
+    const evForLink = { guild_id: ch.guild.id, thread_id: thread.id, time_label: time };
     const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
     const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
     const payload = {
-      content: `${mention} 🛡️ **CTA ${time} UTC** — chamado!\n\n${info}\n\nLoga e pinga tua função na thread 👇`,
+      content: `${mention} 🛡️ ${ctaLinkedLabel(evForLink)} UTC — chamado!\n\n${info}\n\nLoga e pinga tua função na planilha 👇`,
       ...allow,
     };
 
@@ -2516,13 +2635,6 @@ const webActions = {
     }
 
     await ch.send(payload).catch(() => {});
-    await criarCTA(ch, ch.guild, ch.guild.id, actorId, time, { brief: {
-      useDeparture: !!brief.departure,
-      departure: brief.departure,
-      useGear: !!brief.gearTier,
-      gearTier: brief.gearTier,
-      gearCount: brief.gearCount,
-    } });
     return { ok: true };
   },
   flashmass: async (time, actorId) => {
