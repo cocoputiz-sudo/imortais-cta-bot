@@ -1015,6 +1015,22 @@ async function onCallerNo(interaction) {
 // ==================  NAVEGAÇÃO / "WAZE" DA BLACK  ==========================
 const navigationRefreshTimers = new Map();
 const navigationMessageFingerprints = new Map();
+const NODE_RARITIES = new Set(["4.4", "5.4", "6.4", "7.4", "8.4"]);
+const COLOR_RARITIES = new Set(["ROXO", "AZUL", "AMARELO", "VERDE", "VERMELHO"]);
+
+function fmtDurationShort(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return "?";
+  let s = Math.floor(Number(seconds));
+  const neg = s < 0;
+  s = Math.abs(s);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  const body = h > 0
+    ? `${h}h${String(m).padStart(2, "0")}m`
+    : `${m}m${String(r).padStart(2, "0")}s`;
+  return neg ? "-" + body : body;
+}
 
 function navigationObjectiveLabel(objective) {
   if (!objective) return "OBJETIVO";
@@ -1025,58 +1041,60 @@ function navigationObjectiveLabel(objective) {
     : rarity === "AMARELO" ? "🟡"
     : rarity === "VERDE" ? "🟢"
     : rarity === "VERMELHO" ? "🔴"
+    : type === "NODE" ? "💎"
     : "🎯";
   return `${emoji} ${type}${rarity ? " " + rarity : ""}`;
 }
 
 function navigationDiscordText(state) {
-  if (!state || !state.objective) return "🧭 **NAVEGAÇÃO** — sem objetivo ativo.";
+  const queue = state?.objectives || [];
+  if (!state || !queue.length) return `🧭 **NAVEGAÇÃO · CTA ${state?.event?.time || "?"}** — sem objetivo pendente.`;
 
-  const o = state.objective;
-  const lines = [
-    `🧭 **NAVEGAÇÃO · CTA ${state.event?.time || "?"}**`,
-    `${navigationObjectiveLabel(o)}`,
-    `🎯 Destino: **${o.targetZoneName}**`,
-  ];
+  const lines = [`🧭 **NAVEGAÇÃO · CTA ${state.event?.time || "?"}**`];
 
-  if (o.expiresAt) {
-    const unix = Math.floor(new Date(o.expiresAt).getTime() / 1000);
-    if (Number.isFinite(unix)) {
-      lines.push(`⏳ Expira <t:${unix}:R> · <t:${unix}:T>`);
-    }
+  if (state.current) {
+    lines.push(`📍 Zerg: **${state.current.zone?.name || state.current.clusterName || "?"}** · ${state.current.observers} client(s)`);
+  } else {
+    lines.push("📡 Aguardando posição do zerg pelo IMORTAIS Combat Client v0.5.8+.");
   }
 
-  if (!state.current) {
-    lines.push("");
-    lines.push("📡 **Aguardando posição do zerg** pelo IMORTAIS Combat Client v0.5.8+.");
-    lines.push("Assim que um client zonar, a rota será calculada automaticamente.");
-    return lines.join("\n").slice(0, 1990);
+  if (state.instruction?.arrived) {
+    lines.push(`✅ **NO OBJETIVO #1: ${queue[0].targetZoneName}**`);
+  } else if (state.instruction) {
+    lines.push(`➡️ **PRÓXIMA SAÍDA: ${state.instruction.exit} → ${state.instruction.next?.name || "?"}**`);
   }
 
   lines.push("");
-  lines.push(`📍 Zerg: **${state.current.zone?.name || state.current.clusterName || "?"}** · ${state.current.observers} client(s)`);
+  lines.push("**FILA DE OBJETIVOS**");
 
-  if (state.instruction?.arrived) {
-    lines.push(`✅ **DESTINO ALCANÇADO: ${o.targetZoneName}**`);
-  } else if (state.instruction) {
-    lines.push(`➡️ **SAIR ${state.instruction.exit} → ${state.instruction.next?.name || "?"}**`);
-    lines.push(`🗺️ **${state.instruction.mapsRemaining} mapa(s)** restantes`);
-  } else {
-    lines.push("⚠️ Não consegui calcular a rota a partir do mapa atual.");
+  const legs = state.itinerary?.legs || [];
+  for (const leg of legs.slice(0, 6)) {
+    const o = leg.objective;
+    const deadline = o.expiresAt ? Math.floor(new Date(o.expiresAt).getTime() / 1000) : null;
+    lines.push(`**#${leg.index} · ${navigationObjectiveLabel(o)} · ${o.targetZoneName}**`);
+    if (deadline) lines.push(`⏳ expira <t:${deadline}:R> · <t:${deadline}:T>`);
+    if (leg.maps != null) {
+      lines.push(`🛣️ ${leg.maps} mapa(s) · ~${fmtDurationShort(leg.travelSeconds)} desde ${leg.from || "posição atual"}`);
+    }
+    if (leg.massInSeconds != null) {
+      const massUnix = leg.massBy ? Math.floor(new Date(leg.massBy).getTime() / 1000) : null;
+      lines.push(leg.massInSeconds <= 0
+        ? `🚨 **MASSAR/SAIR AGORA** · margem ${fmtDurationShort(leg.slackSeconds)}`
+        : `📣 massar/sair ${massUnix ? `<t:${massUnix}:R> · até <t:${massUnix}:T>` : `em **${fmtDurationShort(leg.massInSeconds)}**`}`);
+    }
+    if (leg.route?.ok) {
+      const first = navigation.nextInstruction(leg.route);
+      if (first && !first.arrived) lines.push(`↳ ${first.exit} → ${first.next?.name || "?"}`);
+    }
   }
+  if (legs.length > 6) lines.push(`… +${legs.length - 6} objetivo(s)`);
 
-  if (state.route?.ok && Array.isArray(state.route.steps)) {
-    lines.push("");
-    lines.push("**ROTA**");
-    lines.push(navigation.formatRoute(state.route, { maxSteps: 7 }));
-  }
+  lines.push("");
+  lines.push(`⏱️ estimativa inicial: **${state.itinerary?.secondsPerMap || 90}s por mapa**. O cálculo encadeia posição atual → objetivo 1 → objetivo 2 → ...`);
 
   const zones = state.positions?.zones || [];
   if (zones.length > 1) {
-    const split = zones.slice(0, 4)
-      .map(z => `${z.clusterName}: ${z.count}`)
-      .join(" · ");
-    lines.push("");
+    const split = zones.slice(0, 4).map(z => `${z.clusterName}: ${z.count}`).join(" · ");
     lines.push(`👥 Zerg espalhado: ${split}`);
   }
 
@@ -1087,9 +1105,6 @@ async function refreshNavigationMessage(eventId, { force = false } = {}) {
   const ev = await db.getEvent(eventId).catch(() => null);
   if (!ev || ev.status !== "open") return null;
 
-  const objective = await db.getNavigationObjective(eventId).catch(() => null);
-  if (!objective) return null;
-
   const state = await telemetry.getNavigationState(db, eventId).catch((e) => {
     console.error("navigation state:", e);
     return null;
@@ -1097,12 +1112,10 @@ async function refreshNavigationMessage(eventId, { force = false } = {}) {
   if (!state) return null;
 
   const content = navigationDiscordText(state);
-  const fingerprint = content;
-  if (!force && navigationMessageFingerprints.get(String(eventId)) === fingerprint) {
-    return state;
-  }
+  if (!force && navigationMessageFingerprints.get(String(eventId)) === content) return state;
 
-  let channelId = objective.discord_channel_id || ev.thread_id || ev.channel_id;
+  const session = await db.getNavigationSession(eventId).catch(() => null);
+  let channelId = session?.discord_channel_id || ev.thread_id || ev.channel_id;
   let channel = channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
   if (!channel && ev.thread_id) {
     channelId = ev.thread_id;
@@ -1111,20 +1124,18 @@ async function refreshNavigationMessage(eventId, { force = false } = {}) {
   if (!channel || !channel.send) return state;
 
   let message = null;
-  if (objective.discord_message_id && channel.messages?.fetch) {
-    message = await channel.messages.fetch(objective.discord_message_id).catch(() => null);
+  if (session?.discord_message_id && channel.messages?.fetch) {
+    message = await channel.messages.fetch(session.discord_message_id).catch(() => null);
   }
 
   if (message) {
     await message.edit({ content }).catch(() => null);
   } else {
     message = await channel.send({ content }).catch(() => null);
-    if (message) {
-      await db.setNavigationObjectiveMessage(eventId, channel.id, message.id).catch(() => null);
-    }
+    if (message) await db.setNavigationObjectiveMessage(eventId, channel.id, message.id).catch(() => null);
   }
 
-  if (message) navigationMessageFingerprints.set(String(eventId), fingerprint);
+  if (message) navigationMessageFingerprints.set(String(eventId), content);
   return state;
 }
 
@@ -1140,6 +1151,19 @@ function scheduleNavigationRefresh(eventId) {
   navigationRefreshTimers.set(key, timer);
 }
 
+function validateObjectiveRarity(type, rarity) {
+  const t = String(type || "OBJETIVO").trim().toUpperCase();
+  const r = String(rarity || "").trim().toUpperCase();
+  if (t === "NODE") {
+    if (!NODE_RARITIES.has(r)) {
+      return { ok: false, error: "Para NODE, escolha raridade 4.4, 5.4, 6.4, 7.4 ou 8.4." };
+    }
+  } else if (r && !COLOR_RARITIES.has(r)) {
+    return { ok: false, error: "Para este tipo, use uma cor válida ou deixe a raridade vazia." };
+  }
+  return { ok: true, rarity: r || null };
+}
+
 async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
   const resolved = navigation.resolveZone(input.targetZone || input.targetZoneName || input.targetZoneId);
   if (!resolved.zone) {
@@ -1151,18 +1175,18 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
   }
 
   const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
-  const rarity = String(input.rarity || "").trim().toUpperCase().slice(0, 40) || null;
+  const rarityCheck = validateObjectiveRarity(type, input.rarity);
+  if (!rarityCheck.ok) return rarityCheck;
+
   const minutes = Math.max(0, Math.min(240, Number(input.minutes) || 0));
   const seconds = Math.max(0, Math.min(59, Number(input.seconds) || 0));
   const durationSeconds = minutes * 60 + seconds;
-  const expiresAt = durationSeconds > 0
-    ? new Date(Date.now() + durationSeconds * 1000)
-    : null;
+  const expiresAt = durationSeconds > 0 ? new Date(Date.now() + durationSeconds * 1000) : null;
 
-  const saved = await db.setNavigationObjective({
+  const saved = await db.addNavigationObjective({
     eventId: ev.id,
     objectiveType: type,
-    rarity,
+    rarity: rarityCheck.rarity,
     targetZoneId: resolved.zone.id,
     targetZoneName: resolved.zone.name,
     expiresAt,
@@ -1174,23 +1198,40 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
   return { ok: true, objective: saved, state };
 }
 
-async function clearNavigationObjectiveCore(ev) {
-  const previous = await db.getNavigationObjective(ev.id).catch(() => null);
-  if (!previous) return { ok: true, cleared: false };
+async function completeNavigationObjectiveCore(ev, waypointId) {
+  const done = await db.completeNavigationObjective(ev.id, waypointId).catch(() => null);
+  if (!done) return { ok: false, error: "Objetivo não encontrado." };
+  navigationMessageFingerprints.delete(String(ev.id));
+  const state = await refreshNavigationMessage(ev.id, { force: true });
+  return { ok: true, objective: done, state };
+}
 
+async function removeNavigationObjectiveCore(ev, waypointId) {
+  const removed = await db.removeNavigationObjective(ev.id, waypointId).catch(() => null);
+  if (!removed) return { ok: false, error: "Objetivo não encontrado." };
+  navigationMessageFingerprints.delete(String(ev.id));
+  const state = await refreshNavigationMessage(ev.id, { force: true });
+  return { ok: true, objective: removed, state };
+}
+
+async function clearNavigationObjectiveCore(ev) {
+  const previous = await db.getNavigationObjectives(ev.id, { includeDone: true }).catch(() => []);
+  if (!previous.length) return { ok: true, cleared: false };
+
+  const session = await db.getNavigationSession(ev.id).catch(() => null);
   let oldMessage = null;
-  if (previous.discord_channel_id && previous.discord_message_id) {
-    const ch = await client.channels.fetch(previous.discord_channel_id).catch(() => null);
+  if (session?.discord_channel_id && session?.discord_message_id) {
+    const ch = await client.channels.fetch(session.discord_channel_id).catch(() => null);
     oldMessage = ch?.messages?.fetch
-      ? await ch.messages.fetch(previous.discord_message_id).catch(() => null)
+      ? await ch.messages.fetch(session.discord_message_id).catch(() => null)
       : null;
   }
 
-  await db.clearNavigationObjective(ev.id);
+  await db.clearNavigationObjectives(ev.id);
   navigationMessageFingerprints.delete(String(ev.id));
   if (oldMessage) {
     await oldMessage.edit({
-      content: `🧭 **NAVEGAÇÃO · CTA ${ev.time_label}**\n🏁 Objetivo removido.`
+      content: `🧭 **NAVEGAÇÃO · CTA ${ev.time_label}**\n🏁 Fila de objetivos limpa.`
     }).catch(() => null);
   }
   return { ok: true, cleared: true };
@@ -1216,17 +1257,36 @@ async function slashNavigationObjective(interaction, ev) {
   }
 
   const state = result.state;
-  const next = state?.instruction?.arrived
-    ? `Já estamos em **${result.objective.target_zone_name}**.`
+  const count = state?.objectives?.length || 1;
+  const first = state?.instruction?.arrived
+    ? `Já estamos no primeiro destino, **${state.objective?.targetZoneName}**.`
     : state?.instruction
       ? `Próxima saída: **${state.instruction.exit} → ${state.instruction.next?.name}**.`
       : "Aguardando o Combat Client informar o mapa atual.";
 
   return interaction.editReply({
-    content: `✅ Objetivo definido: **${navigationObjectiveLabel({
+    content: `✅ Objetivo #${count} adicionado à rota: **${navigationObjectiveLabel({
       type: result.objective.objective_type,
       rarity: result.objective.rarity
-    })} · ${result.objective.target_zone_name}**. ${next}`
+    })} · ${result.objective.target_zone_name}**. ${first}`
+  });
+}
+
+async function slashNavigationNext(interaction, ev) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const first = await db.getNavigationObjective(ev.id).catch(() => null);
+  if (!first) {
+    return interaction.editReply({ content: "Não há objetivo pendente na rota." });
+  }
+  const result = await completeNavigationObjectiveCore(ev, first.id);
+  if (!result.ok) {
+    return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível concluir o objetivo.") });
+  }
+  const next = result.state?.objective;
+  return interaction.editReply({
+    content: next
+      ? `✅ Objetivo concluído. Próximo: **${navigationObjectiveLabel(next)} · ${next.targetZoneName}**.`
+      : "✅ Objetivo concluído. A fila ficou vazia."
   });
 }
 
@@ -1234,7 +1294,7 @@ async function slashNavigationClear(interaction, ev) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const result = await clearNavigationObjectiveCore(ev);
   return interaction.editReply({
-    content: result.cleared ? "🏁 Objetivo de navegação removido." : "Não havia objetivo de navegação ativo."
+    content: result.cleared ? "🏁 Fila de objetivos de navegação limpa." : "Não havia objetivo de navegação ativo."
   });
 }
 
@@ -1292,6 +1352,7 @@ async function onSlash(interaction) {
   if (name === "cta_finish") return slashFinish(interaction, ev);
   if (name === "cta_consolidar") return slashConsolidar(interaction, ev);
   if (name === "objetivo") return slashNavigationObjective(interaction, ev);
+  if (name === "objetivo_proximo") return slashNavigationNext(interaction, ev);
   if (name === "objetivo_limpar") return slashNavigationClear(interaction, ev);
 }
 
@@ -2880,6 +2941,16 @@ const webActions = {
     const ev = await db.getEvent(eventId).catch(() => null);
     if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
     return setNavigationObjectiveCore(ev, input || {}, actorId);
+  },
+  completeNavigationObjective: async (eventId, waypointId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
+    return completeNavigationObjectiveCore(ev, waypointId);
+  },
+  removeNavigationObjective: async (eventId, waypointId) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
+    return removeNavigationObjectiveCore(ev, waypointId);
   },
   clearNavigationObjective: async (eventId) => {
     const ev = await db.getEvent(eventId).catch(() => null);

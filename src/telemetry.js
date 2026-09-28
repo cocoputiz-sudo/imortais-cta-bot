@@ -757,7 +757,14 @@ async function getNavigationState(db, eventId) {
   const ev = await db.getEvent(eventId).catch(() => null);
   if (!ev) return null;
 
-  const objective = await db.getNavigationObjective(eventId).catch(() => null);
+  const objectives = await db.getNavigationObjectives(eventId, { includeDone: true }).catch(() => []);
+  const pending = objectives.filter(o => String(o.status || "pending") === "pending");
+  const session = await db.getNavigationSession(eventId).catch(() => null);
+  const secondsPerMap = Math.max(
+    20,
+    Math.min(600, Number(session?.seconds_per_map || process.env.NAV_SECONDS_PER_MAP || 90) || 90)
+  );
+
   const { rows } = await pool.query(`
     WITH ranked AS (
       SELECT device_id, player_name, payload, occurred_at, received_at,
@@ -829,32 +836,100 @@ async function getNavigationState(db, eventId) {
   );
 
   const majority = groups[0] || null;
+  const nowMs = Date.now();
+
+  function objectiveOut(o) {
+    const expiresMs = o?.expires_at ? new Date(o.expires_at).getTime() - nowMs : null;
+    return {
+      id: String(o.id),
+      ctaEventId: String(o.cta_event_id),
+      position: Number(o.position),
+      status: String(o.status || "pending"),
+      type: o.objective_type,
+      rarity: o.rarity || null,
+      targetZoneId: o.target_zone_id,
+      targetZoneName: o.target_zone_name,
+      expiresAt: o.expires_at,
+      remainingSeconds: Number.isFinite(expiresMs) ? Math.floor(expiresMs / 1000) : null,
+      expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
+      createdBy: o.created_by || null,
+      completedAt: o.completed_at || null,
+      updatedAt: o.updated_at,
+    };
+  }
+
+  const pendingOut = pending.map(objectiveOut);
+  const allOut = objectives.map(objectiveOut);
+
   let route = null;
   let instruction = null;
+  const legs = [];
+  let source = majority ? (majority.zone?.id || majority.clusterName) : null;
+  let sourceName = majority ? (majority.zone?.name || majority.clusterName) : null;
+  let cumulativeTravelSeconds = 0;
 
-  if (objective && majority) {
-    const source = majority.zone?.id || majority.clusterName;
-    route = navigation.shortestRoute(source, objective.target_zone_id || objective.target_zone_name);
+  for (let i = 0; i < pending.length; i++) {
+    const objective = pending[i];
+    const target = objective.target_zone_id || objective.target_zone_name;
+    const legRoute = source ? navigation.shortestRoute(source, target) : null;
+    const validRoute = !!legRoute?.ok;
+    const maps = validRoute ? Number(legRoute.maps || 0) : null;
+    const travelSeconds = validRoute ? maps * secondsPerMap : null;
+
+    if (travelSeconds != null) cumulativeTravelSeconds += travelSeconds;
+
+    const deadlineMs = objective.expires_at ? new Date(objective.expires_at).getTime() : null;
+    const chainMassByMs = Number.isFinite(deadlineMs) && travelSeconds != null
+      ? deadlineMs - cumulativeTravelSeconds * 1000
+      : null;
+    const legDepartureByMs = Number.isFinite(deadlineMs) && travelSeconds != null
+      ? deadlineMs - travelSeconds * 1000
+      : null;
+    const arrivalIfLeaveNowMs = validRoute
+      ? nowMs + cumulativeTravelSeconds * 1000
+      : null;
+    const slackSeconds = Number.isFinite(deadlineMs) && Number.isFinite(arrivalIfLeaveNowMs)
+      ? Math.floor((deadlineMs - arrivalIfLeaveNowMs) / 1000)
+      : null;
+
+    legs.push({
+      index: i + 1,
+      objective: objectiveOut(objective),
+      from: sourceName,
+      to: objective.target_zone_name,
+      route: legRoute,
+      maps,
+      travelSeconds,
+      cumulativeTravelSeconds: validRoute ? cumulativeTravelSeconds : null,
+      massBy: Number.isFinite(chainMassByMs) ? new Date(chainMassByMs).toISOString() : null,
+      massInSeconds: Number.isFinite(chainMassByMs) ? Math.floor((chainMassByMs - nowMs) / 1000) : null,
+      leavePreviousBy: Number.isFinite(legDepartureByMs) ? new Date(legDepartureByMs).toISOString() : null,
+      leavePreviousInSeconds: Number.isFinite(legDepartureByMs) ? Math.floor((legDepartureByMs - nowMs) / 1000) : null,
+      arrivalIfLeaveNow: Number.isFinite(arrivalIfLeaveNowMs) ? new Date(arrivalIfLeaveNowMs).toISOString() : null,
+      slackSeconds,
+      feasibleIfLeaveNow: slackSeconds == null ? null : slackSeconds >= 0,
+    });
+
+    source = objective.target_zone_id || objective.target_zone_name;
+    sourceName = objective.target_zone_name;
+  }
+
+  if (legs[0]?.route?.ok) {
+    route = legs[0].route;
     instruction = navigation.nextInstruction(route);
   }
 
-  const expiresMs = objective?.expires_at ? new Date(objective.expires_at).getTime() - Date.now() : null;
-  const objectiveOut = objective ? {
-    ctaEventId: String(objective.cta_event_id),
-    type: objective.objective_type,
-    rarity: objective.rarity || null,
-    targetZoneId: objective.target_zone_id,
-    targetZoneName: objective.target_zone_name,
-    expiresAt: objective.expires_at,
-    remainingSeconds: Number.isFinite(expiresMs) ? Math.max(0, Math.floor(expiresMs / 1000)) : null,
-    expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
-    createdBy: objective.created_by || null,
-    updatedAt: objective.updated_at,
-  } : null;
-
   return {
     event: { id: String(ev.id), time: ev.time_label, status: ev.status },
-    objective: objectiveOut,
+    objective: pendingOut[0] || null,
+    objectives: pendingOut,
+    allObjectives: allOut,
+    itinerary: {
+      secondsPerMap,
+      totalPending: pendingOut.length,
+      totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
+      legs,
+    },
     current: majority ? {
       zone: majority.zone,
       clusterName: majority.clusterName,
