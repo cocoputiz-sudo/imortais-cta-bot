@@ -1017,11 +1017,11 @@ const navigationRefreshTimers = new Map();
 const navigationMessageFingerprints = new Map();
 const NODE_RARITIES = new Set(["4.4", "5.4", "6.4", "7.4", "8.4"]);
 const COLOR_RARITIES = new Set(["ROXO", "AZUL", "AMARELO", "VERDE", "VERMELHO"]);
-const VORTEX_ZONES = new Map([
-  ["thunderrock upland", "Thunderrock Upland"],
-  ["rivercopse curve", "Rivercopse Curve"],
-  ["giantweald woods", "Giantweald Woods"],
-]);
+const VORTEX_DELIVERY_ZONES = [
+  "Thunderrock Upland",
+  "Rivercopse Curve",
+  "Giantweald Woods",
+];
 const ORBS_HO_ZONE = "Thunderrock Upland";
 
 function fmtDurationShort(seconds) {
@@ -1191,15 +1191,6 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
     };
   }
 
-  if (type === "VORTEX") {
-    const allowed = VORTEX_ZONES.get(String(resolved.zone.name || "").trim().toLowerCase());
-    if (!allowed) {
-      return {
-        ok: false,
-        error: "VORTEX atualmente só pode ser cadastrado em Thunderrock Upland, Rivercopse Curve ou Giantweald Woods.",
-      };
-    }
-  }
   const rarityCheck = validateObjectiveRarity(type, type === "ORBS" ? "" : input.rarity);
   if (!rarityCheck.ok) return rarityCheck;
 
@@ -1221,6 +1212,22 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
   navigationMessageFingerprints.delete(String(ev.id));
   const state = await refreshNavigationMessage(ev.id, { force: true });
   return { ok: true, objective: saved, state };
+}
+
+async function startNavigationCarryCore(ev, waypointId, deliveryZoneId, deliveryZoneName) {
+  if (!deliveryZoneId || !deliveryZoneName) {
+    return { ok: false, error: "Mapa de entrega do Vortex não foi calculado." };
+  }
+  const picked = await db.startNavigationCarry(
+    ev.id,
+    waypointId,
+    deliveryZoneId,
+    deliveryZoneName
+  ).catch(() => null);
+  if (!picked) return { ok: false, error: "Não foi possível marcar o Vortex como pego." };
+  navigationMessageFingerprints.delete(String(ev.id));
+  const state = await refreshNavigationMessage(ev.id, { force: true });
+  return { ok: true, objective: picked, state };
 }
 
 async function completeNavigationObjectiveCore(ev, waypointId) {
@@ -1304,9 +1311,25 @@ async function slashNavigationNext(interaction, ev) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const state = await telemetry.getNavigationState(db, ev.id).catch(() => null);
   const first = state?.objective || null;
+  const firstLeg = state?.itinerary?.legs?.[0] || null;
   if (!first) {
     return interaction.editReply({ content: "Não há objetivo pendente na rota." });
   }
+
+  if (String(first.type || "").toUpperCase() === "VORTEX" && String(first.status || "pending").toLowerCase() === "pending") {
+    const delivery = firstLeg?.delivery;
+    if (!delivery?.zoneId || !delivery?.zoneName) {
+      return interaction.editReply({ content: "⚠️ Ainda não consegui calcular o mapa de entrega deste Vortex." });
+    }
+    const result = await startNavigationCarryCore(ev, first.id, delivery.zoneId, delivery.zoneName);
+    if (!result.ok) {
+      return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível marcar o Vortex como pego.") });
+    }
+    return interaction.editReply({
+      content: `🔮 Vortex marcado como **PEGO**. Agora o Waze vai levar a massa até **${delivery.zoneName}** para entrega.`
+    });
+  }
+
   const result = await completeNavigationObjectiveCore(ev, first.id);
   if (!result.ok) {
     return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível concluir o objetivo.") });
@@ -2984,6 +3007,11 @@ const webActions = {
     const ev = await db.getEvent(eventId).catch(() => null);
     if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
     return setNavigationObjectiveCore(ev, input || {}, actorId);
+  },
+  startNavigationCarry: async (eventId, waypointId, deliveryZoneId, deliveryZoneName) => {
+    const ev = await db.getEvent(eventId).catch(() => null);
+    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
+    return startNavigationCarryCore(ev, waypointId, deliveryZoneId, deliveryZoneName);
   },
   completeNavigationObjective: async (eventId, waypointId) => {
     const ev = await db.getEvent(eventId).catch(() => null);
