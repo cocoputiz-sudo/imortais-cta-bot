@@ -1089,7 +1089,10 @@ async function getNavigationState(db, eventId) {
   if (!ev) return null;
 
   const objectives = await db.getNavigationObjectives(eventId, { includeDone: true }).catch(() => []);
-  const pending = objectives.filter(o => String(o.status || "pending") === "pending");
+  const active = objectives.filter(o => {
+    const status = String(o.status || "pending").toLowerCase();
+    return status === "pending" || status === "carrying";
+  });
   const session = await db.getNavigationSession(eventId).catch(() => null);
   const secondsPerMap = Math.max(
     20,
@@ -1169,7 +1172,7 @@ async function getNavigationState(db, eventId) {
   const majority = groups[0] || null;
   const nowMs = Date.now();
 
-  function objectiveOut(o) {
+  function objectiveOut(o, plannedDelivery = null) {
     const expiresMs = o?.expires_at ? new Date(o.expires_at).getTime() - nowMs : null;
     return {
       id: String(o.id),
@@ -1183,6 +1186,9 @@ async function getNavigationState(db, eventId) {
       expiresAt: o.expires_at,
       remainingSeconds: Number.isFinite(expiresMs) ? Math.floor(expiresMs / 1000) : null,
       expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
+      deliveryZoneId: o.delivery_zone_id || plannedDelivery?.id || null,
+      deliveryZoneName: o.delivery_zone_name || plannedDelivery?.name || null,
+      pickedAt: o.picked_at || null,
       createdBy: o.created_by || null,
       completedAt: o.completed_at || null,
       updatedAt: o.updated_at,
@@ -1191,63 +1197,100 @@ async function getNavigationState(db, eventId) {
 
   const source = majority ? (majority.zone?.id || majority.clusterName) : null;
   const sourceNameInitial = majority ? (majority.zone?.name || majority.clusterName) : null;
-  const optimized = optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs);
-  const orderedPending = optimized.objectives;
+  const optimized = optimizeNavigationObjectives(active, source, secondsPerMap, nowMs);
+  const plan = optimized.plan || [];
 
-  const pendingOut = orderedPending.map(objectiveOut);
-  const allOut = objectives.map(objectiveOut);
+  const activeOut = plan.map(entry =>
+    objectiveOut(entry.objective, entry.transition?.deliveryZone || null)
+  );
+  const allOut = objectives.map(o => objectiveOut(o));
 
   let route = null;
   let instruction = null;
   const legs = [];
-  let legSource = source;
   let sourceName = sourceNameInitial;
   let cumulativeTravelSeconds = 0;
 
-  for (let i = 0; i < orderedPending.length; i++) {
-    const objective = orderedPending[i];
-    const target = objective.target_zone_id || objective.target_zone_name;
-    const legRoute = legSource ? navigation.shortestRoute(legSource, target) : null;
-    const validRoute = !!legRoute?.ok;
-    const maps = validRoute ? Number(legRoute.maps || 0) : null;
-    const travelSeconds = validRoute ? maps * secondsPerMap : null;
+  for (let i = 0; i < plan.length; i++) {
+    const entry = plan[i];
+    const objective = entry.objective;
+    const t = entry.transition;
+    const out = objectiveOut(objective, t?.deliveryZone || null);
+    const stage = String(objective.status || "pending").toLowerCase();
 
-    if (travelSeconds != null) cumulativeTravelSeconds += travelSeconds;
+    const validRoute = !!t?.ok;
+    const pickupTravelSeconds = validRoute ? Number(t.pickupTravelSeconds || 0) : null;
+    const deliveryTravelSeconds = validRoute ? Number(t.deliveryTravelSeconds || 0) : null;
+    const totalTravelSeconds = validRoute ? Number(t.totalSeconds || 0) : null;
+    const pickupMaps = validRoute ? Number(t.pickupMaps || 0) : null;
+    const deliveryMaps = validRoute && t.deliveryMaps != null ? Number(t.deliveryMaps || 0) : null;
+    const totalMaps = validRoute && t.totalMaps != null ? Number(t.totalMaps || 0) : null;
+
+    const elapsedBefore = cumulativeTravelSeconds;
+    const pickupArrivalSeconds = stage === "carrying"
+      ? null
+      : (validRoute ? elapsedBefore + Number(t.deadlineTravelSeconds || 0) : null);
 
     const deadlineMs = objective.expires_at ? new Date(objective.expires_at).getTime() : null;
-    const chainMassByMs = Number.isFinite(deadlineMs) && travelSeconds != null
-      ? deadlineMs - cumulativeTravelSeconds * 1000
+    const chainMassByMs = Number.isFinite(deadlineMs) && pickupArrivalSeconds != null
+      ? deadlineMs - pickupArrivalSeconds * 1000
       : null;
-    const legDepartureByMs = Number.isFinite(deadlineMs) && travelSeconds != null
-      ? deadlineMs - travelSeconds * 1000
+    const legDepartureByMs = Number.isFinite(deadlineMs) && pickupTravelSeconds != null
+      ? deadlineMs - pickupTravelSeconds * 1000
       : null;
-    const arrivalIfLeaveNowMs = validRoute
-      ? nowMs + cumulativeTravelSeconds * 1000
+    const arrivalIfLeaveNowMs = pickupArrivalSeconds != null
+      ? nowMs + pickupArrivalSeconds * 1000
       : null;
     const slackSeconds = Number.isFinite(deadlineMs) && Number.isFinite(arrivalIfLeaveNowMs)
       ? Math.floor((deadlineMs - arrivalIfLeaveNowMs) / 1000)
       : null;
 
+    if (validRoute) cumulativeTravelSeconds += totalTravelSeconds;
+
+    const primaryRoute = stage === "carrying"
+      ? t?.deliveryRoute
+      : t?.pickupRoute;
+
     legs.push({
       index: i + 1,
-      objective: objectiveOut(objective),
+      stage,
+      objective: out,
       from: sourceName,
-      to: objective.target_zone_name,
-      route: legRoute,
-      maps,
-      travelSeconds,
+      to: stage === "carrying"
+        ? (out.deliveryZoneName || objective.delivery_zone_name)
+        : objective.target_zone_name,
+      endAt: t?.deliveryZone?.name || objective.target_zone_name,
+      route: primaryRoute || null,
+      maps: totalMaps,
+      travelSeconds: totalTravelSeconds,
+      pickup: stage === "carrying" ? null : {
+        zoneId: objective.target_zone_id,
+        zoneName: objective.target_zone_name,
+        route: t?.pickupRoute || null,
+        maps: pickupMaps,
+        travelSeconds: pickupTravelSeconds,
+      },
+      delivery: t?.deliveryZone ? {
+        zoneId: t.deliveryZone.id,
+        zoneName: t.deliveryZone.name,
+        route: t.deliveryRoute || null,
+        maps: deliveryMaps,
+        travelSeconds: deliveryTravelSeconds,
+      } : null,
       cumulativeTravelSeconds: validRoute ? cumulativeTravelSeconds : null,
       massBy: Number.isFinite(chainMassByMs) ? new Date(chainMassByMs).toISOString() : null,
       massInSeconds: Number.isFinite(chainMassByMs) ? Math.floor((chainMassByMs - nowMs) / 1000) : null,
       leavePreviousBy: Number.isFinite(legDepartureByMs) ? new Date(legDepartureByMs).toISOString() : null,
       leavePreviousInSeconds: Number.isFinite(legDepartureByMs) ? Math.floor((legDepartureByMs - nowMs) / 1000) : null,
       arrivalIfLeaveNow: Number.isFinite(arrivalIfLeaveNowMs) ? new Date(arrivalIfLeaveNowMs).toISOString() : null,
+      finishIfLeaveNow: validRoute
+        ? new Date(nowMs + cumulativeTravelSeconds * 1000).toISOString()
+        : null,
       slackSeconds,
       feasibleIfLeaveNow: slackSeconds == null ? null : slackSeconds >= 0,
     });
 
-    legSource = objective.target_zone_id || objective.target_zone_name;
-    sourceName = objective.target_zone_name;
+    sourceName = t?.deliveryZone?.name || objective.target_zone_name;
   }
 
   if (legs[0]?.route?.ok) {
@@ -1257,17 +1300,18 @@ async function getNavigationState(db, eventId) {
 
   return {
     event: { id: String(ev.id), time: ev.time_label, status: ev.status },
-    objective: pendingOut[0] || null,
-    objectives: pendingOut,
+    objective: activeOut[0] || null,
+    objectives: activeOut,
     allObjectives: allOut,
     itinerary: {
       secondsPerMap,
-      totalPending: pendingOut.length,
+      totalPending: activeOut.length,
       totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
+      vortexDeliveryZones: VORTEX_DELIVERY_ZONE_NAMES.slice(),
       optimization: {
         mode: optimized.mode,
         score: optimized.score,
-        rule: "minimize missed deadlines, then lateness, then total map travel"
+        rule: "hit pickup deadlines first; include Vortex delivery travel; then minimize lateness and map travel"
       },
       legs,
     },
