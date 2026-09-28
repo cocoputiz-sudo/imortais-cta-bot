@@ -1198,6 +1198,44 @@ const PAGE = `<!doctype html>
 
   // ===================== NAVEGAÇÃO / WAZE ZVZ =====================
   var navZoneSearchTimer=null;
+  var navDraftByEvent={};
+  function navDraftKey(){ return String(current||''); }
+  function navFormIsFocused(){
+    var a=document.activeElement;
+    return !!(a && a.closest && a.closest('#view-navigation .nav2-form'));
+  }
+  function navReadDraftFromDom(){
+    var key=navDraftKey(); if(!key) return null;
+    var target=document.getElementById('nav-target');
+    var type=document.getElementById('nav-type');
+    var rarity=document.getElementById('nav-rarity');
+    var min=document.getElementById('nav-min');
+    var sec=document.getElementById('nav-sec');
+    if(!target||!type||!rarity||!min||!sec) return navDraftByEvent[key]||null;
+    var d={
+      targetZone:target.value||'',
+      type:type.value||'VORTEX',
+      rarity:rarity.value||'',
+      minutes:min.value||'',
+      seconds:sec.value||'0',
+      dirty:true
+    };
+    navDraftByEvent[key]=d;
+    return d;
+  }
+  function navDraftForObjective(o){
+    var key=navDraftKey();
+    var d=key?navDraftByEvent[key]:null;
+    if(d) return d;
+    return {
+      targetZone:o?o.targetZoneName:'',
+      type:o&&o.type?o.type:'VORTEX',
+      rarity:o&&o.rarity?o.rarity:'',
+      minutes:'',
+      seconds:'0',
+      dirty:false
+    };
+  }
   function navCountdown(seconds){
     if(seconds==null) return 'sem limite';
     var s=Math.max(0,Number(seconds)||0), m=Math.floor(s/60), r=Math.floor(s%60);
@@ -1211,11 +1249,21 @@ const PAGE = `<!doctype html>
   }
   function bindNavigationForm(){
     var target=document.getElementById('nav-target');
+    var type=document.getElementById('nav-type');
+    var rarity=document.getElementById('nav-rarity');
+    var min=document.getElementById('nav-min');
+    var sec=document.getElementById('nav-sec');
+
+    function keepDraft(){ navReadDraftFromDom(); }
+
     if(target){
       target.oninput=function(){
+        keepDraft();
         if(navZoneSearchTimer) clearTimeout(navZoneSearchTimer);
         navZoneSearchTimer=setTimeout(function(){
-          fetch('/api/navigation/zones?q='+encodeURIComponent(target.value||''))
+          var liveTarget=document.getElementById('nav-target');
+          if(!liveTarget) return;
+          fetch('/api/navigation/zones?q='+encodeURIComponent(liveTarget.value||''))
             .then(function(r){return r.json();})
             .then(function(d){
               var dl=document.getElementById('nav-zone-list'); if(!dl)return;
@@ -1224,6 +1272,12 @@ const PAGE = `<!doctype html>
         },180);
       };
     }
+    [type,rarity,min,sec].forEach(function(el){
+      if(!el) return;
+      el.onchange=keepDraft;
+      el.oninput=keepDraft;
+    });
+
     var set=document.getElementById('nav-set');
     if(set) set.onclick=function(){
       if(!current) return;
@@ -1239,7 +1293,11 @@ const PAGE = `<!doctype html>
       };
       fetch('/api/navigation/objective',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
         .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
-        .then(function(){flash('● objetivo definido','var(--green)');renderNavigation();})
+        .then(function(){
+          delete navDraftByEvent[navDraftKey()];
+          flash('● objetivo definido','var(--green)');
+          renderNavigation();
+        })
         .catch(function(e){flash('● '+e.message,'var(--red)');});
     };
     var clear=document.getElementById('nav-clear');
@@ -1247,26 +1305,34 @@ const PAGE = `<!doctype html>
       if(!current||!confirm('Remover o objetivo de navegação deste CTA?')) return;
       fetch('/api/navigation/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current})})
         .then(function(r){return r.json();})
-        .then(function(){flash('● objetivo removido','var(--green)');renderNavigation();})
+        .then(function(){
+          delete navDraftByEvent[navDraftKey()];
+          flash('● objetivo removido','var(--green)');
+          renderNavigation();
+        })
         .catch(function(){flash('● erro ao remover','var(--red)');});
     };
   }
   function renderNavigation(silent){
     if(!current){ noCta('view-navigation','🧭 Navegação'); return; }
+    // Atualizações automáticas de telemetria não podem reconstruir o formulário
+    // enquanto o caller está digitando. Isso evitava o efeito de "F5".
+    if(silent && navFormIsFocused()) return;
     if(!silent) loading('view-navigation','🧭 Navegação');
 
     fetchTelemetry('/api/navigation/state?event='+encodeURIComponent(current)).then(function(d){
       var o=d.objective||null, cur=d.current||null, route=d.route||null, inst=d.instruction||null;
+      var draft=navDraftForObjective(o);
       var form=authState.canEdit
         ? '<div class="nav2-card"><h3>FIXAR OBJETIVO</h3><div class="nav2-form">'
-          +'<div class="nav2-field"><label>Mapa de destino</label><input id="nav-target" list="nav-zone-list" placeholder="Ex.: Flammog Fork" value="'+esc(o?o.targetZoneName:'')+'"><datalist id="nav-zone-list"></datalist></div>'
+          +'<div class="nav2-field"><label>Mapa de destino</label><input id="nav-target" list="nav-zone-list" placeholder="Ex.: Flammog Fork" value="'+esc(draft.targetZone||'')+'"><datalist id="nav-zone-list"></datalist></div>'
           +'<div class="nav2-row"><div class="nav2-field"><label>Tipo</label><select id="nav-type">'
-          +['VORTEX','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(o&&o.type===x?' selected':'')+'>'+x+'</option>';}).join('')
+          +['VORTEX','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(String(draft.type||'VORTEX')===x?' selected':'')+'>'+x+'</option>';}).join('')
           +'</select></div><div class="nav2-field"><label>Raridade/cor</label><select id="nav-rarity"><option value="">—</option>'
-          +['ROXO','AZUL','AMARELO','VERDE','VERMELHO'].map(function(x){return '<option'+(o&&o.rarity===x?' selected':'')+'>'+x+'</option>';}).join('')
+          +['ROXO','AZUL','AMARELO','VERDE','VERMELHO'].map(function(x){return '<option'+(String(draft.rarity||'')===x?' selected':'')+'>'+x+'</option>';}).join('')
           +'</select></div></div>'
-          +'<div class="nav2-row"><div class="nav2-field"><label>Minutos restantes</label><input id="nav-min" type="number" min="0" max="240" value=""></div>'
-          +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="0"></div></div>'
+          +'<div class="nav2-row"><div class="nav2-field"><label>Minutos restantes</label><input id="nav-min" type="number" min="0" max="240" value="'+esc(draft.minutes==null?'':draft.minutes)+'"></div>'
+          +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="'+esc(draft.seconds==null?'0':draft.seconds)+'"></div></div>'
           +'<div class="nav2-actions"><button class="btn primary" id="nav-set">🎯 Definir objetivo</button>'
           +(o?'<button class="btn danger" id="nav-clear">Remover objetivo</button>':'')+'</div></div></div>'
         : '';
