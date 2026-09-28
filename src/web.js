@@ -1101,7 +1101,9 @@ const PAGE = `<!doctype html>
     confirmPollTimer=setInterval(function(){
       if(!current || String(current)!==String(id)) return;
       var active=document.querySelector('.nav[data-view].on');
-      if(active&&active.getAttribute('data-view')==='confirm') renderConfirm(true);
+      var view=active&&active.getAttribute('data-view');
+      if(view==='confirm') renderConfirm(true);
+      if(view==='navigation') renderNavigation(true);
     },5000);
   }
 
