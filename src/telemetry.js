@@ -753,6 +753,12 @@ async function getConfirm(db, eventId) {
   };
 }
 
+const VORTEX_DELIVERY_ZONE_NAMES = [
+  "Thunderrock Upland",
+  "Rivercopse Curve",
+  "Giantweald Woods",
+];
+
 function navDeadlineMs(objective) {
   const t = objective?.expires_at ? new Date(objective.expires_at).getTime() : NaN;
   return Number.isFinite(t) ? t : null;
@@ -762,27 +768,31 @@ function navPlanCompare(a, b) {
   if (!b) return -1;
   const keys = ["impossible", "missed", "lateSeconds", "travelSeconds", "deadlineTie"];
   for (const key of keys) {
-    const av = Number(a[key] || 0);
-    const bv = Number(b[key] || 0);
+    const av = Number(a?.[key] || 0);
+    const bv = Number(b?.[key] || 0);
     if (av !== bv) return av < bv ? -1 : 1;
   }
   return 0;
 }
 
-function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
-  const list = Array.isArray(pending) ? pending.slice() : [];
-  if (list.length <= 1) {
-    return {
-      objectives: list,
-      mode: source ? "exact" : "deadline",
-      score: { impossible: 0, missed: 0, lateSeconds: 0, travelSeconds: 0, deadlineTie: 0 }
-    };
-  }
+function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, nowMs) {
+  const active = Array.isArray(activeObjectives) ? activeObjectives.slice() : [];
+  const carrying = active
+    .filter(o => String(o.status || "").toLowerCase() === "carrying")
+    .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  const pending = active
+    .filter(o => String(o.status || "pending").toLowerCase() === "pending");
 
-  const insertionOrder = new Map(list.map((o, i) => [String(o.id), i]));
+  const baseScore = {
+    impossible: 0,
+    missed: 0,
+    lateSeconds: 0,
+    travelSeconds: 0,
+    deadlineTie: 0,
+  };
 
   if (!source) {
-    list.sort((a, b) => {
+    pending.sort((a, b) => {
       const da = navDeadlineMs(a);
       const db = navDeadlineMs(b);
       if (da == null && db != null) return 1;
@@ -790,19 +800,25 @@ function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
       if (da != null && db != null && da !== db) return da - db;
       return (Number(a.position) || 0) - (Number(b.position) || 0);
     });
+    const ordered = [...carrying, ...pending];
     return {
-      objectives: list,
+      plan: ordered.map(objective => ({ objective, transition: null })),
+      objectives: ordered,
       mode: "deadline",
-      score: { impossible: 0, missed: 0, lateSeconds: 0, travelSeconds: 0, deadlineTie: 0 }
+      score: baseScore,
     };
   }
 
   const routeCache = new Map();
-  function edge(from, objective) {
-    const to = objective.target_zone_id || objective.target_zone_name;
-    const key = String(from) + "=>" + String(to);
+  const deliveryZones = VORTEX_DELIVERY_ZONE_NAMES
+    .map(name => navigation.resolveZone(name).zone)
+    .filter(Boolean)
+    .map(zone => navigation.zoneDisplay(zone));
+
+  function edge(from, to) {
+    const key = String(from || "") + "=>" + String(to || "");
     if (routeCache.has(key)) return routeCache.get(key);
-    const route = navigation.shortestRoute(from, to);
+    const route = from && to ? navigation.shortestRoute(from, to) : null;
     const ok = !!route?.ok;
     const maps = ok ? Number(route.maps || 0) : null;
     const out = {
@@ -815,103 +831,257 @@ function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
     return out;
   }
 
-  function scorePath(path) {
-    let current = source;
-    let elapsed = 0;
-    let impossible = 0;
-    let missed = 0;
-    let lateSeconds = 0;
-    let travelSeconds = 0;
-    let deadlineTie = 0;
+  function transitionOptions(from, objective) {
+    const type = String(objective.objective_type || "").toUpperCase();
+    const status = String(objective.status || "pending").toLowerCase();
 
-    for (let i = 0; i < path.length; i++) {
-      const objective = path[i];
-      const leg = edge(current, objective);
-      if (!leg.ok) {
-        impossible++;
-      } else {
-        elapsed += leg.seconds;
-        travelSeconds += leg.seconds;
-      }
-
-      const deadline = navDeadlineMs(objective);
-      if (deadline != null) {
-        const arrivalMs = nowMs + elapsed * 1000;
-        const late = Math.max(0, Math.floor((arrivalMs - deadline) / 1000));
-        if (late > 0) missed++;
-        lateSeconds += late;
-        // Desempate: deadlines mais cedo recebem peso maior nas primeiras posições.
-        deadlineTie += (path.length - i) * Math.max(0, Math.floor((deadline - nowMs) / 1000));
-      }
-
-      current = objective.target_zone_id || objective.target_zone_name;
+    if (status === "carrying") {
+      const deliveryName = objective.delivery_zone_name;
+      const deliveryId = objective.delivery_zone_id || deliveryName;
+      const delivery = edge(from, deliveryId);
+      return [{
+        objective,
+        stage: "carrying",
+        ok: delivery.ok,
+        start: from,
+        pickupRoute: null,
+        pickupMaps: 0,
+        pickupTravelSeconds: 0,
+        deliveryZone: deliveryName ? { id: deliveryId, name: deliveryName } : null,
+        deliveryRoute: delivery.route,
+        deliveryMaps: delivery.maps,
+        deliveryTravelSeconds: delivery.seconds,
+        totalMaps: delivery.maps,
+        totalSeconds: delivery.seconds,
+        deadlineTravelSeconds: 0,
+        end: deliveryId,
+      }];
     }
 
-    return { impossible, missed, lateSeconds, travelSeconds, deadlineTie };
+    const pickupId = objective.target_zone_id || objective.target_zone_name;
+    const pickup = edge(from, pickupId);
+
+    if (type !== "VORTEX") {
+      return [{
+        objective,
+        stage: "pending",
+        ok: pickup.ok,
+        start: from,
+        pickupRoute: pickup.route,
+        pickupMaps: pickup.maps,
+        pickupTravelSeconds: pickup.seconds,
+        deliveryZone: null,
+        deliveryRoute: null,
+        deliveryMaps: 0,
+        deliveryTravelSeconds: 0,
+        totalMaps: pickup.maps,
+        totalSeconds: pickup.seconds,
+        deadlineTravelSeconds: pickup.seconds,
+        end: pickupId,
+      }];
+    }
+
+    return deliveryZones.map(drop => {
+      const carry = edge(pickupId, drop.id || drop.name);
+      const ok = pickup.ok && carry.ok;
+      const pickupMaps = pickup.maps;
+      const deliveryMaps = carry.maps;
+      return {
+        objective,
+        stage: "pending",
+        ok,
+        start: from,
+        pickupRoute: pickup.route,
+        pickupMaps,
+        pickupTravelSeconds: pickup.seconds,
+        deliveryZone: drop,
+        deliveryRoute: carry.route,
+        deliveryMaps,
+        deliveryTravelSeconds: carry.seconds,
+        totalMaps: ok ? Number(pickupMaps || 0) + Number(deliveryMaps || 0) : null,
+        totalSeconds: ok ? Number(pickup.seconds || 0) + Number(carry.seconds || 0) : null,
+        // O deadline do Vortex é o horário para CHEGAR/PEGAR no mapa onde ele está.
+        // O transporte até o mapa de entrega conta para os próximos objetivos.
+        deadlineTravelSeconds: pickup.seconds,
+        end: drop.id || drop.name,
+      };
+    });
   }
 
-  let ordered = null;
+  const prefixPlan = [];
+  let prefixSource = source;
+  let prefixElapsed = 0;
+  let prefixScore = { ...baseScore };
+
+  // Se já estamos carregando um Vortex, a entrega é obrigatória antes de reorganizar
+  // os objetivos que ainda não foram pegos.
+  for (const objective of carrying) {
+    const transition = transitionOptions(prefixSource, objective)[0];
+    prefixPlan.push({ objective, transition });
+    if (!transition?.ok) {
+      prefixScore.impossible++;
+    } else {
+      prefixElapsed += Number(transition.totalSeconds || 0);
+      prefixScore.travelSeconds += Number(transition.totalSeconds || 0);
+      prefixSource = transition.end;
+    }
+  }
+
+  if (!pending.length) {
+    return {
+      plan: prefixPlan,
+      objectives: prefixPlan.map(x => x.objective),
+      mode: "carrying",
+      score: prefixScore,
+    };
+  }
+
+  const insertionOrder = new Map(pending.map((o, i) => [String(o.id), i]));
+
+  function addTransitionScore(score, transition, objective, elapsedBefore, position, totalCount) {
+    const next = { ...score };
+    if (!transition?.ok) {
+      next.impossible++;
+      return next;
+    }
+
+    const pickupArrivalSeconds = elapsedBefore + Number(transition.deadlineTravelSeconds || 0);
+    const deadline = navDeadlineMs(objective);
+    if (deadline != null) {
+      const late = Math.max(0, Math.floor((nowMs + pickupArrivalSeconds * 1000 - deadline) / 1000));
+      if (late > 0) next.missed++;
+      next.lateSeconds += late;
+      next.deadlineTie += (totalCount - position + 1) *
+        Math.max(0, Math.floor((deadline - nowMs) / 1000));
+    }
+    next.travelSeconds += Number(transition.totalSeconds || 0);
+    return next;
+  }
+
+  function partialDefinitelyWorse(score, best) {
+    if (!best) return false;
+    if (score.impossible !== best.impossible) return score.impossible > best.impossible;
+    if (score.missed !== best.missed) return score.missed > best.missed;
+    if (score.lateSeconds !== best.lateSeconds) return score.lateSeconds > best.lateSeconds;
+    return false;
+  }
+
+  let bestPlan = null;
   let bestScore = null;
 
-  // Até 8 objetivos, testamos todas as ordens. 8! = 40.320, pequeno para o CTA.
-  if (list.length <= 8) {
-    const used = new Array(list.length).fill(false);
-    const path = [];
-    function walk() {
-      if (path.length === list.length) {
-        const score = scorePath(path);
+  // Com até 6 objetivos ainda não pegos, testamos ordem + os 3 possíveis mapas de
+  // entrega de cada Vortex. 6! * 3^6 = 524.880 cenários no pior caso.
+  if (pending.length <= 6) {
+    const used = new Array(pending.length).fill(false);
+    const plan = [];
+
+    function walk(current, elapsed, score) {
+      if (plan.length === pending.length) {
         if (!bestScore || navPlanCompare(score, bestScore) < 0) {
-          bestScore = score;
-          ordered = path.slice();
+          bestScore = { ...score };
+          bestPlan = plan.slice();
         }
         return;
       }
-      for (let i = 0; i < list.length; i++) {
+
+      for (let i = 0; i < pending.length; i++) {
         if (used[i]) continue;
-        used[i] = true;
-        path.push(list[i]);
-        walk();
-        path.pop();
-        used[i] = false;
+        const objective = pending[i];
+        const options = transitionOptions(current, objective);
+
+        for (const transition of options) {
+          const position = prefixPlan.length + plan.length + 1;
+          const totalCount = prefixPlan.length + pending.length;
+          const nextScore = addTransitionScore(
+            score,
+            transition,
+            objective,
+            elapsed,
+            position,
+            totalCount
+          );
+          if (partialDefinitelyWorse(nextScore, bestScore)) continue;
+
+          used[i] = true;
+          plan.push({ objective, transition });
+          const nextElapsed = transition?.ok
+            ? elapsed + Number(transition.totalSeconds || 0)
+            : elapsed;
+          const nextCurrent = transition?.ok ? transition.end : current;
+          walk(nextCurrent, nextElapsed, nextScore);
+          plan.pop();
+          used[i] = false;
+        }
       }
     }
-    walk();
-    return { objectives: ordered || list, mode: "exact", score: bestScore || scorePath(list) };
+
+    walk(prefixSource, prefixElapsed, prefixScore);
+    const tail = bestPlan || pending.map(objective => ({
+      objective,
+      transition: transitionOptions(prefixSource, objective)[0] || null,
+    }));
+    const full = [...prefixPlan, ...tail];
+    return {
+      plan: full,
+      objectives: full.map(x => x.objective),
+      mode: "exact",
+      score: bestScore || prefixScore,
+    };
   }
 
-  // Filas enormes usam heurística: menor folga até o deadline, com distância como desempate.
-  const remaining = list.slice();
-  const result = [];
-  let current = source;
-  let elapsed = 0;
+  // Filas maiores: escolhe iterativamente o objetivo com menor folga para o deadline;
+  // para Vortex, também testa os três mapas de entrega e usa distância total no desempate.
+  const remaining = pending.slice();
+  const greedyPlan = [];
+  let current = prefixSource;
+  let elapsed = prefixElapsed;
+  let score = { ...prefixScore };
 
   while (remaining.length) {
-    const candidates = remaining.map((objective) => {
-      const leg = edge(current, objective);
-      const deadline = navDeadlineMs(objective);
-      const travel = leg.ok ? leg.seconds : Number.MAX_SAFE_INTEGER / 1000;
-      const arrival = nowMs + (elapsed + travel) * 1000;
-      const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - arrival) / 1000;
-      return { objective, leg, slack, travel, deadline };
-    });
+    const candidates = [];
+    for (const objective of remaining) {
+      for (const transition of transitionOptions(current, objective)) {
+        const deadline = navDeadlineMs(objective);
+        const pickupTravel = transition?.ok ? Number(transition.deadlineTravelSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000;
+        const pickupArrival = nowMs + (elapsed + pickupTravel) * 1000;
+        const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - pickupArrival) / 1000;
+        candidates.push({
+          objective,
+          transition,
+          slack,
+          total: transition?.ok ? Number(transition.totalSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000,
+        });
+      }
+    }
 
     candidates.sort((a, b) => {
-      if (a.leg.ok !== b.leg.ok) return a.leg.ok ? -1 : 1;
+      if (!!a.transition?.ok !== !!b.transition?.ok) return a.transition?.ok ? -1 : 1;
       if (a.slack !== b.slack) return a.slack - b.slack;
-      if (a.travel !== b.travel) return a.travel - b.travel;
-      const ai = insertionOrder.get(String(a.objective.id)) || 0;
-      const bi = insertionOrder.get(String(b.objective.id)) || 0;
-      return ai - bi;
+      if (a.total !== b.total) return a.total - b.total;
+      return (insertionOrder.get(String(a.objective.id)) || 0) -
+        (insertionOrder.get(String(b.objective.id)) || 0);
     });
 
     const pick = candidates[0];
-    result.push(pick.objective);
-    if (pick.leg.ok) elapsed += pick.leg.seconds;
-    current = pick.objective.target_zone_id || pick.objective.target_zone_name;
+    const position = prefixPlan.length + greedyPlan.length + 1;
+    const totalCount = prefixPlan.length + pending.length;
+    score = addTransitionScore(score, pick.transition, pick.objective, elapsed, position, totalCount);
+    greedyPlan.push({ objective: pick.objective, transition: pick.transition });
+
+    if (pick.transition?.ok) {
+      elapsed += Number(pick.transition.totalSeconds || 0);
+      current = pick.transition.end;
+    }
     remaining.splice(remaining.indexOf(pick.objective), 1);
   }
 
-  return { objectives: result, mode: "greedy", score: scorePath(result) };
+  const full = [...prefixPlan, ...greedyPlan];
+  return {
+    plan: full,
+    objectives: full.map(x => x.objective),
+    mode: "greedy",
+    score,
+  };
 }
 
 async function getNavigationState(db, eventId) {
@@ -919,7 +1089,10 @@ async function getNavigationState(db, eventId) {
   if (!ev) return null;
 
   const objectives = await db.getNavigationObjectives(eventId, { includeDone: true }).catch(() => []);
-  const pending = objectives.filter(o => String(o.status || "pending") === "pending");
+  const active = objectives.filter(o => {
+    const status = String(o.status || "pending").toLowerCase();
+    return status === "pending" || status === "carrying";
+  });
   const session = await db.getNavigationSession(eventId).catch(() => null);
   const secondsPerMap = Math.max(
     20,
@@ -999,7 +1172,7 @@ async function getNavigationState(db, eventId) {
   const majority = groups[0] || null;
   const nowMs = Date.now();
 
-  function objectiveOut(o) {
+  function objectiveOut(o, plannedDelivery = null) {
     const expiresMs = o?.expires_at ? new Date(o.expires_at).getTime() - nowMs : null;
     return {
       id: String(o.id),
@@ -1013,6 +1186,9 @@ async function getNavigationState(db, eventId) {
       expiresAt: o.expires_at,
       remainingSeconds: Number.isFinite(expiresMs) ? Math.floor(expiresMs / 1000) : null,
       expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
+      deliveryZoneId: o.delivery_zone_id || plannedDelivery?.id || null,
+      deliveryZoneName: o.delivery_zone_name || plannedDelivery?.name || null,
+      pickedAt: o.picked_at || null,
       createdBy: o.created_by || null,
       completedAt: o.completed_at || null,
       updatedAt: o.updated_at,
@@ -1021,63 +1197,100 @@ async function getNavigationState(db, eventId) {
 
   const source = majority ? (majority.zone?.id || majority.clusterName) : null;
   const sourceNameInitial = majority ? (majority.zone?.name || majority.clusterName) : null;
-  const optimized = optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs);
-  const orderedPending = optimized.objectives;
+  const optimized = optimizeNavigationObjectives(active, source, secondsPerMap, nowMs);
+  const plan = optimized.plan || [];
 
-  const pendingOut = orderedPending.map(objectiveOut);
-  const allOut = objectives.map(objectiveOut);
+  const activeOut = plan.map(entry =>
+    objectiveOut(entry.objective, entry.transition?.deliveryZone || null)
+  );
+  const allOut = objectives.map(o => objectiveOut(o));
 
   let route = null;
   let instruction = null;
   const legs = [];
-  let legSource = source;
   let sourceName = sourceNameInitial;
   let cumulativeTravelSeconds = 0;
 
-  for (let i = 0; i < orderedPending.length; i++) {
-    const objective = orderedPending[i];
-    const target = objective.target_zone_id || objective.target_zone_name;
-    const legRoute = legSource ? navigation.shortestRoute(legSource, target) : null;
-    const validRoute = !!legRoute?.ok;
-    const maps = validRoute ? Number(legRoute.maps || 0) : null;
-    const travelSeconds = validRoute ? maps * secondsPerMap : null;
+  for (let i = 0; i < plan.length; i++) {
+    const entry = plan[i];
+    const objective = entry.objective;
+    const t = entry.transition;
+    const out = objectiveOut(objective, t?.deliveryZone || null);
+    const stage = String(objective.status || "pending").toLowerCase();
 
-    if (travelSeconds != null) cumulativeTravelSeconds += travelSeconds;
+    const validRoute = !!t?.ok;
+    const pickupTravelSeconds = validRoute ? Number(t.pickupTravelSeconds || 0) : null;
+    const deliveryTravelSeconds = validRoute ? Number(t.deliveryTravelSeconds || 0) : null;
+    const totalTravelSeconds = validRoute ? Number(t.totalSeconds || 0) : null;
+    const pickupMaps = validRoute ? Number(t.pickupMaps || 0) : null;
+    const deliveryMaps = validRoute && t.deliveryMaps != null ? Number(t.deliveryMaps || 0) : null;
+    const totalMaps = validRoute && t.totalMaps != null ? Number(t.totalMaps || 0) : null;
+
+    const elapsedBefore = cumulativeTravelSeconds;
+    const pickupArrivalSeconds = stage === "carrying"
+      ? null
+      : (validRoute ? elapsedBefore + Number(t.deadlineTravelSeconds || 0) : null);
 
     const deadlineMs = objective.expires_at ? new Date(objective.expires_at).getTime() : null;
-    const chainMassByMs = Number.isFinite(deadlineMs) && travelSeconds != null
-      ? deadlineMs - cumulativeTravelSeconds * 1000
+    const chainMassByMs = Number.isFinite(deadlineMs) && pickupArrivalSeconds != null
+      ? deadlineMs - pickupArrivalSeconds * 1000
       : null;
-    const legDepartureByMs = Number.isFinite(deadlineMs) && travelSeconds != null
-      ? deadlineMs - travelSeconds * 1000
+    const legDepartureByMs = Number.isFinite(deadlineMs) && pickupTravelSeconds != null
+      ? deadlineMs - pickupTravelSeconds * 1000
       : null;
-    const arrivalIfLeaveNowMs = validRoute
-      ? nowMs + cumulativeTravelSeconds * 1000
+    const arrivalIfLeaveNowMs = pickupArrivalSeconds != null
+      ? nowMs + pickupArrivalSeconds * 1000
       : null;
     const slackSeconds = Number.isFinite(deadlineMs) && Number.isFinite(arrivalIfLeaveNowMs)
       ? Math.floor((deadlineMs - arrivalIfLeaveNowMs) / 1000)
       : null;
 
+    if (validRoute) cumulativeTravelSeconds += totalTravelSeconds;
+
+    const primaryRoute = stage === "carrying"
+      ? t?.deliveryRoute
+      : t?.pickupRoute;
+
     legs.push({
       index: i + 1,
-      objective: objectiveOut(objective),
+      stage,
+      objective: out,
       from: sourceName,
-      to: objective.target_zone_name,
-      route: legRoute,
-      maps,
-      travelSeconds,
+      to: stage === "carrying"
+        ? (out.deliveryZoneName || objective.delivery_zone_name)
+        : objective.target_zone_name,
+      endAt: t?.deliveryZone?.name || objective.target_zone_name,
+      route: primaryRoute || null,
+      maps: totalMaps,
+      travelSeconds: totalTravelSeconds,
+      pickup: stage === "carrying" ? null : {
+        zoneId: objective.target_zone_id,
+        zoneName: objective.target_zone_name,
+        route: t?.pickupRoute || null,
+        maps: pickupMaps,
+        travelSeconds: pickupTravelSeconds,
+      },
+      delivery: t?.deliveryZone ? {
+        zoneId: t.deliveryZone.id,
+        zoneName: t.deliveryZone.name,
+        route: t.deliveryRoute || null,
+        maps: deliveryMaps,
+        travelSeconds: deliveryTravelSeconds,
+      } : null,
       cumulativeTravelSeconds: validRoute ? cumulativeTravelSeconds : null,
       massBy: Number.isFinite(chainMassByMs) ? new Date(chainMassByMs).toISOString() : null,
       massInSeconds: Number.isFinite(chainMassByMs) ? Math.floor((chainMassByMs - nowMs) / 1000) : null,
       leavePreviousBy: Number.isFinite(legDepartureByMs) ? new Date(legDepartureByMs).toISOString() : null,
       leavePreviousInSeconds: Number.isFinite(legDepartureByMs) ? Math.floor((legDepartureByMs - nowMs) / 1000) : null,
       arrivalIfLeaveNow: Number.isFinite(arrivalIfLeaveNowMs) ? new Date(arrivalIfLeaveNowMs).toISOString() : null,
+      finishIfLeaveNow: validRoute
+        ? new Date(nowMs + cumulativeTravelSeconds * 1000).toISOString()
+        : null,
       slackSeconds,
       feasibleIfLeaveNow: slackSeconds == null ? null : slackSeconds >= 0,
     });
 
-    legSource = objective.target_zone_id || objective.target_zone_name;
-    sourceName = objective.target_zone_name;
+    sourceName = t?.deliveryZone?.name || objective.target_zone_name;
   }
 
   if (legs[0]?.route?.ok) {
@@ -1087,17 +1300,18 @@ async function getNavigationState(db, eventId) {
 
   return {
     event: { id: String(ev.id), time: ev.time_label, status: ev.status },
-    objective: pendingOut[0] || null,
-    objectives: pendingOut,
+    objective: activeOut[0] || null,
+    objectives: activeOut,
     allObjectives: allOut,
     itinerary: {
       secondsPerMap,
-      totalPending: pendingOut.length,
+      totalPending: activeOut.length,
       totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
+      vortexDeliveryZones: VORTEX_DELIVERY_ZONE_NAMES.slice(),
       optimization: {
         mode: optimized.mode,
         score: optimized.score,
-        rule: "minimize missed deadlines, then lateness, then total map travel"
+        rule: "hit pickup deadlines first; include Vortex delivery travel; then minimize lateness and map travel"
       },
       legs,
     },

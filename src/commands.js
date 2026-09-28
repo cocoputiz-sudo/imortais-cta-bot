@@ -60,7 +60,7 @@ function commandDefs() {
         { name: "Outpost", value: "OUTPOST" },
         { name: "Outro", value: "OBJETIVO" }
       ))
-      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino; ORBS usa o HO automaticamente").setRequired(false).setAutocomplete(true))
+      .addStringOption((o) => o.setName("destino").setDescription("Mapa onde o objetivo está; ORBS usa o HO automaticamente").setRequired(false).setAutocomplete(true))
       .addStringOption((o) => o.setName("raridade").setDescription("Cor do objetivo ou tier do Node").addChoices(
         { name: "Roxo", value: "ROXO" },
         { name: "Azul", value: "AZUL" },
@@ -75,7 +75,7 @@ function commandDefs() {
       ))
       .addIntegerOption((o) => o.setName("minutos").setDescription("Tempo restante do objetivo").setMinValue(0).setMaxValue(240))
       .addIntegerOption((o) => o.setName("segundos").setDescription("Segundos adicionais").setMinValue(0).setMaxValue(59)),
-    new SlashCommandBuilder().setName("objetivo_proximo").setDescription("(staff) Marca o primeiro objetivo da rota como concluído")
+    new SlashCommandBuilder().setName("objetivo_proximo").setDescription("(staff) Avança o objetivo: Vortex pego/entregue ou conclui o atual")
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("objetivo_limpar").setDescription("(staff) Limpa toda a fila de objetivos do CTA")
       .addStringOption(ctaOpt),
@@ -184,18 +184,8 @@ async function handleAutocomplete(interaction) {
   if (focused.name === "destino") {
     const q = String(focused.value || "");
     const type = String(interaction.options.getString("tipo") || "").toUpperCase();
-    const vortexZones = ["Thunderrock Upland", "Rivercopse Curve", "Giantweald Woods"];
     if (type === "ORBS") {
       return interaction.respond([{ name: "Thunderrock Upland · HO", value: "Thunderrock Upland" }]);
-    }
-    if (type === "VORTEX") {
-      const needle = q.trim().toLowerCase();
-      return interaction.respond(
-        vortexZones
-          .filter((name) => !needle || name.toLowerCase().includes(needle))
-          .slice(0, 25)
-          .map((name) => ({ name: `${name} · VORTEX`, value: name }))
-      );
     }
     const zones = navigation.searchZones(q, { limit: 25, blackOnly: true });
     return interaction.respond(zones.map((z) => ({
