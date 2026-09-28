@@ -1130,8 +1130,10 @@ async function showPTCore(ev, guild, tipo, actor) {
   const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
   const nomeTipo = tipo === "press" ? "PRESS COMP" : tipo === "pt6teste" ? "pt6teste" : "FLEX";
   const tituloAnuncio = tipo === "pt6teste" ? "pt6teste LIBERADA!" : `PARTY ${novoDisplayNum} LIBERADA (${nomeTipo})!`;
+  const briefText = ctaBriefText(await resolveCtaBrief(fresh));
+  const ctaLabel = ctaLinkedLabel(fresh);
   await thread.send({
-    content: `${mention} 🛡️⚔️ **${tituloAnuncio}** — mais 20 vagas. Escolhe tua função 👇`,
+    content: `${mention} 🛡️⚔️ ${ctaLabel} — **${tituloAnuncio}** — mais 20 vagas. Escolhe tua função 👇\n\n${briefText}`,
     components: buildRolePicker(fresh.id),
     ...allow,
   });
