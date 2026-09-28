@@ -160,6 +160,22 @@ async function init() {
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (event_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS cta_navigation_objectives (
+      cta_event_id       BIGINT PRIMARY KEY REFERENCES cta_events(id) ON DELETE CASCADE,
+      objective_type     TEXT NOT NULL,
+      rarity             TEXT,
+      target_zone_id     TEXT NOT NULL,
+      target_zone_name   TEXT NOT NULL,
+      expires_at         TIMESTAMPTZ,
+      created_by         TEXT,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cta_nav_expiry
+      ON cta_navigation_objectives(expires_at);
   `);
 
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
@@ -555,6 +571,97 @@ async function getCasteloPresence(casteloId) {
   return rows;
 }
 
+// ---- CTA NAVIGATION / WAZE ----
+async function setNavigationObjective({
+  eventId,
+  objectiveType,
+  rarity = null,
+  targetZoneId,
+  targetZoneName,
+  expiresAt = null,
+  createdBy = null,
+  discordChannelId = null,
+  discordMessageId = null,
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO cta_navigation_objectives
+       (cta_event_id, objective_type, rarity, target_zone_id, target_zone_name,
+        expires_at, created_by, discord_channel_id, discord_message_id, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+     ON CONFLICT (cta_event_id) DO UPDATE SET
+       objective_type=EXCLUDED.objective_type,
+       rarity=EXCLUDED.rarity,
+       target_zone_id=EXCLUDED.target_zone_id,
+       target_zone_name=EXCLUDED.target_zone_name,
+       expires_at=EXCLUDED.expires_at,
+       created_by=EXCLUDED.created_by,
+       discord_channel_id=COALESCE(EXCLUDED.discord_channel_id, cta_navigation_objectives.discord_channel_id),
+       discord_message_id=COALESCE(EXCLUDED.discord_message_id, cta_navigation_objectives.discord_message_id),
+       updated_at=now()
+     RETURNING *`,
+    [
+      eventId,
+      String(objectiveType || "OBJETIVO").trim().slice(0, 80),
+      rarity ? String(rarity).trim().slice(0, 40) : null,
+      String(targetZoneId || "").trim(),
+      String(targetZoneName || "").trim(),
+      expiresAt || null,
+      createdBy || null,
+      discordChannelId || null,
+      discordMessageId || null,
+    ]
+  );
+  return rows[0];
+}
+
+async function getNavigationObjective(eventId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_navigation_objectives WHERE cta_event_id=$1 LIMIT 1`,
+    [eventId]
+  );
+  return rows[0] || null;
+}
+
+async function clearNavigationObjective(eventId) {
+  const { rows } = await pool.query(
+    `DELETE FROM cta_navigation_objectives WHERE cta_event_id=$1 RETURNING *`,
+    [eventId]
+  );
+  return rows[0] || null;
+}
+
+async function setNavigationObjectiveMessage(eventId, channelId, messageId) {
+  const { rows } = await pool.query(
+    `UPDATE cta_navigation_objectives
+        SET discord_channel_id=$2,
+            discord_message_id=$3,
+            updated_at=now()
+      WHERE cta_event_id=$1
+      RETURNING *`,
+    [eventId, channelId || null, messageId || null]
+  );
+  return rows[0] || null;
+}
+
+async function getOpenNavigationObjectives(guildId = null) {
+  const params = [];
+  let guildWhere = "";
+  if (guildId) {
+    params.push(guildId);
+    guildWhere = `AND e.guild_id=$${params.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT n.*, e.guild_id, e.channel_id, e.thread_id, e.time_label, e.status, e.caller_id
+       FROM cta_navigation_objectives n
+       JOIN cta_events e ON e.id=n.cta_event_id
+      WHERE e.status='open'
+        ${guildWhere}
+      ORDER BY n.updated_at DESC`,
+    params
+  );
+  return rows;
+}
+
 // ---- ROAMING ----
 async function createRoaming({ guildId, nome, ownerId, vagas }) {
   const { rows } = await pool.query(
@@ -624,6 +731,8 @@ module.exports = {
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
+  setNavigationObjective, getNavigationObjective, clearNavigationObjective,
+  setNavigationObjectiveMessage, getOpenNavigationObjectives,
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
   upsertRoamingSignup, getRoamingSignups, deleteRoamingSignup,
   roamingVoiceJoin, roamingVoiceLeave, roamingCloseAllOpen, getRoamingPresence,
