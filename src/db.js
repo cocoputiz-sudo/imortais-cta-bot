@@ -241,6 +241,9 @@ async function init() {
       discord_message_id=COALESCE(EXCLUDED.discord_message_id, cta_navigation_sessions.discord_message_id),
       updated_at=GREATEST(cta_navigation_sessions.updated_at, EXCLUDED.updated_at)
   `);
+  // A tabela antiga era de objetivo único. Depois de migrar, esvaziamos para que
+  // um "limpar fila" não faça o objetivo legado reaparecer no próximo restart.
+  await pool.query(`DELETE FROM cta_navigation_objectives`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10, brief = {} }) {
