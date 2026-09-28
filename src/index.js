@@ -2807,11 +2807,25 @@ async function checkConsolidation() {
   } catch (e) { console.error("consolidation:", e); }
 }
 
+async function checkNavigationPlans() {
+  try {
+    const rows = await db.getOpenNavigationObjectives().catch(() => []);
+    const eventIds = [...new Set(rows.map(r => String(r.cta_event_id)).filter(Boolean))];
+    for (const eventId of eventIds) {
+      await refreshNavigationMessage(eventId).catch((e) => console.error("navigation periodic refresh:", e));
+    }
+  } catch (e) {
+    console.error("navigation periodic:", e);
+  }
+}
+
 // ======================  BOOT  =============================================
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Online como ${c.user.tag}`);
   setInterval(checkReminders, 60 * 1000);
   setInterval(checkConsolidation, 60 * 1000);
+  setInterval(checkNavigationPlans, 30 * 1000);
+  checkNavigationPlans().catch(() => {});
   for (const [gid] of c.guilds.cache) {
     try { await cmds.registerCommands(c.user.id, gid); }
     catch (e) { console.error("registerCommands:", e); }
