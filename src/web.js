@@ -108,6 +108,7 @@ function plOf(ev) { try { return db.parsePartyList(ev); } catch { return [0]; } 
 async function buildRosterData(ev) {
   const pl = plOf(ev);
   const signups = await db.getSignups(ev.id);
+  const reallocationLocks = new Set(db.parseReallocationLocks(ev));
   let coreSet = new Set();
   try { const cr = await db.pool.query("SELECT user_id FROM players WHERE guild_id=$1 AND core_verified=true", [ev.guild_id]); coreSet = new Set(cr.rows.map((r) => String(r.user_id))); } catch (_) { /* players pode não existir */ }
   const bySlot = new Map();
@@ -131,10 +132,18 @@ async function buildRosterData(ev) {
         slots.push({ n: i + 1, filled: false, role: slot.role, locked: !!slot.locked, options });
       }
     }
-    return { display: idx + 1, name: `Party ${idx + 1}`, filled, total: party.slots.length, slots };
+    return {
+      display: idx + 1,
+      rawParty: p,
+      name: `Party ${idx + 1}`,
+      filled,
+      total: party.slots.length,
+      reallocationLocked: reallocationLocks.has(p),
+      slots
+    };
   });
   return {
-    event: { id: ev.id, time: ev.time_label, status: ev.status },
+    event: { id: ev.id, time: ev.time_label, status: ev.status, reallocationLocks: [...reallocationLocks] },
     parties,
     reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon, userId: r.user_id, core: coreSet.has(String(r.user_id)) })),
   };
@@ -311,9 +320,23 @@ function startWebServer(client, opts) {
   });
   app.post("/api/cta/open", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
-    const time = String((req.body || {}).time || "").trim();
+    const body = req.body || {};
+    const time = String(body.time || "").trim();
     if (!/^\d{1,2}:\d{2}$/.test(time)) return res.status(400).json({ error: "time" });
-    res.json(_act.openCTA ? await _act.openCTA(time, sess.id, (req.body || {}).image) : { ok: false, error: "indisponível" });
+
+    const brief = {
+      useDeparture: !!body.useDeparture,
+      departure: String(body.departure || "").trim().slice(0, 120),
+      useGear: !!body.useGear,
+      gearTier: String(body.gearTier || "T8").trim().slice(0, 16),
+      gearCount: Math.max(1, Math.min(9, Number(body.gearCount) || 2)),
+    };
+    if (brief.useDeparture && !brief.departure) return res.status(400).json({ error: "Informe o local de saída." });
+    if (brief.useGear && !brief.gearTier) return res.status(400).json({ error: "Informe o tier do gear." });
+
+    res.json(_act.openCTA
+      ? await _act.openCTA(time, sess.id, body.image, brief)
+      : { ok: false, error: "indisponível" });
   });
   app.post("/api/cta/flashmass", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
@@ -335,6 +358,15 @@ function startWebServer(client, opts) {
     const sess = requireEditor(req, res); if (!sess) return;
     const { event, party } = req.body || {};
     res.json(_act.removePT ? await _act.removePT(event, Number(party), sess.id) : { ok: false, error: "indisponível" });
+  });
+  app.post("/api/cta/reallocation-lock", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const { event, party, locked } = req.body || {};
+    const visual = Number(party);
+    if (![1, 2].includes(visual)) return res.status(400).json({ error: "A trava está disponível somente para PT1 e PT2." });
+    res.json(_act.setPartyReallocationLock
+      ? await _act.setPartyReallocationLock(event, visual, !!locked, sess.id)
+      : { ok: false, error: "indisponível" });
   });
 
   app.post("/api/setweapon", async (req, res) => {
@@ -427,6 +459,9 @@ const PAGE = `<!doctype html>
   .danger{ border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; font-weight:700; }
   .ptx{ margin-left:8px; border:1px solid #7a2a2a; background:transparent; color:#ff9a9a; border-radius:6px; width:22px; height:22px; cursor:pointer; font-weight:700; line-height:1; flex:0 0 auto; }
   .ptx:hover{ background:#2a1315; }
+  .ptlock{ border:1px solid #4d617d; background:#101923; color:#9eb0c8; border-radius:7px; min-height:26px; padding:4px 8px; cursor:pointer; font:800 8px var(--sans); white-space:nowrap; flex:0 0 auto; }
+  .ptlock:hover{ border-color:#7c93b2; color:#e3ebf5; }
+  .ptlock.on{ border-color:#b0842e; background:#2d220d; color:#f1c864; }
   .catdot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; flex:0 0 auto; }
   .catleg{ display:flex; flex-wrap:wrap; gap:10px; margin:8px 0 4px; font-size:11px; color:var(--muted); }
   .catleg span{ display:inline-flex; align-items:center; gap:4px; }
@@ -509,6 +544,15 @@ const PAGE = `<!doctype html>
   .drop{ display:block; border:1.5px dashed var(--line2); border-radius:12px; padding:18px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer; margin-bottom:18px; }
   .drop:hover{ border-color:var(--red); color:var(--text); }
   .drop .ic{ font-size:24px; display:block; margin-bottom:6px; } .drop small{ color:var(--faint); } .drop img{ max-height:110px; border-radius:8px; margin-top:6px; }
+  .cta-brief{ margin:0 0 16px; padding:13px; border:1px solid var(--line); border-radius:12px; background:#0c1118; }
+  .cta-brief-title{ margin-bottom:9px; color:var(--muted); font-size:9px; font-weight:900; letter-spacing:.11em; }
+  .brief-toggle{ display:flex; align-items:center; gap:8px; margin:8px 0 6px; color:#d4dde9; font-size:12px; font-weight:800; cursor:pointer; }
+  .brief-toggle input{ accent-color:var(--red); width:16px; height:16px; }
+  .brief-input,.brief-select{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:9px; padding:9px 11px; font:600 12px var(--sans); }
+  .brief-input:disabled,.brief-select:disabled{ opacity:.38; cursor:not-allowed; }
+  .brief-gear-row{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .brief-fixed{ display:grid; gap:4px; margin-top:12px; padding:9px 10px; border:1px solid #2a3a2f; border-radius:9px; background:#0d1b13; color:#91d7a8; font-size:10px; }
+  .brief-fixed b{ color:#6f9f80; font-size:8px; letter-spacing:.08em; }
   .field input{ width:100%; background:var(--bg); border:1px solid var(--line2); color:var(--text); border-radius:11px; padding:12px 14px; font-size:15px; font-family:var(--sans); margin-bottom:14px; }
   .note{ font-size:12px; color:var(--faint); margin:-4px 0 16px; }
   .auditpt{ margin-bottom:12px; }
@@ -754,8 +798,34 @@ const PAGE = `<!doctype html>
 </div>
 
 <div class="modal" id="m-open"><div class="sheet"><button class="x" onclick="mclose('m-open')">✕</button>
-  <h2>Abrir CTA</h2><p class="sub">Escolha o horário e, se quiser, uma arte pro chamado.</p>
+  <h2>Abrir CTA</h2><p class="sub">Escolha o horário e configure as informações padronizadas do chamado.</p>
   <div class="timegrid" id="open-times"></div>
+
+  <div class="cta-brief">
+    <div class="cta-brief-title">INFORMAÇÕES DO DISCORD</div>
+
+    <label class="brief-toggle"><input type="checkbox" id="open-departure-check"><span>Local de saída</span></label>
+    <input class="brief-input" id="open-departure" placeholder="Ex.: Martlock Portal" maxlength="120" disabled>
+
+    <label class="brief-toggle"><input type="checkbox" id="open-gear-check"><span>Número de gears e tier</span></label>
+    <div class="brief-gear-row">
+      <input class="brief-input" id="open-gear-tier" value="T8" placeholder="T8" maxlength="16" disabled>
+      <select class="brief-select" id="open-gear-count" disabled>
+        <option value="1">1 ficha</option>
+        <option value="2" selected>2 fichas</option>
+        <option value="3">3 fichas</option>
+        <option value="4">4 fichas</option>
+        <option value="5">5 fichas</option>
+      </select>
+    </div>
+
+    <div class="brief-fixed">
+      <b>SEMPRE SERÁ ENVIADO</b>
+      <span># FOOD .2</span>
+      <span># POÇÃO: GIGANTIFICADORA T7</span>
+    </div>
+  </div>
+
   <label class="drop"><span class="ic">🖼️</span><span id="drop-txt">Clique pra escolher a arte do CTA</span><br><small>opcional · PNG ou JPG</small><input type="file" id="open-file" accept="image/*" style="display:none"></label>
   <button class="btn primary go" id="open-go">Abrir CTA</button>
 </div></div>
@@ -888,8 +958,19 @@ const PAGE = `<!doctype html>
       var pct=pt.total?Math.round(pt.filled/pt.total*100):0;
       var ph=document.createElement('div'); ph.className='ph';
       var xbtn=(authState.canEdit && pt.display>1)?'<button class="ptx" title="Remover esta PT">✕</button>':'';
-      ph.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="ct">'+pt.filled+'/'+pt.total+'</span><div class="meter"><i style="width:'+pct+'%"></i></div>'+xbtn;
+      var lockbtn=(authState.canEdit && pt.display<=2)
+        ? '<button class="ptlock '+(pt.reallocationLocked?'on':'')+'" data-realloc-lock="'+pt.display+'">'
+          +(pt.reallocationLocked?'🔓 DESTRAVAR RE-ALOCAÇÃO PT'+pt.display:'🔒 TRAVAR RE-ALOCAÇÃO PT'+pt.display)
+          +'</button>'
+        : '';
+      ph.innerHTML='<span class="name">'+esc(pt.name)+'</span><span class="ct">'+pt.filled+'/'+pt.total+'</span><div class="meter"><i style="width:'+pct+'%"></i></div>'+lockbtn+xbtn;
       sec.appendChild(ph);
+      if(lockbtn){
+        var lb=ph.querySelector('[data-realloc-lock]');
+        if(lb) lb.onclick=function(){
+          if(current) post('/api/cta/reallocation-lock',{event:current,party:pt.display,locked:!pt.reallocationLocked});
+        };
+      }
       if(xbtn){ var xb=ph.querySelector('.ptx'); if(xb) xb.onclick=function(){ if(current && confirm('Remover a '+pt.name+'? A galera dela volta pra reserva.')) post('/api/cta/removept',{event:current,party:pt.display}); }; }
       var slots=document.createElement('div'); slots.className='slots';
       var left=document.createElement('div'); left.className='col'; var right=document.createElement('div'); right.className='col';
@@ -977,8 +1058,23 @@ const PAGE = `<!doctype html>
     } else { sel.innerHTML=''; }
   }
 
+  function syncOpenBriefControls(){
+    var depOn=document.getElementById('open-departure-check').checked;
+    var gearOn=document.getElementById('open-gear-check').checked;
+    document.getElementById('open-departure').disabled=!depOn;
+    document.getElementById('open-gear-tier').disabled=!gearOn;
+    document.getElementById('open-gear-count').disabled=!gearOn;
+  }
+
   function openOpenModal(){
     selTime=null; selImg=null;
+    document.getElementById('open-file').value='';
+    document.getElementById('open-departure-check').checked=false;
+    document.getElementById('open-departure').value='';
+    document.getElementById('open-gear-check').checked=false;
+    document.getElementById('open-gear-tier').value='T8';
+    document.getElementById('open-gear-count').value='2';
+    syncOpenBriefControls();
     document.getElementById('drop-txt').textContent='Clique pra escolher a arte do CTA';
     document.getElementById('open-go').textContent='Abrir CTA';
     fetch('/api/caller').then(function(r){return r.json();}).then(function(c){
@@ -990,11 +1086,32 @@ const PAGE = `<!doctype html>
       mopen('m-open');
     });
   }
+  document.getElementById('open-departure-check').addEventListener('change',syncOpenBriefControls);
+  document.getElementById('open-gear-check').addEventListener('change',syncOpenBriefControls);
   document.getElementById('open-file').addEventListener('change',function(e){
     var f=e.target.files[0]; if(!f) return;
     var rd=new FileReader(); rd.onload=function(){ selImg=rd.result; document.getElementById('drop-txt').innerHTML='✅ '+esc(f.name)+'<br><img src="'+selImg+'">'; }; rd.readAsDataURL(f);
   });
-  document.getElementById('open-go').onclick=function(){ if(!selTime){ flash('● escolha um horário','var(--red)'); return; } mclose('m-open'); post('/api/cta/open',{time:selTime,image:selImg||null}); };
+  document.getElementById('open-go').onclick=function(){
+    if(!selTime){ flash('● escolha um horário','var(--red)'); return; }
+    var useDeparture=document.getElementById('open-departure-check').checked;
+    var departure=(document.getElementById('open-departure').value||'').trim();
+    var useGear=document.getElementById('open-gear-check').checked;
+    var gearTier=(document.getElementById('open-gear-tier').value||'T8').trim();
+    var gearCount=Number(document.getElementById('open-gear-count').value||2);
+    if(useDeparture&&!departure){ flash('● informe o local de saída','var(--red)'); return; }
+    if(useGear&&!gearTier){ flash('● informe o tier do gear','var(--red)'); return; }
+    mclose('m-open');
+    post('/api/cta/open',{
+      time:selTime,
+      image:selImg||null,
+      useDeparture:useDeparture,
+      departure:departure,
+      useGear:useGear,
+      gearTier:gearTier,
+      gearCount:gearCount
+    });
+  };
   document.getElementById('flash-go').onclick=function(){ var t=(document.getElementById('flash-time').value||'').trim(); if(!t) return; mclose('m-flash'); post('/api/cta/flashmass',{time:t}); };
 
   function loadEvents(){
