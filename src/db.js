@@ -167,6 +167,7 @@ async function init() {
   await pool.query(`ALTER TABLE cta_signups ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS realloc_lock_parties TEXT NOT NULL DEFAULT '';`);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
@@ -212,6 +213,24 @@ async function setPartyList(eventId, list) {
 function parsePartyList(ev) {
   const raw = (ev.party_list || "0").trim();
   return raw.split(",").map(Number).filter((n) => !isNaN(n));
+}
+
+function parseReallocationLocks(ev) {
+  const raw = String(ev?.realloc_lock_parties || "").trim();
+  if (!raw) return [];
+  return [...new Set(
+    raw.split(",").map(Number).filter((n) => Number.isInteger(n) && n >= 0)
+  )];
+}
+
+async function setReallocationLocks(eventId, list) {
+  const clean = [...new Set(
+    (Array.isArray(list) ? list : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0)
+  )];
+  await pool.query(
+    `UPDATE cta_events SET realloc_lock_parties=$1 WHERE id=$2`,
+    [clean.join(","), eventId]
+  );
 }
 
 async function getEvent(eventId) {
@@ -573,7 +592,7 @@ async function getRoamingPresence(roamingId) {
 }
 
 module.exports = {
-  pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, getEvent, getEventByThread,
+  pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, parseReallocationLocks, setReallocationLocks, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange, setEventIgnored,
