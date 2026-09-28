@@ -369,6 +369,36 @@ function startWebServer(client, opts) {
       : { ok: false, error: "indisponível" });
   });
 
+  app.post("/api/navigation/objective", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const body = req.body || {};
+    const event = String(body.event || "").trim();
+    const targetZone = String(body.targetZone || "").trim();
+    if (!event) return res.status(400).json({ error: "event" });
+    if (!targetZone) return res.status(400).json({ error: "Informe o mapa de destino." });
+    const input = {
+      targetZone,
+      type: String(body.type || "OBJETIVO").trim(),
+      rarity: String(body.rarity || "").trim(),
+      minutes: Math.max(0, Math.min(240, Number(body.minutes) || 0)),
+      seconds: Math.max(0, Math.min(59, Number(body.seconds) || 0)),
+    };
+    const result = _act.setNavigationObjective
+      ? await _act.setNavigationObjective(event, input, sess.id)
+      : { ok: false, error: "indisponível" };
+    res.status(result && result.ok === false ? 400 : 200).json(result);
+  });
+
+  app.post("/api/navigation/clear", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const event = String((req.body || {}).event || "").trim();
+    if (!event) return res.status(400).json({ error: "event" });
+    const result = _act.clearNavigationObjective
+      ? await _act.clearNavigationObjective(event, sess.id)
+      : { ok: false, error: "indisponível" };
+    res.status(result && result.ok === false ? 400 : 200).json(result);
+  });
+
   app.post("/api/setweapon", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
     const { event, userId, weapon } = req.body || {};
@@ -737,6 +767,32 @@ const PAGE = `<!doctype html>
   @media(max-width:1300px){.cv2-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-layout{grid-template-columns:1fr}.cv2-side{position:static;grid-template-columns:1fr 1fr}}
   @media(max-width:760px){.cv2-head{align-items:flex-start;flex-direction:column}.cv2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:1fr 1fr}.cv2-side{display:block}.cv2-panel{margin-bottom:10px}.cv2-distlegend,.cv2-extra-grid{grid-template-columns:1fr 1fr}}
 
+  /* ===== Navegação / Waze ZvZ ===== */
+  .nav2-shell{display:grid;gap:14px}
+  .nav2-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:15px 16px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,#101924,#0c121a)}
+  .nav2-head h2{margin:0;font-family:var(--disp);font-size:20px}.nav2-head p{margin:5px 0 0;color:var(--muted);font-size:11px}
+  .nav2-status{font-size:10px;border:1px solid #2b5940;background:#0d2418;color:#74dda0;border-radius:999px;padding:5px 9px;font-weight:800;white-space:nowrap}
+  .nav2-layout{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(420px,1.4fr);gap:14px}
+  .nav2-card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:14px}
+  .nav2-card h3{margin:0 0 10px;font-family:var(--disp);font-size:15px}
+  .nav2-form{display:grid;gap:9px}.nav2-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .nav2-field label{display:block;margin:0 0 5px;color:var(--muted);font-size:8px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+  .nav2-field input,.nav2-field select{width:100%;background:#0b1118;border:1px solid var(--line2);color:var(--text);border-radius:8px;padding:9px 10px;font:600 11px var(--sans)}
+  .nav2-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .nav2-objective{padding:14px;border:1px solid #4d3c73;background:linear-gradient(180deg,#191229,#100d19);border-radius:11px}
+  .nav2-objective .kind{font:900 17px var(--disp)}.nav2-objective .target{margin-top:7px;font-size:18px;font-weight:900}
+  .nav2-objective .timer{margin-top:6px;color:#d1b7ff;font-size:12px}
+  .nav2-current{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px}
+  .nav2-stat{border:1px solid #273649;border-radius:9px;background:#0c131c;padding:10px}.nav2-stat small{display:block;color:var(--muted);font-size:8px;text-transform:uppercase}.nav2-stat b{display:block;margin-top:4px;font-size:15px}
+  .nav2-next{margin-top:11px;border:1px solid #315d83;border-radius:10px;background:#0e2030;padding:12px}
+  .nav2-next small{color:#80a9c9;font-size:8px;font-weight:900}.nav2-next strong{display:block;margin-top:4px;font-size:22px}
+  .nav2-route{display:grid;gap:6px;margin-top:11px}.nav2-step{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:8px;padding:8px 9px;border:1px solid #243244;border-radius:8px;background:#0c131b}
+  .nav2-step .n{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#172333;color:#8da5c2;font-size:9px;font-weight:900}
+  .nav2-step .zone{font-weight:800}.nav2-step .go{color:#8bc9ff;font-weight:900;font-size:11px;white-space:nowrap}
+  .nav2-spread{display:grid;gap:6px;margin-top:10px}.nav2-spread-row{display:flex;justify-content:space-between;gap:10px;padding:7px 8px;border-bottom:1px solid #1e2a38;color:#aebccc;font-size:10px}
+  .nav2-empty{padding:18px;color:var(--muted);text-align:center;border:1px dashed #2b394b;border-radius:10px}
+  @media(max-width:900px){.nav2-layout{grid-template-columns:1fr}.nav2-current{grid-template-columns:1fr}.nav2-row{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -750,6 +806,7 @@ const PAGE = `<!doctype html>
   <aside id="side">
     <div class="navtitle">OPERAÇÃO</div>
     <div class="nav on" data-view="board">⚔ Formação ao vivo</div>
+    <div class="nav" data-view="navigation">🧭 Navegação</div>
     <div class="nav" data-view="mural">📣 Mural da guilda</div>
     <div class="nav" id="nav-stats">📊 Meu desempenho</div>
     <div class="navtitle">DADOS DO JOGO</div>
@@ -789,6 +846,7 @@ const PAGE = `<!doctype html>
     </div>
 
     <div id="view-mural" style="display:none"><div id="news"></div></div>
+    <div id="view-navigation" style="display:none"></div>
     <div id="view-confirm" style="display:none"></div>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
@@ -881,9 +939,10 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices',guild:'view-guild'};
+    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices',guild:'view-guild'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
+    if(v==='navigation') renderNavigation();
     if(v==='confirm') renderConfirm();
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
@@ -1030,6 +1089,7 @@ const PAGE = `<!doctype html>
         telemetryRefreshPending=false;
         var active=document.querySelector('.nav[data-view].on');
         var v=active&&active.getAttribute('data-view');
+        if(v==='navigation') renderNavigation(true);
         if(v==='confirm') renderConfirm(true);
         if(v==='loot') renderLoot(true);
         if(v==='combat') renderCombat(true);
@@ -1133,6 +1193,124 @@ const PAGE = `<!doctype html>
   Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.onclick=function(){ show(b.getAttribute('data-view')); }; });
   document.getElementById('nav-stats').onclick=openStats;
   Array.prototype.forEach.call(document.querySelectorAll('.modal'),function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
+
+  // ===================== NAVEGAÇÃO / WAZE ZVZ =====================
+  var navZoneSearchTimer=null;
+  function navCountdown(seconds){
+    if(seconds==null) return 'sem limite';
+    var s=Math.max(0,Number(seconds)||0), m=Math.floor(s/60), r=Math.floor(s%60);
+    return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
+  }
+  function navKind(o){
+    if(!o) return 'OBJETIVO';
+    var rarity=String(o.rarity||'').toUpperCase();
+    var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':'🎯';
+    return emoji+' '+esc(String(o.type||'OBJETIVO'))+(rarity?' '+esc(rarity):'');
+  }
+  function bindNavigationForm(){
+    var target=document.getElementById('nav-target');
+    if(target){
+      target.oninput=function(){
+        if(navZoneSearchTimer) clearTimeout(navZoneSearchTimer);
+        navZoneSearchTimer=setTimeout(function(){
+          fetch('/api/navigation/zones?q='+encodeURIComponent(target.value||''))
+            .then(function(r){return r.json();})
+            .then(function(d){
+              var dl=document.getElementById('nav-zone-list'); if(!dl)return;
+              dl.innerHTML=(d.zones||[]).map(function(z){return '<option value="'+esc(z.name)+'"></option>';}).join('');
+            }).catch(function(){});
+        },180);
+      };
+    }
+    var set=document.getElementById('nav-set');
+    if(set) set.onclick=function(){
+      if(!current) return;
+      var dest=(document.getElementById('nav-target').value||'').trim();
+      if(!dest){ flash('● informe o destino','var(--red)'); return; }
+      var payload={
+        event:current,
+        targetZone:dest,
+        type:document.getElementById('nav-type').value,
+        rarity:document.getElementById('nav-rarity').value,
+        minutes:Number(document.getElementById('nav-min').value||0),
+        seconds:Number(document.getElementById('nav-sec').value||0)
+      };
+      fetch('/api/navigation/objective',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+        .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
+        .then(function(){flash('● objetivo definido','var(--green)');renderNavigation();})
+        .catch(function(e){flash('● '+e.message,'var(--red)');});
+    };
+    var clear=document.getElementById('nav-clear');
+    if(clear) clear.onclick=function(){
+      if(!current||!confirm('Remover o objetivo de navegação deste CTA?')) return;
+      fetch('/api/navigation/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current})})
+        .then(function(r){return r.json();})
+        .then(function(){flash('● objetivo removido','var(--green)');renderNavigation();})
+        .catch(function(){flash('● erro ao remover','var(--red)');});
+    };
+  }
+  function renderNavigation(silent){
+    if(!current){ noCta('view-navigation','🧭 Navegação'); return; }
+    if(!silent) loading('view-navigation','🧭 Navegação');
+
+    fetchTelemetry('/api/navigation/state?event='+encodeURIComponent(current)).then(function(d){
+      var o=d.objective||null, cur=d.current||null, route=d.route||null, inst=d.instruction||null;
+      var form=authState.canEdit
+        ? '<div class="nav2-card"><h3>FIXAR OBJETIVO</h3><div class="nav2-form">'
+          +'<div class="nav2-field"><label>Mapa de destino</label><input id="nav-target" list="nav-zone-list" placeholder="Ex.: Flammog Fork" value="'+esc(o?o.targetZoneName:'')+'"><datalist id="nav-zone-list"></datalist></div>'
+          +'<div class="nav2-row"><div class="nav2-field"><label>Tipo</label><select id="nav-type">'
+          +['VORTEX','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(o&&o.type===x?' selected':'')+'>'+x+'</option>';}).join('')
+          +'</select></div><div class="nav2-field"><label>Raridade/cor</label><select id="nav-rarity"><option value="">—</option>'
+          +['ROXO','AZUL','AMARELO','VERDE','VERMELHO'].map(function(x){return '<option'+(o&&o.rarity===x?' selected':'')+'>'+x+'</option>';}).join('')
+          +'</select></div></div>'
+          +'<div class="nav2-row"><div class="nav2-field"><label>Minutos restantes</label><input id="nav-min" type="number" min="0" max="240" value=""></div>'
+          +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="0"></div></div>'
+          +'<div class="nav2-actions"><button class="btn primary" id="nav-set">🎯 Definir objetivo</button>'
+          +(o?'<button class="btn danger" id="nav-clear">Remover objetivo</button>':'')+'</div></div></div>'
+        : '';
+
+      var objective=o
+        ? '<div class="nav2-objective"><div class="kind">'+navKind(o)+'</div><div class="target">🎯 '+esc(o.targetZoneName)+'</div>'
+          +'<div class="timer">⏳ '+(o.expired?'EXPIRADO':navCountdown(o.remainingSeconds)+' restantes')+'</div></div>'
+        : '<div class="nav2-empty">Nenhum objetivo ativo. O caller pode fixar um mapa pelo site ou pelo comando <b>/objetivo</b>.</div>';
+
+      var currentHtml=cur
+        ? '<div class="nav2-current"><div class="nav2-stat"><small>Mapa atual do zerg</small><b>'+esc((cur.zone&&cur.zone.name)||cur.clusterName||'?')+'</b></div>'
+          +'<div class="nav2-stat"><small>Clients confirmando</small><b>'+esc(cur.observers||0)+'</b></div></div>'
+        : '<div class="nav2-empty" style="margin-top:10px">📡 Aguardando <b>zone_change</b> do Combat Client v0.5.8+.</div>';
+
+      var next='';
+      if(o&&cur){
+        if(inst&&inst.arrived) next='<div class="nav2-next"><small>DESTINO</small><strong>✅ CHEGAMOS EM '+esc(o.targetZoneName)+'</strong></div>';
+        else if(inst) next='<div class="nav2-next"><small>PRÓXIMA SAÍDA</small><strong>'+esc(inst.exit)+' → '+esc(inst.next&&inst.next.name||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">'+esc(inst.mapsRemaining)+' mapa(s) restantes</div></div>';
+        else next='<div class="nav2-next"><small>ROTA</small><strong>⚠️ INDISPONÍVEL</strong></div>';
+      }
+
+      var routeHtml='';
+      if(route&&route.ok&&route.steps&&route.steps.length){
+        routeHtml='<div class="nav2-route">'+route.steps.slice(0,10).map(function(s,i){
+          return '<div class="nav2-step"><span class="n">'+(i+1)+'</span><span class="zone">'+esc(s.zone&&s.zone.name||'?')+'</span>'
+            +'<span class="go">'+(s.next?('SAIR '+esc(s.exit)+' → '+esc(s.next.name)):'✅ DESTINO')+'</span></div>';
+        }).join('')+'</div>';
+      }
+
+      var spread=(d.positions&&d.positions.zones)||[];
+      var spreadHtml=spread.length
+        ? '<div class="nav2-spread"><h3 style="margin:12px 0 0">POSIÇÃO DOS CLIENTS</h3>'+spread.map(function(z){
+            return '<div class="nav2-spread-row"><span>'+esc((z.zone&&z.zone.name)||z.clusterName||'?')+'</span><b>'+esc(z.count)+' client(s)</b></div>';
+          }).join('')+'</div>'
+        : '';
+
+      var right='<div class="nav2-card"><h3>ROTA AO VIVO</h3>'+objective+currentHtml+next+routeHtml+spreadHtml+'</div>';
+      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Rota automática pelo mapa que os Combat Clients estão detectando.</p></div>'
+        +'<span class="nav2-status">'+esc((d.graph&&d.graph.zones)||0)+' mapas carregados</span></div>'
+        +'<div class="nav2-layout">'+form+right+'</div></div>';
+      setView('view-navigation',html);
+      bindNavigationForm();
+    }).catch(function(){
+      setView('view-navigation','<div class="modhead">🧭 Navegação</div><div class="empty-note">Não foi possível carregar a navegação.</div>');
+    });
+  }
 
   // ===================== DADOS DO JOGO — TELEMETRIA REAL =====================
   function fmtS(v){ if(v==null) return '—'; if(v>=1e6) return (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+'M'; if(v>=1e3) return Math.round(v/1e3)+'K'; return String(v); }
