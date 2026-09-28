@@ -840,8 +840,8 @@ function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
         const late = Math.max(0, Math.floor((arrivalMs - deadline) / 1000));
         if (late > 0) missed++;
         lateSeconds += late;
-        // desempate: quando duas rotas têm o mesmo custo/atraso, favorece deadlines mais cedo antes.
-        deadlineTie += (i + 1) * Math.max(0, Math.floor((deadline - nowMs) / 1000));
+        // Desempate: deadlines mais cedo recebem peso maior nas primeiras posições.
+        deadlineTie += (path.length - i) * Math.max(0, Math.floor((deadline - nowMs) / 1000));
       }
 
       current = objective.target_zone_id || objective.target_zone_name;
