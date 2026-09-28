@@ -753,6 +753,167 @@ async function getConfirm(db, eventId) {
   };
 }
 
+function navDeadlineMs(objective) {
+  const t = objective?.expires_at ? new Date(objective.expires_at).getTime() : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+function navPlanCompare(a, b) {
+  if (!b) return -1;
+  const keys = ["impossible", "missed", "lateSeconds", "travelSeconds", "deadlineTie"];
+  for (const key of keys) {
+    const av = Number(a[key] || 0);
+    const bv = Number(b[key] || 0);
+    if (av !== bv) return av < bv ? -1 : 1;
+  }
+  return 0;
+}
+
+function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
+  const list = Array.isArray(pending) ? pending.slice() : [];
+  if (list.length <= 1) {
+    return {
+      objectives: list,
+      mode: source ? "exact" : "deadline",
+      score: { impossible: 0, missed: 0, lateSeconds: 0, travelSeconds: 0, deadlineTie: 0 }
+    };
+  }
+
+  const insertionOrder = new Map(list.map((o, i) => [String(o.id), i]));
+
+  if (!source) {
+    list.sort((a, b) => {
+      const da = navDeadlineMs(a);
+      const db = navDeadlineMs(b);
+      if (da == null && db != null) return 1;
+      if (da != null && db == null) return -1;
+      if (da != null && db != null && da !== db) return da - db;
+      return (Number(a.position) || 0) - (Number(b.position) || 0);
+    });
+    return {
+      objectives: list,
+      mode: "deadline",
+      score: { impossible: 0, missed: 0, lateSeconds: 0, travelSeconds: 0, deadlineTie: 0 }
+    };
+  }
+
+  const routeCache = new Map();
+  function edge(from, objective) {
+    const to = objective.target_zone_id || objective.target_zone_name;
+    const key = String(from) + "=>" + String(to);
+    if (routeCache.has(key)) return routeCache.get(key);
+    const route = navigation.shortestRoute(from, to);
+    const ok = !!route?.ok;
+    const maps = ok ? Number(route.maps || 0) : null;
+    const out = {
+      route,
+      ok,
+      maps,
+      seconds: ok ? maps * secondsPerMap : null,
+    };
+    routeCache.set(key, out);
+    return out;
+  }
+
+  function scorePath(path) {
+    let current = source;
+    let elapsed = 0;
+    let impossible = 0;
+    let missed = 0;
+    let lateSeconds = 0;
+    let travelSeconds = 0;
+    let deadlineTie = 0;
+
+    for (let i = 0; i < path.length; i++) {
+      const objective = path[i];
+      const leg = edge(current, objective);
+      if (!leg.ok) {
+        impossible++;
+      } else {
+        elapsed += leg.seconds;
+        travelSeconds += leg.seconds;
+      }
+
+      const deadline = navDeadlineMs(objective);
+      if (deadline != null) {
+        const arrivalMs = nowMs + elapsed * 1000;
+        const late = Math.max(0, Math.floor((arrivalMs - deadline) / 1000));
+        if (late > 0) missed++;
+        lateSeconds += late;
+        // Desempate: deadlines mais cedo recebem peso maior nas primeiras posições.
+        deadlineTie += (path.length - i) * Math.max(0, Math.floor((deadline - nowMs) / 1000));
+      }
+
+      current = objective.target_zone_id || objective.target_zone_name;
+    }
+
+    return { impossible, missed, lateSeconds, travelSeconds, deadlineTie };
+  }
+
+  let ordered = null;
+  let bestScore = null;
+
+  // Até 8 objetivos, testamos todas as ordens. 8! = 40.320, pequeno para o CTA.
+  if (list.length <= 8) {
+    const used = new Array(list.length).fill(false);
+    const path = [];
+    function walk() {
+      if (path.length === list.length) {
+        const score = scorePath(path);
+        if (!bestScore || navPlanCompare(score, bestScore) < 0) {
+          bestScore = score;
+          ordered = path.slice();
+        }
+        return;
+      }
+      for (let i = 0; i < list.length; i++) {
+        if (used[i]) continue;
+        used[i] = true;
+        path.push(list[i]);
+        walk();
+        path.pop();
+        used[i] = false;
+      }
+    }
+    walk();
+    return { objectives: ordered || list, mode: "exact", score: bestScore || scorePath(list) };
+  }
+
+  // Filas enormes usam heurística: menor folga até o deadline, com distância como desempate.
+  const remaining = list.slice();
+  const result = [];
+  let current = source;
+  let elapsed = 0;
+
+  while (remaining.length) {
+    const candidates = remaining.map((objective) => {
+      const leg = edge(current, objective);
+      const deadline = navDeadlineMs(objective);
+      const travel = leg.ok ? leg.seconds : Number.MAX_SAFE_INTEGER / 1000;
+      const arrival = nowMs + (elapsed + travel) * 1000;
+      const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - arrival) / 1000;
+      return { objective, leg, slack, travel, deadline };
+    });
+
+    candidates.sort((a, b) => {
+      if (a.leg.ok !== b.leg.ok) return a.leg.ok ? -1 : 1;
+      if (a.slack !== b.slack) return a.slack - b.slack;
+      if (a.travel !== b.travel) return a.travel - b.travel;
+      const ai = insertionOrder.get(String(a.objective.id)) || 0;
+      const bi = insertionOrder.get(String(b.objective.id)) || 0;
+      return ai - bi;
+    });
+
+    const pick = candidates[0];
+    result.push(pick.objective);
+    if (pick.leg.ok) elapsed += pick.leg.seconds;
+    current = pick.objective.target_zone_id || pick.objective.target_zone_name;
+    remaining.splice(remaining.indexOf(pick.objective), 1);
+  }
+
+  return { objectives: result, mode: "greedy", score: scorePath(result) };
+}
+
 async function getNavigationState(db, eventId) {
   const ev = await db.getEvent(eventId).catch(() => null);
   if (!ev) return null;
@@ -858,20 +1019,25 @@ async function getNavigationState(db, eventId) {
     };
   }
 
-  const pendingOut = pending.map(objectiveOut);
+  const source = majority ? (majority.zone?.id || majority.clusterName) : null;
+  const sourceNameInitial = majority ? (majority.zone?.name || majority.clusterName) : null;
+  const optimized = optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs);
+  const orderedPending = optimized.objectives;
+
+  const pendingOut = orderedPending.map(objectiveOut);
   const allOut = objectives.map(objectiveOut);
 
   let route = null;
   let instruction = null;
   const legs = [];
-  let source = majority ? (majority.zone?.id || majority.clusterName) : null;
-  let sourceName = majority ? (majority.zone?.name || majority.clusterName) : null;
+  let legSource = source;
+  let sourceName = sourceNameInitial;
   let cumulativeTravelSeconds = 0;
 
-  for (let i = 0; i < pending.length; i++) {
-    const objective = pending[i];
+  for (let i = 0; i < orderedPending.length; i++) {
+    const objective = orderedPending[i];
     const target = objective.target_zone_id || objective.target_zone_name;
-    const legRoute = source ? navigation.shortestRoute(source, target) : null;
+    const legRoute = legSource ? navigation.shortestRoute(legSource, target) : null;
     const validRoute = !!legRoute?.ok;
     const maps = validRoute ? Number(legRoute.maps || 0) : null;
     const travelSeconds = validRoute ? maps * secondsPerMap : null;
@@ -910,7 +1076,7 @@ async function getNavigationState(db, eventId) {
       feasibleIfLeaveNow: slackSeconds == null ? null : slackSeconds >= 0,
     });
 
-    source = objective.target_zone_id || objective.target_zone_name;
+    legSource = objective.target_zone_id || objective.target_zone_name;
     sourceName = objective.target_zone_name;
   }
 
@@ -928,6 +1094,11 @@ async function getNavigationState(db, eventId) {
       secondsPerMap,
       totalPending: pendingOut.length,
       totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
+      optimization: {
+        mode: optimized.mode,
+        score: optimized.score,
+        rule: "minimize missed deadlines, then lateness, then total map travel"
+      },
       legs,
     },
     current: majority ? {

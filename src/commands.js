@@ -49,9 +49,8 @@ function commandDefs() {
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
       .addStringOption(ctaOpt),
-    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Adiciona um objetivo à rota encadeada do CTA")
+    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Adiciona um objetivo e deixa o bot otimizar a ordem")
       .addStringOption(ctaOpt)
-      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("tipo").setDescription("Tipo do objetivo").setRequired(true).addChoices(
         { name: "Vortex", value: "VORTEX" },
         { name: "Node", value: "NODE" },
@@ -60,6 +59,7 @@ function commandDefs() {
         { name: "Outpost", value: "OUTPOST" },
         { name: "Outro", value: "OBJETIVO" }
       ))
+      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("raridade").setDescription("Cor do objetivo ou tier do Node").addChoices(
         { name: "Roxo", value: "ROXO" },
         { name: "Azul", value: "AZUL" },
@@ -182,6 +182,17 @@ async function handleAutocomplete(interaction) {
   }
   if (focused.name === "destino") {
     const q = String(focused.value || "");
+    const type = String(interaction.options.getString("tipo") || "").toUpperCase();
+    const vortexZones = ["Thunderrock Upland", "Rivercopse Curve", "Giantweald Woods"];
+    if (type === "VORTEX") {
+      const needle = q.trim().toLowerCase();
+      return interaction.respond(
+        vortexZones
+          .filter((name) => !needle || name.toLowerCase().includes(needle))
+          .slice(0, 25)
+          .map((name) => ({ name: `${name} · VORTEX`, value: name }))
+      );
+    }
     const zones = navigation.searchZones(q, { limit: 25, blackOnly: true });
     return interaction.respond(zones.map((z) => ({
       name: `${z.name}${z.tier ? ` (T${z.tier})` : ""}`,
