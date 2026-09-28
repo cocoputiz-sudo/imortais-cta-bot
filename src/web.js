@@ -389,6 +389,30 @@ function startWebServer(client, opts) {
     res.status(result && result.ok === false ? 400 : 200).json(result);
   });
 
+  app.post("/api/navigation/complete", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const body = req.body || {};
+    const event = String(body.event || "").trim();
+    const waypoint = String(body.waypoint || "").trim();
+    if (!event || !waypoint) return res.status(400).json({ error: "event/waypoint" });
+    const result = _act.completeNavigationObjective
+      ? await _act.completeNavigationObjective(event, waypoint, sess.id)
+      : { ok: false, error: "indisponível" };
+    res.status(result && result.ok === false ? 400 : 200).json(result);
+  });
+
+  app.post("/api/navigation/remove", async (req, res) => {
+    const sess = requireEditor(req, res); if (!sess) return;
+    const body = req.body || {};
+    const event = String(body.event || "").trim();
+    const waypoint = String(body.waypoint || "").trim();
+    if (!event || !waypoint) return res.status(400).json({ error: "event/waypoint" });
+    const result = _act.removeNavigationObjective
+      ? await _act.removeNavigationObjective(event, waypoint, sess.id)
+      : { ok: false, error: "indisponível" };
+    res.status(result && result.ok === false ? 400 : 200).json(result);
+  });
+
   app.post("/api/navigation/clear", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
     const event = String((req.body || {}).event || "").trim();
@@ -790,6 +814,16 @@ const PAGE = `<!doctype html>
   .nav2-step .n{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#172333;color:#8da5c2;font-size:9px;font-weight:900}
   .nav2-step .zone{font-weight:800}.nav2-step .go{color:#8bc9ff;font-weight:900;font-size:11px;white-space:nowrap}
   .nav2-spread{display:grid;gap:6px;margin-top:10px}.nav2-spread-row{display:flex;justify-content:space-between;gap:10px;padding:7px 8px;border-bottom:1px solid #1e2a38;color:#aebccc;font-size:10px}
+  .nav2-queue{display:grid;gap:9px;margin-top:11px}
+  .nav2-qitem{border:1px solid #2d3b4f;border-radius:10px;background:#0c131c;padding:11px}
+  .nav2-qtop{display:flex;align-items:flex-start;gap:8px}.nav2-qnum{display:grid;place-items:center;min-width:25px;height:25px;border-radius:50%;background:#172333;color:#a8bdd8;font-size:10px;font-weight:900}
+  .nav2-qmain{min-width:0;flex:1}.nav2-qkind{font-size:11px;font-weight:900}.nav2-qtarget{margin-top:3px;font-size:14px;font-weight:900}
+  .nav2-qmeta{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px;font-size:9px;color:#91a2b8}.nav2-qmeta span{border:1px solid #28374a;border-radius:999px;padding:3px 6px}
+  .nav2-mass{margin-top:8px;padding:8px 9px;border-radius:8px;background:#10251a;border:1px solid #28543a;color:#8fe0ad;font-size:11px;font-weight:900}
+  .nav2-mass.late{background:#2b1115;border-color:#79323a;color:#ff9da5}
+  .nav2-leg{margin-top:8px;padding-top:8px;border-top:1px solid #202c3a;color:#9fb0c5;font-size:9px}
+  .nav2-legsteps{margin-top:5px;display:flex;gap:5px;flex-wrap:wrap}.nav2-legsteps span{background:#111b27;border:1px solid #25364a;border-radius:6px;padding:3px 5px}
+  .nav2-qactions{display:flex;gap:6px;margin-top:9px}.nav2-qactions button{font-size:9px;padding:6px 8px}
   .nav2-empty{padding:18px;color:var(--muted);text-align:center;border:1px dashed #2b394b;border-radius:10px}
   @media(max-width:900px){.nav2-layout{grid-template-columns:1fr}.nav2-current{grid-template-columns:1fr}.nav2-row{grid-template-columns:1fr}}
 
@@ -1223,29 +1257,44 @@ const PAGE = `<!doctype html>
     navDraftByEvent[key]=d;
     return d;
   }
-  function navDraftForObjective(o){
+  function navDraftForObjective(){
     var key=navDraftKey();
     var d=key?navDraftByEvent[key]:null;
     if(d) return d;
-    return {
-      targetZone:o?o.targetZoneName:'',
-      type:o&&o.type?o.type:'VORTEX',
-      rarity:o&&o.rarity?o.rarity:'',
-      minutes:'',
-      seconds:'0',
-      dirty:false
-    };
+    return { targetZone:'', type:'VORTEX', rarity:'', minutes:'', seconds:'0', dirty:false };
   }
   function navCountdown(seconds){
     if(seconds==null) return 'sem limite';
-    var s=Math.max(0,Number(seconds)||0), m=Math.floor(s/60), r=Math.floor(s%60);
-    return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
+    var s=Math.max(0,Number(seconds)||0), h=Math.floor(s/3600), m=Math.floor((s%3600)/60), r=Math.floor(s%60);
+    return (h?h+'h ':'')+String(m).padStart(2,'0')+':'+String(r).padStart(2,'0');
+  }
+  function navDelta(seconds){
+    if(seconds==null||!isFinite(Number(seconds))) return '—';
+    var s=Math.floor(Number(seconds)), neg=s<0; s=Math.abs(s);
+    var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), r=s%60;
+    var txt=(h?h+'h ':'')+m+'m '+String(r).padStart(2,'0')+'s';
+    return neg?'-'+txt:txt;
   }
   function navKind(o){
     if(!o) return 'OBJETIVO';
-    var rarity=String(o.rarity||'').toUpperCase();
-    var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':'🎯';
-    return emoji+' '+esc(String(o.type||'OBJETIVO'))+(rarity?' '+esc(rarity):'');
+    var rarity=String(o.rarity||'').toUpperCase(), type=String(o.type||'OBJETIVO').toUpperCase();
+    var emoji=rarity==='ROXO'?'🟣':rarity==='AZUL'?'🔵':rarity==='AMARELO'?'🟡':rarity==='VERDE'?'🟢':rarity==='VERMELHO'?'🔴':type==='NODE'?'💎':'🎯';
+    return emoji+' '+esc(type)+(rarity?' '+esc(rarity):'');
+  }
+  function navRarityChoices(type,selected){
+    var arr=String(type||'').toUpperCase()==='NODE'
+      ? ['4.4','5.4','6.4','7.4','8.4']
+      : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
+    return '<option value="">—</option>'+arr.map(function(x){return '<option'+(String(selected||'')===x?' selected':'')+'>'+x+'</option>';}).join('');
+  }
+  function syncNavRarityOptions(){
+    var type=document.getElementById('nav-type'), rarity=document.getElementById('nav-rarity');
+    if(!type||!rarity) return;
+    var old=rarity.value||'';
+    var valid=String(type.value).toUpperCase()==='NODE'
+      ? ['4.4','5.4','6.4','7.4','8.4']
+      : ['ROXO','AZUL','AMARELO','VERDE','VERMELHO'];
+    rarity.innerHTML=navRarityChoices(type.value,valid.indexOf(old)>=0?old:'');
   }
   function bindNavigationForm(){
     var target=document.getElementById('nav-target');
@@ -1272,7 +1321,8 @@ const PAGE = `<!doctype html>
         },180);
       };
     }
-    [type,rarity,min,sec].forEach(function(el){
+    if(type) type.onchange=function(){ syncNavRarityOptions(); keepDraft(); };
+    [rarity,min,sec].forEach(function(el){
       if(!el) return;
       el.onchange=keepDraft;
       el.oninput=keepDraft;
@@ -1295,71 +1345,115 @@ const PAGE = `<!doctype html>
         .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
         .then(function(){
           delete navDraftByEvent[navDraftKey()];
-          flash('● objetivo definido','var(--green)');
+          flash('● objetivo adicionado à rota','var(--green)');
           renderNavigation();
         })
         .catch(function(e){flash('● '+e.message,'var(--red)');});
     };
+
     var clear=document.getElementById('nav-clear');
     if(clear) clear.onclick=function(){
-      if(!current||!confirm('Remover o objetivo de navegação deste CTA?')) return;
+      if(!current||!confirm('Limpar TODA a fila de objetivos deste CTA?')) return;
       fetch('/api/navigation/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current})})
         .then(function(r){return r.json();})
         .then(function(){
           delete navDraftByEvent[navDraftKey()];
-          flash('● objetivo removido','var(--green)');
+          flash('● fila de objetivos limpa','var(--green)');
           renderNavigation();
         })
-        .catch(function(){flash('● erro ao remover','var(--red)');});
+        .catch(function(){flash('● erro ao limpar','var(--red)');});
     };
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-nav-complete]'),function(btn){
+      btn.onclick=function(){
+        var id=btn.getAttribute('data-nav-complete');
+        fetch('/api/navigation/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,waypoint:id})})
+          .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
+          .then(function(){flash('● objetivo concluído','var(--green)');renderNavigation();})
+          .catch(function(e){flash('● '+e.message,'var(--red)');});
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-nav-remove]'),function(btn){
+      btn.onclick=function(){
+        var id=btn.getAttribute('data-nav-remove');
+        if(!confirm('Remover este objetivo da rota?')) return;
+        fetch('/api/navigation/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,waypoint:id})})
+          .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
+          .then(function(){flash('● objetivo removido','var(--green)');renderNavigation();})
+          .catch(function(e){flash('● '+e.message,'var(--red)');});
+      };
+    });
   }
+
   function renderNavigation(silent){
     if(!current){ noCta('view-navigation','🧭 Navegação'); return; }
-    // Atualizações automáticas de telemetria não podem reconstruir o formulário
-    // enquanto o caller está digitando. Isso evitava o efeito de "F5".
     if(silent && navFormIsFocused()) return;
     if(!silent) loading('view-navigation','🧭 Navegação');
 
     fetchTelemetry('/api/navigation/state?event='+encodeURIComponent(current)).then(function(d){
-      var o=d.objective||null, cur=d.current||null, route=d.route||null, inst=d.instruction||null;
-      var draft=navDraftForObjective(o);
+      var queue=d.objectives||[], o=d.objective||null, cur=d.current||null, inst=d.instruction||null;
+      var legs=(d.itinerary&&d.itinerary.legs)||[];
+      var draft=navDraftForObjective();
       var form=authState.canEdit
-        ? '<div class="nav2-card"><h3>FIXAR OBJETIVO</h3><div class="nav2-form">'
+        ? '<div class="nav2-card"><h3>ADICIONAR OBJETIVO À ROTA</h3><div class="nav2-form">'
           +'<div class="nav2-field"><label>Mapa de destino</label><input id="nav-target" list="nav-zone-list" placeholder="Ex.: Flammog Fork" value="'+esc(draft.targetZone||'')+'"><datalist id="nav-zone-list"></datalist></div>'
           +'<div class="nav2-row"><div class="nav2-field"><label>Tipo</label><select id="nav-type">'
-          +['VORTEX','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(String(draft.type||'VORTEX')===x?' selected':'')+'>'+x+'</option>';}).join('')
-          +'</select></div><div class="nav2-field"><label>Raridade/cor</label><select id="nav-rarity"><option value="">—</option>'
-          +['ROXO','AZUL','AMARELO','VERDE','VERMELHO'].map(function(x){return '<option'+(String(draft.rarity||'')===x?' selected':'')+'>'+x+'</option>';}).join('')
-          +'</select></div></div>'
-          +'<div class="nav2-row"><div class="nav2-field"><label>Minutos restantes</label><input id="nav-min" type="number" min="0" max="240" value="'+esc(draft.minutes==null?'':draft.minutes)+'"></div>'
+          +['VORTEX','NODE','TERRITÓRIO','CASTELO','OUTPOST','OBJETIVO'].map(function(x){return '<option'+(String(draft.type||'VORTEX')===x?' selected':'')+'>'+x+'</option>';}).join('')
+          +'</select></div><div class="nav2-field"><label>Raridade / tier</label><select id="nav-rarity">'+navRarityChoices(draft.type,draft.rarity)+'</select></div></div>'
+          +'<div class="nav2-row"><div class="nav2-field"><label>Tempo restante: minutos</label><input id="nav-min" type="number" min="0" max="240" value="'+esc(draft.minutes==null?'':draft.minutes)+'"></div>'
           +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="'+esc(draft.seconds==null?'0':draft.seconds)+'"></div></div>'
-          +'<div class="nav2-actions"><button class="btn primary" id="nav-set">🎯 Definir objetivo</button>'
-          +(o?'<button class="btn danger" id="nav-clear">Remover objetivo</button>':'')+'</div></div></div>'
+          +'<div class="nav2-actions"><button class="btn primary" id="nav-set">＋ Adicionar à rota</button>'
+          +(queue.length?'<button class="btn danger" id="nav-clear">Limpar fila</button>':'')+'</div>'
+          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">NODE usa 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O ETA inicial considera '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
+          +'</div></div>'
         : '';
-
-      var objective=o
-        ? '<div class="nav2-objective"><div class="kind">'+navKind(o)+'</div><div class="target">🎯 '+esc(o.targetZoneName)+'</div>'
-          +'<div class="timer">⏳ '+(o.expired?'EXPIRADO':navCountdown(o.remainingSeconds)+' restantes')+'</div></div>'
-        : '<div class="nav2-empty">Nenhum objetivo ativo. O caller pode fixar um mapa pelo site ou pelo comando <b>/objetivo</b>.</div>';
 
       var currentHtml=cur
         ? '<div class="nav2-current"><div class="nav2-stat"><small>Mapa atual do zerg</small><b>'+esc((cur.zone&&cur.zone.name)||cur.clusterName||'?')+'</b></div>'
           +'<div class="nav2-stat"><small>Clients confirmando</small><b>'+esc(cur.observers||0)+'</b></div></div>'
-        : '<div class="nav2-empty" style="margin-top:10px">📡 Aguardando <b>zone_change</b> do Combat Client v0.5.8+.</div>';
+        : '<div class="nav2-empty">📡 Aguardando <b>zone_change</b> do Combat Client v0.5.8+.</div>';
 
       var next='';
       if(o&&cur){
-        if(inst&&inst.arrived) next='<div class="nav2-next"><small>DESTINO</small><strong>✅ CHEGAMOS EM '+esc(o.targetZoneName)+'</strong></div>';
-        else if(inst) next='<div class="nav2-next"><small>PRÓXIMA SAÍDA</small><strong>'+esc(inst.exit)+' → '+esc(inst.next&&inst.next.name||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">'+esc(inst.mapsRemaining)+' mapa(s) restantes</div></div>';
-        else next='<div class="nav2-next"><small>ROTA</small><strong>⚠️ INDISPONÍVEL</strong></div>';
+        if(inst&&inst.arrived) next='<div class="nav2-next"><small>OBJETIVO #1</small><strong>✅ '+esc(o.targetZoneName)+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Marque como concluído para seguir automaticamente para o próximo.</div></div>';
+        else if(inst) next='<div class="nav2-next"><small>PRÓXIMA SAÍDA</small><strong>'+esc(inst.exit)+' → '+esc(inst.next&&inst.next.name||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">'+esc(inst.mapsRemaining)+' mapa(s) até o primeiro objetivo</div></div>';
+        else next='<div class="nav2-next"><small>ROTA</small><strong>⚠️ AGUARDANDO POSIÇÃO/ROTA</strong></div>';
       }
 
-      var routeHtml='';
-      if(route&&route.ok&&route.steps&&route.steps.length){
-        routeHtml='<div class="nav2-route">'+route.steps.slice(0,10).map(function(s,i){
-          return '<div class="nav2-step"><span class="n">'+(i+1)+'</span><span class="zone">'+esc(s.zone&&s.zone.name||'?')+'</span>'
-            +'<span class="go">'+(s.next?('SAIR '+esc(s.exit)+' → '+esc(s.next.name)):'✅ DESTINO')+'</span></div>';
+      var queueHtml='';
+      if(queue.length){
+        queueHtml='<div class="nav2-queue">'+legs.map(function(leg){
+          var obj=leg.objective||{};
+          var massClass=(leg.massInSeconds!=null&&Number(leg.massInSeconds)<=0)?' late':'';
+          var mass=leg.massInSeconds==null
+            ? ''
+            : '<div class="nav2-mass'+massClass+'">'+(Number(leg.massInSeconds)<=0?'🚨 MASSAR/SAIR AGORA':'📣 MASSAR/SAIR EM '+navDelta(leg.massInSeconds))+'</div>';
+          var deadline=obj.expiresAt
+            ? '<span>⏳ '+(obj.expired?'EXPIRADO':navCountdown(obj.remainingSeconds))+'</span>'
+            : '<span>⏳ sem limite</span>';
+          var routeSteps='';
+          if(leg.route&&leg.route.ok&&leg.route.steps){
+            routeSteps='<div class="nav2-legsteps">'+leg.route.steps.slice(0,8).map(function(s){
+              return s.next
+                ? '<span>'+esc(s.zone&&s.zone.name||'?')+' · <b>'+esc(s.exit)+'</b> → '+esc(s.next.name)+'</span>'
+                : '<span>✅ '+esc(s.zone&&s.zone.name||'?')+'</span>';
+            }).join('')+'</div>';
+          }
+          var acts=authState.canEdit
+            ? '<div class="nav2-qactions"><button class="btn ghost" data-nav-complete="'+esc(obj.id)+'">✓ Concluído</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>'
+            : '';
+          return '<div class="nav2-qitem"><div class="nav2-qtop"><span class="nav2-qnum">'+esc(leg.index)+'</span><div class="nav2-qmain">'
+            +'<div class="nav2-qkind">'+navKind(obj)+'</div><div class="nav2-qtarget">'+esc(obj.targetZoneName)+'</div>'
+            +'<div class="nav2-qmeta">'+deadline
+            +(leg.maps!=null?'<span>🗺️ '+esc(leg.maps)+' mapa(s)</span>':'')
+            +(leg.travelSeconds!=null?'<span>🚕 ~'+navDelta(leg.travelSeconds)+'</span>':'')
+            +(leg.slackSeconds!=null?'<span>margem '+navDelta(leg.slackSeconds)+'</span>':'')
+            +'</div>'+mass
+            +'<div class="nav2-leg">De <b>'+esc(leg.from||'posição atual')+'</b> para <b>'+esc(leg.to||'?')+'</b>'+routeSteps+'</div>'
+            +acts+'</div></div></div>';
         }).join('')+'</div>';
+      } else {
+        queueHtml='<div class="nav2-empty">Nenhum objetivo pendente. Adicione vários objetivos; a rota será concatenada na ordem em que você cadastrar.</div>';
       }
 
       var spread=(d.positions&&d.positions.zones)||[];
@@ -1369,9 +1463,9 @@ const PAGE = `<!doctype html>
           }).join('')+'</div>'
         : '';
 
-      var right='<div class="nav2-card"><h3>ROTA AO VIVO</h3>'+objective+currentHtml+next+routeHtml+spreadHtml+'</div>';
-      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Rota automática pelo mapa que os Combat Clients estão detectando.</p></div>'
-        +'<span class="nav2-status">'+esc((d.graph&&d.graph.zones)||0)+' mapas carregados</span></div>'
+      var right='<div class="nav2-card"><h3>ROTA ENCADEADA</h3>'+currentHtml+next+queueHtml+spreadHtml+'</div>';
+      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Posição atual → objetivo 1 → objetivo 2 → objetivo 3, com horário-limite de saída.</p></div>'
+        +'<span class="nav2-status">'+esc(queue.length)+' objetivo(s) · '+esc((d.graph&&d.graph.zones)||0)+' mapas</span></div>'
         +'<div class="nav2-layout">'+form+right+'</div></div>';
       setView('view-navigation',html);
       bindNavigationForm();
