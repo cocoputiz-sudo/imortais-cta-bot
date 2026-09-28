@@ -1063,6 +1063,7 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
       objectives: full.map(x => x.objective),
       mode: "exact",
       score: bestScore || prefixScore,
+      estimatedScenarios,
     };
   }
 
@@ -1118,6 +1119,7 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     objectives: full.map(x => x.objective),
     mode: "greedy",
     score,
+    estimatedScenarios,
   };
 }
 
@@ -1349,7 +1351,7 @@ async function getNavigationState(db, eventId) {
       optimization: {
         mode: optimized.mode,
         score: optimized.score,
-        estimatedScenarios: optimized.mode === "exact" ? estimatedScenarios : null,
+        estimatedScenarios: optimized.estimatedScenarios ?? null,
         rule: "hit pickup deadlines first; include transport delivery travel; then minimize lateness and map travel"
       },
       legs,
