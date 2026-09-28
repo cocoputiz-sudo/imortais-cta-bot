@@ -1077,9 +1077,10 @@ function navigationDiscordText(state) {
       lines.push(`🛣️ ${leg.maps} mapa(s) · ~${fmtDurationShort(leg.travelSeconds)} desde ${leg.from || "posição atual"}`);
     }
     if (leg.massInSeconds != null) {
+      const massUnix = leg.massBy ? Math.floor(new Date(leg.massBy).getTime() / 1000) : null;
       lines.push(leg.massInSeconds <= 0
         ? `🚨 **MASSAR/SAIR AGORA** · margem ${fmtDurationShort(leg.slackSeconds)}`
-        : `📣 massar/sair em **${fmtDurationShort(leg.massInSeconds)}**`);
+        : `📣 massar/sair em **${fmtDurationShort(leg.massInSeconds)}**${massUnix ? ` · até <t:${massUnix}:T>` : ""}`);
     }
     if (leg.route?.ok) {
       const first = navigation.nextInstruction(leg.route);
