@@ -168,13 +168,23 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS realloc_lock_parties TEXT NOT NULL DEFAULT '';`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_departure TEXT;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_tier TEXT;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_count INT;`);
 }
 
-async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10 }) {
+async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10, brief = {} }) {
+  const departure = String(brief.departure || "").trim() || null;
+  const gearTier = String(brief.gearTier || "").trim().toUpperCase() || null;
+  const gearCount = gearTier ? Math.max(1, Math.min(9, Number(brief.gearCount) || 2)) : null;
   const { rows } = await pool.query(
-    `INSERT INTO cta_events (guild_id, channel_id, caller_id, time_label, remind_30, remind_10, num_parties)
-     VALUES ($1,$2,$3,$4,$5,$6, 4) RETURNING *`,
-    [guildId, channelId, callerId, timeLabel, remind30 || null, remind10 || null]
+    `INSERT INTO cta_events
+       (guild_id, channel_id, caller_id, time_label, remind_30, remind_10, num_parties,
+        cta_departure, cta_gear_tier, cta_gear_count)
+     VALUES ($1,$2,$3,$4,$5,$6,4,$7,$8,$9)
+     RETURNING *`,
+    [guildId, channelId, callerId, timeLabel, remind30 || null, remind10 || null,
+      departure, gearTier, gearCount]
   );
   return rows[0];
 }
@@ -231,6 +241,20 @@ async function setReallocationLocks(eventId, list) {
     `UPDATE cta_events SET realloc_lock_parties=$1 WHERE id=$2`,
     [clean.join(","), eventId]
   );
+}
+
+async function setEventBrief(eventId, brief = {}) {
+  const departure = String(brief.departure || "").trim() || null;
+  const gearTier = String(brief.gearTier || "").trim().toUpperCase() || null;
+  const gearCount = gearTier ? Math.max(1, Math.min(9, Number(brief.gearCount) || 2)) : null;
+  const { rows } = await pool.query(
+    `UPDATE cta_events
+        SET cta_departure=$2, cta_gear_tier=$3, cta_gear_count=$4
+      WHERE id=$1
+      RETURNING *`,
+    [eventId, departure, gearTier, gearCount]
+  );
+  return rows[0];
 }
 
 async function getEvent(eventId) {
@@ -592,7 +616,7 @@ async function getRoamingPresence(roamingId) {
 }
 
 module.exports = {
-  pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, parseReallocationLocks, setReallocationLocks, getEvent, getEventByThread,
+  pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, parseReallocationLocks, setReallocationLocks, setEventBrief, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange, setEventIgnored,
