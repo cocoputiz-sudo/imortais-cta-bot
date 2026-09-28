@@ -780,13 +780,72 @@ function navDeadlineMs(objective) {
 
 function navPlanCompare(a, b) {
   if (!b) return -1;
-  const keys = ["impossible", "missed", "lateSeconds", "travelSeconds", "deadlineTie"];
+  // Primeiro preserva objetivos; depois evita sair de um pickup transportável que já
+  // está no mapa atual; só então usa horário e distância como desempate.
+  const keys = [
+    "impossible",
+    "missed",
+    "lateSeconds",
+    "localPickupDeferrals",
+    "deadlineTie",
+    "travelSeconds",
+  ];
   for (const key of keys) {
     const av = Number(a?.[key] || 0);
     const bv = Number(b?.[key] || 0);
     if (av !== bv) return av < bv ? -1 : 1;
   }
   return 0;
+}
+
+function navTransitionTiming(objective, transition, elapsedBefore, nowMs) {
+  const elapsed = Math.max(0, Number(elapsedBefore) || 0);
+  if (!transition?.ok) {
+    return {
+      pickupArrivalSeconds: null,
+      pickupAtSeconds: null,
+      waitSeconds: 0,
+      lateSeconds: null,
+      elapsedAfter: elapsed,
+    };
+  }
+
+  const status = String(objective?.status || "pending").toLowerCase();
+  if (status === "carrying") {
+    return {
+      pickupArrivalSeconds: null,
+      pickupAtSeconds: null,
+      waitSeconds: 0,
+      lateSeconds: 0,
+      elapsedAfter: elapsed + Number(transition.totalSeconds || 0),
+    };
+  }
+
+  const pickupTravelSeconds = Number(
+    transition.deadlineTravelSeconds ?? transition.pickupTravelSeconds ?? 0
+  ) || 0;
+  const deliveryTravelSeconds = Number(transition.deliveryTravelSeconds || 0) || 0;
+  const pickupArrivalSeconds = elapsed + pickupTravelSeconds;
+  const objectiveMs = navDeadlineMs(objective);
+  const objectiveOffsetSeconds = objectiveMs == null
+    ? null
+    : (objectiveMs - nowMs) / 1000;
+
+  const waitSeconds = objectiveOffsetSeconds == null
+    ? 0
+    : Math.max(0, objectiveOffsetSeconds - pickupArrivalSeconds);
+  const lateSeconds = objectiveOffsetSeconds == null
+    ? 0
+    : Math.max(0, pickupArrivalSeconds - objectiveOffsetSeconds);
+  const pickupAtSeconds = pickupArrivalSeconds + waitSeconds;
+
+  return {
+    pickupArrivalSeconds,
+    pickupAtSeconds,
+    waitSeconds,
+    lateSeconds,
+    elapsedAfter: pickupAtSeconds + deliveryTravelSeconds,
+  };
 }
 
 function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, nowMs) {
@@ -801,6 +860,7 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     impossible: 0,
     missed: 0,
     lateSeconds: 0,
+    localPickupDeferrals: 0,
     travelSeconds: 0,
     deadlineTie: 0,
   };
