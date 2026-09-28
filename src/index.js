@@ -1080,7 +1080,7 @@ function navigationDiscordText(state) {
       const massUnix = leg.massBy ? Math.floor(new Date(leg.massBy).getTime() / 1000) : null;
       lines.push(leg.massInSeconds <= 0
         ? `🚨 **MASSAR/SAIR AGORA** · margem ${fmtDurationShort(leg.slackSeconds)}`
-        : `📣 massar/sair em **${fmtDurationShort(leg.massInSeconds)}**${massUnix ? ` · até <t:${massUnix}:T>` : ""}`);
+        : `📣 massar/sair ${massUnix ? `<t:${massUnix}:R> · até <t:${massUnix}:T>` : `em **${fmtDurationShort(leg.massInSeconds)}**`}`);
     }
     if (leg.route?.ok) {
       const first = navigation.nextInstruction(leg.route);
