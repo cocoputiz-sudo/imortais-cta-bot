@@ -753,6 +753,12 @@ async function getConfirm(db, eventId) {
   };
 }
 
+const VORTEX_DELIVERY_ZONE_NAMES = [
+  "Thunderrock Upland",
+  "Rivercopse Curve",
+  "Giantweald Woods",
+];
+
 function navDeadlineMs(objective) {
   const t = objective?.expires_at ? new Date(objective.expires_at).getTime() : NaN;
   return Number.isFinite(t) ? t : null;
@@ -762,27 +768,31 @@ function navPlanCompare(a, b) {
   if (!b) return -1;
   const keys = ["impossible", "missed", "lateSeconds", "travelSeconds", "deadlineTie"];
   for (const key of keys) {
-    const av = Number(a[key] || 0);
-    const bv = Number(b[key] || 0);
+    const av = Number(a?.[key] || 0);
+    const bv = Number(b?.[key] || 0);
     if (av !== bv) return av < bv ? -1 : 1;
   }
   return 0;
 }
 
-function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
-  const list = Array.isArray(pending) ? pending.slice() : [];
-  if (list.length <= 1) {
-    return {
-      objectives: list,
-      mode: source ? "exact" : "deadline",
-      score: { impossible: 0, missed: 0, lateSeconds: 0, travelSeconds: 0, deadlineTie: 0 }
-    };
-  }
+function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, nowMs) {
+  const active = Array.isArray(activeObjectives) ? activeObjectives.slice() : [];
+  const carrying = active
+    .filter(o => String(o.status || "").toLowerCase() === "carrying")
+    .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  const pending = active
+    .filter(o => String(o.status || "pending").toLowerCase() === "pending");
 
-  const insertionOrder = new Map(list.map((o, i) => [String(o.id), i]));
+  const baseScore = {
+    impossible: 0,
+    missed: 0,
+    lateSeconds: 0,
+    travelSeconds: 0,
+    deadlineTie: 0,
+  };
 
   if (!source) {
-    list.sort((a, b) => {
+    pending.sort((a, b) => {
       const da = navDeadlineMs(a);
       const db = navDeadlineMs(b);
       if (da == null && db != null) return 1;
@@ -790,19 +800,25 @@ function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
       if (da != null && db != null && da !== db) return da - db;
       return (Number(a.position) || 0) - (Number(b.position) || 0);
     });
+    const ordered = [...carrying, ...pending];
     return {
-      objectives: list,
+      plan: ordered.map(objective => ({ objective, transition: null })),
+      objectives: ordered,
       mode: "deadline",
-      score: { impossible: 0, missed: 0, lateSeconds: 0, travelSeconds: 0, deadlineTie: 0 }
+      score: baseScore,
     };
   }
 
   const routeCache = new Map();
-  function edge(from, objective) {
-    const to = objective.target_zone_id || objective.target_zone_name;
-    const key = String(from) + "=>" + String(to);
+  const deliveryZones = VORTEX_DELIVERY_ZONE_NAMES
+    .map(name => navigation.resolveZone(name).zone)
+    .filter(Boolean)
+    .map(zone => navigation.zoneDisplay(zone));
+
+  function edge(from, to) {
+    const key = String(from || "") + "=>" + String(to || "");
     if (routeCache.has(key)) return routeCache.get(key);
-    const route = navigation.shortestRoute(from, to);
+    const route = from && to ? navigation.shortestRoute(from, to) : null;
     const ok = !!route?.ok;
     const maps = ok ? Number(route.maps || 0) : null;
     const out = {
@@ -815,103 +831,257 @@ function optimizeNavigationObjectives(pending, source, secondsPerMap, nowMs) {
     return out;
   }
 
-  function scorePath(path) {
-    let current = source;
-    let elapsed = 0;
-    let impossible = 0;
-    let missed = 0;
-    let lateSeconds = 0;
-    let travelSeconds = 0;
-    let deadlineTie = 0;
+  function transitionOptions(from, objective) {
+    const type = String(objective.objective_type || "").toUpperCase();
+    const status = String(objective.status || "pending").toLowerCase();
 
-    for (let i = 0; i < path.length; i++) {
-      const objective = path[i];
-      const leg = edge(current, objective);
-      if (!leg.ok) {
-        impossible++;
-      } else {
-        elapsed += leg.seconds;
-        travelSeconds += leg.seconds;
-      }
-
-      const deadline = navDeadlineMs(objective);
-      if (deadline != null) {
-        const arrivalMs = nowMs + elapsed * 1000;
-        const late = Math.max(0, Math.floor((arrivalMs - deadline) / 1000));
-        if (late > 0) missed++;
-        lateSeconds += late;
-        // Desempate: deadlines mais cedo recebem peso maior nas primeiras posições.
-        deadlineTie += (path.length - i) * Math.max(0, Math.floor((deadline - nowMs) / 1000));
-      }
-
-      current = objective.target_zone_id || objective.target_zone_name;
+    if (status === "carrying") {
+      const deliveryName = objective.delivery_zone_name;
+      const deliveryId = objective.delivery_zone_id || deliveryName;
+      const delivery = edge(from, deliveryId);
+      return [{
+        objective,
+        stage: "carrying",
+        ok: delivery.ok,
+        start: from,
+        pickupRoute: null,
+        pickupMaps: 0,
+        pickupTravelSeconds: 0,
+        deliveryZone: deliveryName ? { id: deliveryId, name: deliveryName } : null,
+        deliveryRoute: delivery.route,
+        deliveryMaps: delivery.maps,
+        deliveryTravelSeconds: delivery.seconds,
+        totalMaps: delivery.maps,
+        totalSeconds: delivery.seconds,
+        deadlineTravelSeconds: 0,
+        end: deliveryId,
+      }];
     }
 
-    return { impossible, missed, lateSeconds, travelSeconds, deadlineTie };
+    const pickupId = objective.target_zone_id || objective.target_zone_name;
+    const pickup = edge(from, pickupId);
+
+    if (type !== "VORTEX") {
+      return [{
+        objective,
+        stage: "pending",
+        ok: pickup.ok,
+        start: from,
+        pickupRoute: pickup.route,
+        pickupMaps: pickup.maps,
+        pickupTravelSeconds: pickup.seconds,
+        deliveryZone: null,
+        deliveryRoute: null,
+        deliveryMaps: 0,
+        deliveryTravelSeconds: 0,
+        totalMaps: pickup.maps,
+        totalSeconds: pickup.seconds,
+        deadlineTravelSeconds: pickup.seconds,
+        end: pickupId,
+      }];
+    }
+
+    return deliveryZones.map(drop => {
+      const carry = edge(pickupId, drop.id || drop.name);
+      const ok = pickup.ok && carry.ok;
+      const pickupMaps = pickup.maps;
+      const deliveryMaps = carry.maps;
+      return {
+        objective,
+        stage: "pending",
+        ok,
+        start: from,
+        pickupRoute: pickup.route,
+        pickupMaps,
+        pickupTravelSeconds: pickup.seconds,
+        deliveryZone: drop,
+        deliveryRoute: carry.route,
+        deliveryMaps,
+        deliveryTravelSeconds: carry.seconds,
+        totalMaps: ok ? Number(pickupMaps || 0) + Number(deliveryMaps || 0) : null,
+        totalSeconds: ok ? Number(pickup.seconds || 0) + Number(carry.seconds || 0) : null,
+        // O deadline do Vortex é o horário para CHEGAR/PEGAR no mapa onde ele está.
+        // O transporte até o mapa de entrega conta para os próximos objetivos.
+        deadlineTravelSeconds: pickup.seconds,
+        end: drop.id || drop.name,
+      };
+    });
   }
 
-  let ordered = null;
+  const prefixPlan = [];
+  let prefixSource = source;
+  let prefixElapsed = 0;
+  let prefixScore = { ...baseScore };
+
+  // Se já estamos carregando um Vortex, a entrega é obrigatória antes de reorganizar
+  // os objetivos que ainda não foram pegos.
+  for (const objective of carrying) {
+    const transition = transitionOptions(prefixSource, objective)[0];
+    prefixPlan.push({ objective, transition });
+    if (!transition?.ok) {
+      prefixScore.impossible++;
+    } else {
+      prefixElapsed += Number(transition.totalSeconds || 0);
+      prefixScore.travelSeconds += Number(transition.totalSeconds || 0);
+      prefixSource = transition.end;
+    }
+  }
+
+  if (!pending.length) {
+    return {
+      plan: prefixPlan,
+      objectives: prefixPlan.map(x => x.objective),
+      mode: "carrying",
+      score: prefixScore,
+    };
+  }
+
+  const insertionOrder = new Map(pending.map((o, i) => [String(o.id), i]));
+
+  function addTransitionScore(score, transition, objective, elapsedBefore, position, totalCount) {
+    const next = { ...score };
+    if (!transition?.ok) {
+      next.impossible++;
+      return next;
+    }
+
+    const pickupArrivalSeconds = elapsedBefore + Number(transition.deadlineTravelSeconds || 0);
+    const deadline = navDeadlineMs(objective);
+    if (deadline != null) {
+      const late = Math.max(0, Math.floor((nowMs + pickupArrivalSeconds * 1000 - deadline) / 1000));
+      if (late > 0) next.missed++;
+      next.lateSeconds += late;
+      next.deadlineTie += (totalCount - position + 1) *
+        Math.max(0, Math.floor((deadline - nowMs) / 1000));
+    }
+    next.travelSeconds += Number(transition.totalSeconds || 0);
+    return next;
+  }
+
+  function partialDefinitelyWorse(score, best) {
+    if (!best) return false;
+    if (score.impossible !== best.impossible) return score.impossible > best.impossible;
+    if (score.missed !== best.missed) return score.missed > best.missed;
+    if (score.lateSeconds !== best.lateSeconds) return score.lateSeconds > best.lateSeconds;
+    return false;
+  }
+
+  let bestPlan = null;
   let bestScore = null;
 
-  // Até 8 objetivos, testamos todas as ordens. 8! = 40.320, pequeno para o CTA.
-  if (list.length <= 8) {
-    const used = new Array(list.length).fill(false);
-    const path = [];
-    function walk() {
-      if (path.length === list.length) {
-        const score = scorePath(path);
+  // Com até 6 objetivos ainda não pegos, testamos ordem + os 3 possíveis mapas de
+  // entrega de cada Vortex. 6! * 3^6 = 524.880 cenários no pior caso.
+  if (pending.length <= 6) {
+    const used = new Array(pending.length).fill(false);
+    const plan = [];
+
+    function walk(current, elapsed, score) {
+      if (plan.length === pending.length) {
         if (!bestScore || navPlanCompare(score, bestScore) < 0) {
-          bestScore = score;
-          ordered = path.slice();
+          bestScore = { ...score };
+          bestPlan = plan.slice();
         }
         return;
       }
-      for (let i = 0; i < list.length; i++) {
+
+      for (let i = 0; i < pending.length; i++) {
         if (used[i]) continue;
-        used[i] = true;
-        path.push(list[i]);
-        walk();
-        path.pop();
-        used[i] = false;
+        const objective = pending[i];
+        const options = transitionOptions(current, objective);
+
+        for (const transition of options) {
+          const position = prefixPlan.length + plan.length + 1;
+          const totalCount = prefixPlan.length + pending.length;
+          const nextScore = addTransitionScore(
+            score,
+            transition,
+            objective,
+            elapsed,
+            position,
+            totalCount
+          );
+          if (partialDefinitelyWorse(nextScore, bestScore)) continue;
+
+          used[i] = true;
+          plan.push({ objective, transition });
+          const nextElapsed = transition?.ok
+            ? elapsed + Number(transition.totalSeconds || 0)
+            : elapsed;
+          const nextCurrent = transition?.ok ? transition.end : current;
+          walk(nextCurrent, nextElapsed, nextScore);
+          plan.pop();
+          used[i] = false;
+        }
       }
     }
-    walk();
-    return { objectives: ordered || list, mode: "exact", score: bestScore || scorePath(list) };
+
+    walk(prefixSource, prefixElapsed, prefixScore);
+    const tail = bestPlan || pending.map(objective => ({
+      objective,
+      transition: transitionOptions(prefixSource, objective)[0] || null,
+    }));
+    const full = [...prefixPlan, ...tail];
+    return {
+      plan: full,
+      objectives: full.map(x => x.objective),
+      mode: "exact",
+      score: bestScore || prefixScore,
+    };
   }
 
-  // Filas enormes usam heurística: menor folga até o deadline, com distância como desempate.
-  const remaining = list.slice();
-  const result = [];
-  let current = source;
-  let elapsed = 0;
+  // Filas maiores: escolhe iterativamente o objetivo com menor folga para o deadline;
+  // para Vortex, também testa os três mapas de entrega e usa distância total no desempate.
+  const remaining = pending.slice();
+  const greedyPlan = [];
+  let current = prefixSource;
+  let elapsed = prefixElapsed;
+  let score = { ...prefixScore };
 
   while (remaining.length) {
-    const candidates = remaining.map((objective) => {
-      const leg = edge(current, objective);
-      const deadline = navDeadlineMs(objective);
-      const travel = leg.ok ? leg.seconds : Number.MAX_SAFE_INTEGER / 1000;
-      const arrival = nowMs + (elapsed + travel) * 1000;
-      const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - arrival) / 1000;
-      return { objective, leg, slack, travel, deadline };
-    });
+    const candidates = [];
+    for (const objective of remaining) {
+      for (const transition of transitionOptions(current, objective)) {
+        const deadline = navDeadlineMs(objective);
+        const pickupTravel = transition?.ok ? Number(transition.deadlineTravelSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000;
+        const pickupArrival = nowMs + (elapsed + pickupTravel) * 1000;
+        const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - pickupArrival) / 1000;
+        candidates.push({
+          objective,
+          transition,
+          slack,
+          total: transition?.ok ? Number(transition.totalSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000,
+        });
+      }
+    }
 
     candidates.sort((a, b) => {
-      if (a.leg.ok !== b.leg.ok) return a.leg.ok ? -1 : 1;
+      if (!!a.transition?.ok !== !!b.transition?.ok) return a.transition?.ok ? -1 : 1;
       if (a.slack !== b.slack) return a.slack - b.slack;
-      if (a.travel !== b.travel) return a.travel - b.travel;
-      const ai = insertionOrder.get(String(a.objective.id)) || 0;
-      const bi = insertionOrder.get(String(b.objective.id)) || 0;
-      return ai - bi;
+      if (a.total !== b.total) return a.total - b.total;
+      return (insertionOrder.get(String(a.objective.id)) || 0) -
+        (insertionOrder.get(String(b.objective.id)) || 0);
     });
 
     const pick = candidates[0];
-    result.push(pick.objective);
-    if (pick.leg.ok) elapsed += pick.leg.seconds;
-    current = pick.objective.target_zone_id || pick.objective.target_zone_name;
+    const position = prefixPlan.length + greedyPlan.length + 1;
+    const totalCount = prefixPlan.length + pending.length;
+    score = addTransitionScore(score, pick.transition, pick.objective, elapsed, position, totalCount);
+    greedyPlan.push({ objective: pick.objective, transition: pick.transition });
+
+    if (pick.transition?.ok) {
+      elapsed += Number(pick.transition.totalSeconds || 0);
+      current = pick.transition.end;
+    }
     remaining.splice(remaining.indexOf(pick.objective), 1);
   }
 
-  return { objectives: result, mode: "greedy", score: scorePath(result) };
+  const full = [...prefixPlan, ...greedyPlan];
+  return {
+    plan: full,
+    objectives: full.map(x => x.objective),
+    mode: "greedy",
+    score,
+  };
 }
 
 async function getNavigationState(db, eventId) {
