@@ -182,6 +182,17 @@ async function handleAutocomplete(interaction) {
   }
   if (focused.name === "destino") {
     const q = String(focused.value || "");
+    const type = String(interaction.options.getString("tipo") || "").toUpperCase();
+    const vortexZones = ["Thunderrock Upland", "Rivercopse Curve", "Giantweald Woods"];
+    if (type === "VORTEX") {
+      const needle = q.trim().toLowerCase();
+      return interaction.respond(
+        vortexZones
+          .filter((name) => !needle || name.toLowerCase().includes(needle))
+          .slice(0, 25)
+          .map((name) => ({ name: `${name} · VORTEX`, value: name }))
+      );
+    }
     const zones = navigation.searchZones(q, { limit: 25, blackOnly: true });
     return interaction.respond(zones.map((z) => ({
       name: `${z.name}${z.tier ? ` (T${z.tier})` : ""}`,
