@@ -1,0 +1,9234 @@
+{
+  "schemaVersion": 1,
+  "source": "https://github.com/beemerwt/albion-map-navigator/blob/main/public/data/world.json",
+  "importedAt": "2026-09-28",
+  "zoneTypes": [
+    "black",
+    "city",
+    "passage"
+  ],
+  "zones": [
+    {
+      "id": "arthurs-rest",
+      "name": "Arthur's Rest",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -91.78,
+        "y": 65.62
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "battlebrae-grassland",
+          "toPort": "SW"
+        },
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "battlebrae-peaks",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitewall-pass",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "battlebrae-meadow",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "avalanche-incline",
+      "name": "Avalanche Incline",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -113.52,
+        "y": 185.56
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "razorrock-verge",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "driftwood-vale",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "avalanche-ravine",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "avalanche-ravine",
+      "name": "Avalanche Ravine",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -129.04,
+        "y": 201.72
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "unhallowed-cloister",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "avalanche-incline",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "driftwood-glen",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "battlebrae-flatland",
+      "name": "Battlebrae Flatland",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -120.84,
+        "y": 85.91
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deathreach-priory",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "battlebrae-meadow",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "highstone-loch",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "battlebrae-grassland",
+      "name": "Battlebrae Grassland",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -73.54,
+        "y": 73.11
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "arthurs-rest",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "battlebrae-lake",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunfang-dawn",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "battlebrae-plain",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "battlebrae-lake",
+      "name": "Battlebrae Lake",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -64.91,
+        "y": 60.53
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "battlebrae-grassland",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "battlebrae-peaks",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "battlebrae-meadow",
+      "name": "Battlebrae Meadow",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -107.48,
+        "y": 75.29
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deathcreep-adit",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "battlebrae-flatland",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "battlebrae-plain",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "arthurs-rest",
+          "toPort": "NW2"
+        }
+      ]
+    },
+    {
+      "id": "battlebrae-peaks",
+      "name": "Battlebrae Peaks",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -77.57,
+        "y": 53.39
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "battlebrae-lake",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "arthurs-rest",
+          "toPort": "NE2"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitewall-ridge",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "dryvein-cross",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "battlebrae-plain",
+      "name": "Battlebrae Plain",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -92.98,
+        "y": 86.9
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "battlebrae-grassland",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "parchsand-drought",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "battlebrae-meadow",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "bedrock-passage",
+      "name": "Bedrock Passage",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deathwisp-sink",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "murdergulch-trail",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "black-monastery",
+      "name": "Black Monastery",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -73.76,
+        "y": 191.85
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "murdergulch-gap",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deathwisp-sink",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deathwisp-bog",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "bleachskull-desert",
+      "name": "Bleachskull Desert",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -176.49,
+        "y": 148.63
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "bleachskull-steppe",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "windgrass-fields",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "highstone-plateau",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "bleachskull-steppe",
+      "name": "Bleachskull Steppe",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -192.12,
+        "y": 166.95
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "bleachskull-desert",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "windgrass-border",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "braemore-lowland",
+      "name": "Braemore Lowland",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -191.41,
+        "y": 238.51
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "braemore-upland",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "unhallowed-cloister",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandmount-strand",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "braemore-upland",
+      "name": "Braemore Upland",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -213.48,
+        "y": 241.05
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deathcap-channel",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "braemore-lowland",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandmount-ascent",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "brambleshore-hinterlands",
+      "name": "Brambleshore Hinterlands",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 20.93,
+        "y": 370.95
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "scuttlesink-marsh",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "scuttlesink-mouth",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-reach",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "brecilien-5000",
+      "name": "Brecilien",
+      "type": "black",
+      "tier": 1,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "brecilien-5001",
+          "toPort": "NE"
+        },
+        {
+          "port": "SW2",
+          "direction": "SW",
+          "to": "brecilien-5001",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "brecilien-5001",
+      "name": "Brecilien",
+      "type": "black",
+      "tier": 1,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "brecilien-5000",
+          "toPort": "SW2"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "brecilien-5000",
+          "toPort": "NE2"
+        }
+      ]
+    },
+    {
+      "id": "bridgewatch",
+      "name": "Bridgewatch",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": 15.8,
+        "y": -370.8
+      },
+      "ports": [
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "bridgewatch-portal",
+          "toPort": "NW3"
+        }
+      ]
+    },
+    {
+      "id": "bridgewatch-portal",
+      "name": "Bridgewatch Portal",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -75.26,
+        "y": -32.88
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "farshore-bay",
+          "toPort": "SE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandrift-prairie",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW2",
+          "direction": "SW",
+          "to": "sandrift-shore",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sandrift-coast",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sandrift-coast",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "sandrift-prairie",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "sandrift-steppe",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW3",
+          "direction": "NW",
+          "to": "bridgewatch",
+          "toPort": "NE2"
+        }
+      ]
+    },
+    {
+      "id": "caerleon",
+      "name": "Caerleon",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 28.21,
+        "y": -288.95
+      },
+      "ports": []
+    },
+    {
+      "id": "chasmlight-cave",
+      "name": "Chasmlight Cave",
+      "type": "passage",
+      "tier": 7,
+      "mapPosition": null,
+      "ports": []
+    },
+    {
+      "id": "citadel-of-ash",
+      "name": "Citadel of Ash",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -15.49,
+        "y": 298.47
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "drownfield-mire",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-incline",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-course",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "craglight-cavern",
+      "name": "Craglight Cavern",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-fringe",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "southgrove-copse",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "creags-way",
+      "name": "Creag's Way",
+      "type": "passage",
+      "tier": 7,
+      "mapPosition": null,
+      "ports": []
+    },
+    {
+      "id": "crosscut-skip",
+      "name": "Crosscut Skip",
+      "type": "passage",
+      "tier": 5,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitebank-wall",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "meltwater-bog",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "daemonium-keep",
+      "name": "Daemonium Keep",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 15.77,
+        "y": 6.58
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-steppe",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "nightbloom-track",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "frostspring-volcano",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "darkbough-snag",
+      "name": "Darkbough Snag",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 35.99,
+        "y": 160.44
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "iceburn-firth",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "thunderrock-ascent",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "darkseep-core",
+      "name": "Darkseep Core",
+      "type": "passage",
+      "tier": 5,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostpeak-vista",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "timberslope-dell",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "deadpine-forest",
+      "name": "Deadpine Forest",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -19.94,
+        "y": 219.63
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "glacierfall-fissure",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "glacierfall-canyon",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-sink",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "deathcap-channel",
+      "name": "Deathcap Channel",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "braemore-upland",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "widemoor-fen",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "deathcreep-adit",
+      "name": "Deathcreep Adit",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "battlebrae-meadow",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "longfen-veins",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "deathreach-priory",
+      "name": "Deathreach Priory",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -136.05,
+        "y": 78.21
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "battlebrae-flatland",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "gravemound-knoll",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "longfen-veins",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "deathwisp-bog",
+      "name": "Deathwisp Bog",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -65.34,
+        "y": 171.26
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "razorrock-chasm",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "black-monastery",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "murdergulch-ravine",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "deathwisp-sink",
+      "name": "Deathwisp Sink",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -76.05,
+        "y": 216.54
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "driftwood-hollow",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "murdergulch-divide",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "bedrock-passage",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "black-monastery",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "deepwood-copse",
+      "name": "Deepwood Copse",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 56.71,
+        "y": 216.37
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "driprock-tunnel",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "glacierfall-valley",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "eldersleep",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "iceburn-peaks",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "deepwood-dell",
+      "name": "Deepwood Dell",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 90.37,
+        "y": 238.44
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitebank-shore",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitebank-cross",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deepwood-pines",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "deepwood-gorge",
+      "name": "Deepwood Gorge",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 64.91,
+        "y": 234.19
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitebank-cross",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "driprock-tunnel",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "glacierfall-passage",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "iceburn-cliffs",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "deepwood-pines",
+      "name": "Deepwood Pines",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 94.96,
+        "y": 218.28
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "floatshoal-fissure",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "smugglers-rut",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deepwood-dell",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "driftwood-glen",
+      "name": "Driftwood Glen",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -118.72,
+        "y": 232.14
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "willowshade-lake",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "willowshade-icemarsh",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "driftwood-vale",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "avalanche-ravine",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "driftwood-hollow",
+      "name": "Driftwood Hollow",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -91.29,
+        "y": 199.76
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "driftwood-vale",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "razorrock-passage",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deathwisp-sink",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "driftwood-vale",
+      "name": "Driftwood Vale",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -97.58,
+        "y": 214.39
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "murdergulch-trail",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "avalanche-incline",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "driftwood-glen",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "driftwood-hollow",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "driprock-tunnel",
+      "name": "Driprock Tunnel",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deepwood-gorge",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deepwood-copse",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-course",
+      "name": "Drownfield Course",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -34.58,
+        "y": 316.34
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "citadel-of-ash",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "drownfield-wetland",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-fen",
+      "name": "Drownfield Fen",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -21.34,
+        "y": 250.95
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "drownfield-rut",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "glacierfall-pass",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "morganas-rest",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-quag",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-mire",
+      "name": "Drownfield Mire",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -33.21,
+        "y": 286.97
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "citadel-of-ash",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drownfield-slough",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-wetland",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitepeak-tundra",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-quag",
+      "name": "Drownfield Quag",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -32.53,
+        "y": 262.2
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitepeak-tundra",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drownfield-fen",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitepeak-ascent",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-rut",
+      "name": "Drownfield Rut",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -37.62,
+        "y": 247.06
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drownfield-fen",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "murdergulch-divide",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drownfield-sink",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-sink",
+      "name": "Drownfield Sink",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -32.81,
+        "y": 230.38
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deadpine-forest",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-rut",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-slough",
+      "name": "Drownfield Slough",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -17.46,
+        "y": 270.25
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-mire",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "morganas-rest",
+          "toPort": "NW2"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "skysand-ridge",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "drownfield-wetland",
+      "name": "Drownfield Wetland",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -53.41,
+        "y": 311.7
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drownfield-mire",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timberscar-copse",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drownfield-course",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "timberscar-dell",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "drybasin-oasis",
+      "name": "Drybasin Oasis",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 149.98,
+        "y": 133.29
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drybasin-riverbed",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "giantweald-woods",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "giantweald-edge",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "shale-underway",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "drybasin-riverbed",
+      "name": "Drybasin Riverbed",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 164.12,
+        "y": 147.57
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "drybasin-oasis",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "wetgrave-marsh",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "drystone-channel",
+      "name": "Drystone Channel",
+      "type": "passage",
+      "tier": 7,
+      "mapPosition": null,
+      "ports": []
+    },
+    {
+      "id": "drytop-pillars",
+      "name": "Drytop Pillars",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -67.53,
+        "y": 352.21
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drytop-riverbed",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "timberscar-copse",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "stalagmite-adit",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "drytop-riverbed",
+      "name": "Drytop Riverbed",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -76.67,
+        "y": 364.93
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-hills",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drytop-pillars",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-confluence",
+      "name": "Dryvein Confluence",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -39.53,
+        "y": 46.17
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "dryvein-cross",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "dryvein-end",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "dryvein-riverbed",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-cross",
+      "name": "Dryvein Cross",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -54.83,
+        "y": 21.74
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "battlebrae-peaks",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "dryvein-oasis",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "dryvein-confluence",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "springsump-wetland",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-end",
+      "name": "Dryvein End",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -20.72,
+        "y": 51.27
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "dryvein-confluence",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunfang-approach",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunkenbough-spring",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-oasis",
+      "name": "Dryvein Oasis",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -75.02,
+        "y": 21
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "dryvein-plain",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "dryvein-cross",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "stonelake-hillock",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-plain",
+      "name": "Dryvein Plain",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -58.48,
+        "y": 1.34
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-oasis",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "springsump-melt",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-dunes",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-riverbed",
+      "name": "Dryvein Riverbed",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -25.03,
+        "y": 26.73
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-confluence",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "springsump-wetland",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "dryvein-steppe",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "dryvein-steppe",
+      "name": "Dryvein Steppe",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 2.83,
+        "y": 18.81
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "daemonium-keep",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-riverbed",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "firesink-trench",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "eldersleep",
+      "name": "Eldersleep",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 50.85,
+        "y": 206.14
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "glacierfall-canyon",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "glacierfall-fissure",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deepwood-copse",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "everglow-deep",
+      "name": "Everglow Deep",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "thunderrock-rapids",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thunderrock-upland",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-crossing",
+      "name": "Everwinter Crossing",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 39.53,
+        "y": 300.45
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitebank-ridge",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-plain",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-gorge",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-expanse",
+      "name": "Everwinter Expanse",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -14.15,
+        "y": 323.76
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-shores",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-incline",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "shaleheath-steep",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-gap",
+      "name": "Everwinter Gap",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 13.44,
+        "y": 279.59
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "meltwater-channel",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "skysand-ridge",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "morganas-rest",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-gorge",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-gorge",
+      "name": "Everwinter Gorge",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 26.8,
+        "y": 292.95
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "skysand-plateau",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-gap",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-crossing",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "meltwater-bog",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-incline",
+      "name": "Everwinter Incline",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 0.5,
+        "y": 318.55
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-expanse",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "citadel-of-ash",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-peak",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "skysand-plateau",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-passage",
+      "name": "Everwinter Passage",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 32.17,
+        "y": 339.06
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-peak",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "meltwater-sump",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-reach",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-peak",
+      "name": "Everwinter Peak",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 17.25,
+        "y": 326.82
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "stoneslip-passage",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-passage",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-incline",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-plain",
+      "name": "Everwinter Plain",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 24.61,
+        "y": 310.84
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "skysand-plateau",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-crossing",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "meltwater-sump",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "stoneslip-passage",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-reach",
+      "name": "Everwinter Reach",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 42.57,
+        "y": 358.36
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "brambleshore-hinterlands",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-passage",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "everwinter-shores",
+      "name": "Everwinter Shores",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -21.51,
+        "y": 335.39
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "shaleheath-hills",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "stalagmite-adit",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-expanse",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "eye-of-the-forest",
+      "name": "Eye of the Forest",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 117.38,
+        "y": 130.67
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "giantweald-woods",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "flammog-desolation",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "giantweald-copse",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "farshore-bay",
+      "name": "Farshore Bay",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -113.95,
+        "y": -33.78
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "stonelake-fields",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "bridgewatch-portal",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "farshore-cape",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "farshore-cape",
+      "name": "Farshore Cape",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -137.39,
+        "y": -8.98
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "farshore-bay",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "farshore-lagoon",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "farshore-drylands",
+      "name": "Farshore Drylands",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -134.7,
+        "y": 27.51
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "farshore-esker",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "longfen-arms",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "middlemurk-path",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "farshore-esker",
+      "name": "Farshore Esker",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -120.1,
+        "y": 36.26
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "farshore-drylands",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "longfen-marsh",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "farshore-heath",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitewall-pass",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "farshore-heath",
+      "name": "Farshore Heath",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -110.59,
+        "y": 22.63
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "stonelake-hillock",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "farshore-esker",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "farshore-lagoon",
+      "name": "Farshore Lagoon",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -122.9,
+        "y": 3.68
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "stonelake-fields",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "middlemurk-path",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "farshore-cape",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "firesink-caldera",
+      "name": "Firesink Caldera",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 40.64,
+        "y": 34.68
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "thirstwater-waste",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-borderlands",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "firesink-trench",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunkenbough-woods",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "firesink-trench",
+      "name": "Firesink Trench",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 32.99,
+        "y": 24.46
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "dryvein-steppe",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunkenbough-spring",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "firesink-caldera",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "flammog-desolation",
+      "name": "Flammog Desolation",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 99.35,
+        "y": 151.25
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "flammog-valley",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "runnelvein-slough",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "eye-of-the-forest",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "flammog-fork",
+      "name": "Flammog Fork",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 78.42,
+        "y": 120.84
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "rivercopse-fount",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thunderrock-draw",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "flammog-valley",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "flammog-valley",
+      "name": "Flammog Valley",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 93.2,
+        "y": 125.86
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "flammog-desolation",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "flammog-fork",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "runnelvein-sink",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "giantweald-copse",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "flatrock-cliffs",
+      "name": "Flatrock Cliffs",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 176.64,
+        "y": 98.85
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "flatrock-plateau",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "greenshore-bay",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "wetgrave-marsh",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "flatrock-plateau",
+      "name": "Flatrock Plateau",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 162.14,
+        "y": 89.31
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "flatrock-cliffs",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "greenshore-peninsula",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "giantweald-edge",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "floatshoal-bight",
+      "name": "Floatshoal Bight",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 147.79,
+        "y": 193.61
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostpeak-ascent",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "floatshoal-fissure",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "timberslope-dell",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "floatshoal-fissure",
+      "name": "Floatshoal Fissure",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 116.74,
+        "y": 195.3
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "floatshoal-floe",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "skylake-bridge",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deepwood-pines",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "floatshoal-bight",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "floatshoal-floe",
+      "name": "Floatshoal Floe",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 105.99,
+        "y": 177.87
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "runnelvein-bog",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "floatshoal-fissure",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "skylake-hinterlands",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "forest-cross",
+      "name": "Forest Cross",
+      "type": "city",
+      "tier": 2,
+      "mapPosition": {
+        "x": 155.02,
+        "y": -333.01
+      },
+      "ports": []
+    },
+    {
+      "id": "fort-sterling",
+      "name": "Fort Sterling",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": 70.83,
+        "y": -208.91
+      },
+      "ports": [
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "fort-sterling-portal",
+          "toPort": "NW2"
+        }
+      ]
+    },
+    {
+      "id": "fort-sterling-portal",
+      "name": "Fort Sterling Portal",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": 109.22,
+        "y": 271.68
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "frostpeak-vista",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE2",
+          "direction": "SE",
+          "to": "whitebank-shore",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitebank-stream",
+          "toPort": "NE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitebank-stream",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitebank-descent",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW2",
+          "direction": "SW",
+          "to": "whitebank-cross",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE3",
+          "direction": "SE",
+          "to": "whitebank-shore",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "fort-sterling",
+          "toPort": "NW2"
+        }
+      ]
+    },
+    {
+      "id": "frostbite-chasm",
+      "name": "Frostbite Chasm",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -228.61,
+        "y": 173.5
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandmount-esker",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "westweald-shore",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "frostbite-mountain",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "frostbite-mountain",
+      "name": "Frostbite Mountain",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -221.25,
+        "y": 164.54
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "windgrass-border",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "windgrass-gully",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostbite-chasm",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "westweald-thicket",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "frostpeak-ascent",
+      "name": "Frostpeak Ascent",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 157.12,
+        "y": 238.58
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitebank-shore",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "floatshoal-bight",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "frostpeak-vista",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "frostpeak-vista",
+      "name": "Frostpeak Vista",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 160.71,
+        "y": 255.31
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "darkseep-core",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "fort-sterling-portal",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "frostpeak-ascent",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "frostseep-crevasse",
+      "name": "Frostseep Crevasse",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -129.59,
+        "y": 274.03
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "frostseep-ravine",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "willowshade-mire",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "frostseep-ravine",
+      "name": "Frostseep Ravine",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -148.14,
+        "y": 260.29
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "willowshade-icemarsh",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "frostseep-crevasse",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-fen",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "frostspring-passage",
+      "name": "Frostspring Passage",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -17.25,
+        "y": -31.68
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-expanse",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "springsump-melt",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "frostspring-volcano",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "frostspring-volcano",
+      "name": "Frostspring Volcano",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -6.63,
+        "y": -17.36
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "frostspring-passage",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunstrand-shoal",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "daemonium-keep",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "giantweald-copse",
+      "name": "Giantweald Copse",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 113.07,
+        "y": 110.52
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "eye-of-the-forest",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "merlyns-rest",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "flammog-valley",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "giantweald-roots",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "giantweald-dale",
+      "name": "Giantweald Dale",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 139.23,
+        "y": 91.85
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "giantweald-woods",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "giantweald-edge",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "munten-fell",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "munten-tundra",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "giantweald-edge",
+      "name": "Giantweald Edge",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 157.54,
+        "y": 115.68
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "giantweald-dale",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "flatrock-plateau",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drybasin-oasis",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "giantweald-glade",
+      "name": "Giantweald Glade",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 104.58,
+        "y": 91.57
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "merlyns-rest",
+          "toPort": "SE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "giantweald-roots",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "giantweald-roots",
+      "name": "Giantweald Roots",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 95.6,
+        "y": 103.8
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "thunderrock-upland",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "giantweald-glade",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "giantweald-copse",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "giantweald-woods",
+      "name": "Giantweald Woods",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 133.08,
+        "y": 109.04
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "giantweald-dale",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "merlyns-rest",
+          "toPort": "NE2"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "eye-of-the-forest",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drybasin-oasis",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "glacierbreak-summit",
+      "name": "Glacierbreak Summit",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 153.87,
+        "y": -13.86
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-isle",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "skullmarsh-lower",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "glacierfall-canyon",
+      "name": "Glacierfall Canyon",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 17.82,
+        "y": 227.69
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "eldersleep",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deadpine-forest",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "glacierfall-cross",
+      "name": "Glacierfall Cross",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 29.49,
+        "y": 243.46
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "glacierfall-valley",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "meltwater-channel",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "glacierfall-pass",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "morganas-rest",
+          "toPort": "NE2"
+        }
+      ]
+    },
+    {
+      "id": "glacierfall-fissure",
+      "name": "Glacierfall Fissure",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 16.97,
+        "y": 203.51
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "eldersleep",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deadpine-forest",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "glacierfall-pass",
+      "name": "Glacierfall Pass",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 2.83,
+        "y": 240.56
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "glacierfall-cross",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-fen",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "glacierfall-passage",
+      "name": "Glacierfall Passage",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 48.22,
+        "y": 251.45
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "glacierfall-valley",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deepwood-gorge",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "glacierfall-valley",
+      "name": "Glacierfall Valley",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 38.96,
+        "y": 230.73
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deepwood-copse",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "glacierfall-cross",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "glacierfall-passage",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "glowmire-grotto",
+      "name": "Glowmire Grotto",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "westweald-thicket",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "twinchannel-narrows",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "gravemound-brim",
+      "name": "Gravemound Brim",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -211.71,
+        "y": 62.79
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "gravemound-slope",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "gravemound-cliffs",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "gravemound-cliffs",
+      "name": "Gravemound Cliffs",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -204.5,
+        "y": 50.91
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "gravemound-hills",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "gravemound-brim",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "gravemound-hills",
+      "name": "Gravemound Hills",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -182.29,
+        "y": 70.15
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "gravemound-slope",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "longfen-arms",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "gravemound-cliffs",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "gravemound-knoll",
+      "name": "Gravemound Knoll",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -160.37,
+        "y": 67.32
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deathreach-priory",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "greenhollow-copse",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "longfen-marsh",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "gravemound-slope",
+      "name": "Gravemound Slope",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -192.47,
+        "y": 81.46
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "greenhollow-copse",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "lurkers-hollow",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "gravemound-hills",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "gravemound-brim",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "greenhollow-copse",
+      "name": "Greenhollow Copse",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -175.86,
+        "y": 95.67
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "greenhollow-vale",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "gravemound-knoll",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "gravemound-slope",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "windgrass-terrace",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "greenhollow-vale",
+      "name": "Greenhollow Vale",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -162.14,
+        "y": 102.18
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "highstone-grassland",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "highstone-loch",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "greenhollow-copse",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "greenshore-bay",
+      "name": "Greenshore Bay",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 180.52,
+        "y": 79.55
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "greenshore-peninsula",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "flatrock-cliffs",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "greenshore-peninsula",
+      "name": "Greenshore Peninsula",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 173.74,
+        "y": 67.67
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "greenshore-bay",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "slakesands-mesa",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "flatrock-plateau",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "highland-cross",
+      "name": "Highland Cross",
+      "type": "city",
+      "tier": 2,
+      "mapPosition": {
+        "x": -96.41,
+        "y": -302.44
+      },
+      "ports": []
+    },
+    {
+      "id": "highstone-grassland",
+      "name": "Highstone Grassland",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -166.1,
+        "y": 129.61
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "greenhollow-vale",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "windgrass-fields",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "highstone-loch",
+      "name": "Highstone Loch",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -140.93,
+        "y": 114.48
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "highstone-plains",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "greenhollow-vale",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "battlebrae-flatland",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "parchsand-cliffs",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "highstone-meadow",
+      "name": "Highstone Meadow",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -128.98,
+        "y": 156.55
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "razorrock-verge",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "highstone-plains",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "highstone-plateau",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "highstone-mound",
+      "name": "Highstone Mound",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -163.84,
+        "y": 180.67
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "highstone-plateau",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "twinchannel-narrows",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "highstone-plains",
+      "name": "Highstone Plains",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -135.69,
+        "y": 141.92
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "highstone-loch",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "highstone-meadow",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "highstone-plateau",
+      "name": "Highstone Plateau",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -159.81,
+        "y": 161.5
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "highstone-meadow",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "bleachskull-desert",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "highstone-mound",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "hightree-borderlands",
+      "name": "Hightree Borderlands",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 57.56,
+        "y": 47.8
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "firesink-caldera",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thunderrock-rapids",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-hillock",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "hightree-cliffs",
+      "name": "Hightree Cliffs",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 117.1,
+        "y": -28
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-enclave",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitecliff-expanse",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-glade",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "hightree-dale",
+      "name": "Hightree Dale",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 124.1,
+        "y": 19.3
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-isle",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "lymhurst-portal",
+          "toPort": "SE2"
+        }
+      ]
+    },
+    {
+      "id": "hightree-enclave",
+      "name": "Hightree Enclave",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 91.08,
+        "y": -15.7
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "lymhurst-portal",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "mudrock-burrow",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-levee",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-cliffs",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "hightree-glade",
+      "name": "Hightree Glade",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 113.28,
+        "y": -7.21
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-isle",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "lymhurst-portal",
+          "toPort": "SE3"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-cliffs",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "hightree-hillock",
+      "name": "Hightree Hillock",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 69.03,
+        "y": 40.71
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-borderlands",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-strand",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "hightree-isle",
+      "name": "Hightree Isle",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 138,
+        "y": 13.35
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-glade",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "glacierbreak-summit",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "watchwood-grove",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-dale",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "hightree-lake",
+      "name": "Hightree Lake",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 87.33,
+        "y": 56.78
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "lymhurst-portal",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-pass",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thunderrock-rapids",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "hightree-levee",
+      "name": "Hightree Levee",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 80.54,
+        "y": 7.85
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "thirstwater-steppe",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thirstwater-waste",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-enclave",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-strand",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "hightree-pass",
+      "name": "Hightree Pass",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 109.96,
+        "y": 62.86
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-lake",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "munten-tundra",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-steep",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "hightree-steep",
+      "name": "Hightree Steep",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 116.67,
+        "y": 50.06
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "lymhurst-portal",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-pass",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "hightree-strand",
+      "name": "Hightree Strand",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 88.6,
+        "y": 22.27
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "lymhurst-portal",
+          "toPort": "SW2"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-levee",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-hillock",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "iceburn-cliffs",
+      "name": "Iceburn Cliffs",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 78.35,
+        "y": 205.91
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deepwood-gorge",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "iceburn-peaks",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "runnelvein-bog",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "iceburn-firth",
+      "name": "Iceburn Firth",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 35,
+        "y": 178.69
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "darkbough-snag",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "iceburn-tundra",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "thunderrock-draw",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "iceburn-peaks",
+      "name": "Iceburn Peaks",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 66.26,
+        "y": 189.01
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "iceburn-cliffs",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deepwood-copse",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "iceburn-tundra",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "runnelvein-slough",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "iceburn-tundra",
+      "name": "Iceburn Tundra",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 52.54,
+        "y": 181.23
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "iceburn-peaks",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "iceburn-firth",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "longfen-arms",
+      "name": "Longfen Arms",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -150.54,
+        "y": 32.31
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "gravemound-hills",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "redtree-enclave",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "farshore-drylands",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "longfen-marsh",
+      "name": "Longfen Marsh",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -134.42,
+        "y": 50.42
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "farshore-esker",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "gravemound-knoll",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "longfen-veins",
+      "name": "Longfen Veins",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -123.6,
+        "y": 62.08
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "deathreach-priory",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deathcreep-adit",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitewall-pass",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "lurkers-hollow",
+      "name": "Lurkers' Hollow",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "gravemound-slope",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "mudfoot-sump",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "lymhurst",
+      "name": "Lymhurst",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": 127.54,
+        "y": -313.69
+      },
+      "ports": [
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "lymhurst-portal",
+          "toPort": "SE4"
+        }
+      ]
+    },
+    {
+      "id": "lymhurst-portal",
+      "name": "Lymhurst Portal",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": 111.09,
+        "y": 29.77
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-enclave",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "watchwood-grove",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE2",
+          "direction": "SE",
+          "to": "hightree-dale",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-steep",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "hightree-lake",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW2",
+          "direction": "SW",
+          "to": "hightree-strand",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "watchwood-precipice",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE3",
+          "direction": "SE",
+          "to": "hightree-glade",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE4",
+          "direction": "SE",
+          "to": "lymhurst",
+          "toPort": "NW2"
+        }
+      ]
+    },
+    {
+      "id": "martlock",
+      "name": "Martlock",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -58.59,
+        "y": -280.33
+      },
+      "ports": [
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "martlock-portal",
+          "toPort": "NW4"
+        }
+      ]
+    },
+    {
+      "id": "martlock-portal",
+      "name": "Martlock Portal",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -220.31,
+        "y": 132.55
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "windgrass-rill",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "windgrass-precipice",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE2",
+          "direction": "SE",
+          "to": "windgrass-rill",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "windgrass-border",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "mudfoot-sump",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "windgrass-gully",
+          "toPort": "SE"
+        },
+        {
+          "port": "NW3",
+          "direction": "NW",
+          "to": "windgrass-gully",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW4",
+          "direction": "NW",
+          "to": "martlock",
+          "toPort": "NW2"
+        }
+      ]
+    },
+    {
+      "id": "meltwater-bog",
+      "name": "Meltwater Bog",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 45.82,
+        "y": 282.28
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "meltwater-channel",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-gorge",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "crosscut-skip",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "meltwater-channel",
+      "name": "Meltwater Channel",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 36.91,
+        "y": 271.25
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "glacierfall-cross",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-gap",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "meltwater-bog",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "meltwater-delta",
+      "name": "Meltwater Delta",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 63.92,
+        "y": 301.79
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitebank-descent",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "meltwater-sump",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "meltwater-sump",
+      "name": "Meltwater Sump",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 48.65,
+        "y": 314.66
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "meltwater-delta",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-plain",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-passage",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "merlyns-rest",
+      "name": "Merlyn's Rest",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": 119.23,
+        "y": 95.41
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "giantweald-glade",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "giantweald-copse",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "giantweald-woods",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "middlemurk-path",
+      "name": "Middlemurk Path",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "farshore-lagoon",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "farshore-drylands",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "morganas-rest",
+      "name": "Morgana's Rest",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -4.73,
+        "y": 261.14
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-gap",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drownfield-fen",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW2",
+          "direction": "NW",
+          "to": "drownfield-slough",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "glacierfall-cross",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "mountain-cross",
+      "name": "Mountain Cross",
+      "type": "city",
+      "tier": 2,
+      "mapPosition": {
+        "x": 101.07,
+        "y": -179.07
+      },
+      "ports": []
+    },
+    {
+      "id": "mudfoot-mounds",
+      "name": "Mudfoot Mounds",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -223.3,
+        "y": 82.02
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "mudfoot-sump",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "mudfoot-sump",
+      "name": "Mudfoot Sump",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -207.39,
+        "y": 90.58
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "mudfoot-mounds",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "windgrass-terrace",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "martlock-portal",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "lurkers-hollow",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "mudrock-burrow",
+      "name": "Mudrock Burrow",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitecliff-peak",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-enclave",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "munten-fell",
+      "name": "Munten Fell",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 147.57,
+        "y": 75.59
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "watchwood-lakeside",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "munten-rise",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "giantweald-dale",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "munten-rise",
+      "name": "Munten Rise",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 139.8,
+        "y": 64.13
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "watchwood-precipice",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "munten-tundra",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "munten-fell",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "munten-tundra",
+      "name": "Munten Tundra",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 120.42,
+        "y": 76.16
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "giantweald-dale",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-pass",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "munten-rise",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "murdergulch-cross",
+      "name": "Murdergulch Cross",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -78.63,
+        "y": 243.95
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "murdergulch-divide",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "murdergulch-trail",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "willowshade-sink",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitepeak-ascent",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "murdergulch-divide",
+      "name": "Murdergulch Divide",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -63.57,
+        "y": 238.93
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "murdergulch-gap",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deathwisp-sink",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drownfield-rut",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "murdergulch-cross",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "murdergulch-gap",
+      "name": "Murdergulch Gap",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -52.89,
+        "y": 219.91
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "murdergulch-ravine",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "black-monastery",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "murdergulch-divide",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "murdergulch-ravine",
+      "name": "Murdergulch Ravine",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -47.94,
+        "y": 197.57
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "murdergulch-gap",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deathwisp-bog",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "murdergulch-trail",
+      "name": "Murdergulch Trail",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -87.96,
+        "y": 230.94
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "bedrock-passage",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "murdergulch-cross",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "driftwood-vale",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "nightbloom-track",
+      "name": "Nightbloom Track",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "daemonium-keep",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thirstwater-gully",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "northstrand-beach",
+      "name": "Northstrand Beach",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -7.78,
+        "y": 398.1
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "northstrand-dunes",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "timbertop-dale",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "northstrand-dunes",
+      "name": "Northstrand Dunes",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -18.24,
+        "y": 408
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "northstrand-beach",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "timbertop-wood",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "parchsand-cliffs",
+      "name": "Parchsand Cliffs",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -112.71,
+        "y": 126.15
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "highstone-loch",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "razorrock-edge",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "parchsand-drought",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "parchsand-drought",
+      "name": "Parchsand Drought",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -108.69,
+        "y": 109.55
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "battlebrae-plain",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "razorrock-valley",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "parchsand-cliffs",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-chasm",
+      "name": "Razorrock Chasm",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -78.63,
+        "y": 136.75
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "razorrock-valley",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "razorrock-passage",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deathwisp-bog",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-edge",
+      "name": "Razorrock Edge",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -96.67,
+        "y": 151.75
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "razorrock-valley",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "razorrock-verge",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "parchsand-cliffs",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-gulch",
+      "name": "Razorrock Gulch",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -59.82,
+        "y": 113.7
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "razorrock-ravine",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunfang-cliffs",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-passage",
+      "name": "Razorrock Passage",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -88.05,
+        "y": 176.88
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "driftwood-hollow",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "razorrock-chasm",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-ravine",
+      "name": "Razorrock Ravine",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -50.2,
+        "y": 103.94
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "razorrock-gulch",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunfang-wasteland",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunfang-dawn",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-valley",
+      "name": "Razorrock Valley",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -89.02,
+        "y": 123.25
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "parchsand-drought",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "razorrock-chasm",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "razorrock-edge",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "razorrock-verge",
+      "name": "Razorrock Verge",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -113.21,
+        "y": 162.42
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "avalanche-incline",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "razorrock-edge",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "highstone-meadow",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "redtree-enclave",
+      "name": "Redtree Enclave",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -161.36,
+        "y": 22.77
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "longfen-arms",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "rivercopse-crossing",
+      "name": "Rivercopse Crossing",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 25.49,
+        "y": 87.11
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "rivercopse-fount",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "rivercopse-path",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "rivercopse-curve",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "wailing-bulwark",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "rivercopse-curve",
+      "name": "Rivercopse Curve",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 36.56,
+        "y": 75.02
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thunderrock-upland",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "rivercopse-crossing",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunkenbough-woods",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "rivercopse-fount",
+      "name": "Rivercopse Fount",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 39.39,
+        "y": 103.45
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thunderrock-ascent",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "thunderrock-upland",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "flammog-fork",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "rivercopse-crossing",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "rivercopse-path",
+      "name": "Rivercopse Path",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 7.85,
+        "y": 76.58
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "rivercopse-crossing",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunfang-ravine",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "runnelvein-bog",
+      "name": "Runnelvein Bog",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 86.41,
+        "y": 176.07
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "floatshoal-floe",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "smugglers-rut",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "iceburn-cliffs",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "runnelvein-slough",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "runnelvein-sink",
+      "name": "Runnelvein Sink",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 67.39,
+        "y": 151.25
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "flammog-valley",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "runnelvein-slough",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "runnelvein-slough",
+      "name": "Runnelvein Slough",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 71.7,
+        "y": 166.17
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "runnelvein-bog",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "runnelvein-sink",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "flammog-desolation",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "iceburn-peaks",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "sandmount-ascent",
+      "name": "Sandmount Ascent",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -222.1,
+        "y": 216.45
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "braemore-upland",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sandmount-strand",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "sandmount-desert",
+      "name": "Sandmount Desert",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -257.74,
+        "y": 175.43
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "windgrass-coast",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sandmount-esker",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "sandmount-esker",
+      "name": "Sandmount Esker",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -248.65,
+        "y": 188
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "frostbite-chasm",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandmount-desert",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sandmount-strand",
+      "name": "Sandmount Strand",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -209.58,
+        "y": 211.7
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "braemore-lowland",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandmount-ascent",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "westweald-shore",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-coast",
+      "name": "Sandrift Coast",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -50.47,
+        "y": -45.96
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "bridgewatch-portal",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sandrift-expanse",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "bridgewatch-portal",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sandrift-fringe",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-dunes",
+      "name": "Sandrift Dunes",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -73.74,
+        "y": -7.01
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sandrift-steppe",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-prairie",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "dryvein-plain",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-expanse",
+      "name": "Sandrift Expanse",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -40.65,
+        "y": -35.7
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "southgrove-copse",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "frostspring-passage",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandrift-steppe",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-coast",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-fringe",
+      "name": "Sandrift Fringe",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -34.61,
+        "y": -58.73
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandrift-coast",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "craglight-cavern",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-shore",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-prairie",
+      "name": "Sandrift Prairie",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -97.86,
+        "y": -20.79
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "stonelake-fields",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "bridgewatch-portal",
+          "toPort": "NW2"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "bridgewatch-portal",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sandrift-dunes",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-shore",
+      "name": "Sandrift Shore",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -56.21,
+        "y": -58.34
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "bridgewatch-portal",
+          "toPort": "SW2"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sandrift-fringe",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "sandrift-steppe",
+      "name": "Sandrift Steppe",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -58.27,
+        "y": -16.4
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandrift-dunes",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "bridgewatch-portal",
+          "toPort": "NE2"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sandrift-expanse",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "springsump-melt",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "scuttlesink-marsh",
+      "name": "Scuttlesink Marsh",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 6.86,
+        "y": 362.25
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "brambleshore-hinterlands",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "scuttlesink-pools",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitecap-cave",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "scuttlesink-mouth",
+      "name": "Scuttlesink Mouth",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 7.5,
+        "y": 384.38
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "brambleshore-hinterlands",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "scuttlesink-pools",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "scuttlesink-pools",
+      "name": "Scuttlesink Pools",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -0.92,
+        "y": 373.14
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "scuttlesink-marsh",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "scuttlesink-mouth",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timbertop-dale",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "shale-underway",
+      "name": "Shale Underway",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drybasin-oasis",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "skylake-hinterlands",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "shaleheath-hills",
+      "name": "Shaleheath Hills",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -14.7,
+        "y": 352.56
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timbertop-escarp",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "shaleheath-steep",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-shores",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "shaleheath-steep",
+      "name": "Shaleheath Steep",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -6.65,
+        "y": 340.27
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "everwinter-expanse",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "shaleheath-hills",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitecap-cave",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "skullmarsh-lower",
+      "name": "Skullmarsh Lower",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 165.89,
+        "y": 3.25
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "glacierbreak-summit",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "skullmarsh-upper",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "watchwood-grove",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "skullmarsh-upper",
+      "name": "Skullmarsh Upper",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 175.57,
+        "y": 18.46
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "skullmarsh-lower",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "watchwood-bluffs",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "skylake-bridge",
+      "name": "Skylake Bridge",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 145.31,
+        "y": 163.84
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "timberslope-bridge",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "floatshoal-fissure",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "skylake-hinterlands",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "skylake-hinterlands",
+      "name": "Skylake Hinterlands",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 137.96,
+        "y": 150.97
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "floatshoal-floe",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "skylake-bridge",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "shale-underway",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "skysand-plateau",
+      "name": "Skysand Plateau",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 6.08,
+        "y": 303.21
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-plain",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-incline",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-gorge",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "skysand-ridge",
+      "name": "Skysand Ridge",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -3.61,
+        "y": 287.01
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-gap",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "drownfield-slough",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "slakesands-canyon",
+      "name": "Slakesands Canyon",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 180.71,
+        "y": 47.83
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "slakesands-mesa",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "slakesands-mesa",
+      "name": "Slakesands Mesa",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 170.23,
+        "y": 48.99
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "slakesands-canyon",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "greenshore-peninsula",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "watchwood-bluffs",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "smugglers-rut",
+      "name": "Smuggler's Rut",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "runnelvein-bog",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "deepwood-pines",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "southgrove-copse",
+      "name": "Southgrove Copse",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -16.97,
+        "y": -58.83
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "southgrove-thicket",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "craglight-cavern",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "southgrove-escarp",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandrift-expanse",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "southgrove-escarp",
+      "name": "Southgrove Escarp",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -9.83,
+        "y": -76.01
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunstrand-quicksands",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "southgrove-copse",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "southgrove-thicket",
+      "name": "Southgrove Thicket",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -8.27,
+        "y": -49.57
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunstrand-quicksands",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "southgrove-copse",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunstrand-shoal",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "springsump-basin",
+      "name": "Springsump Basin",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -22.27,
+        "y": 4.45
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "springsump-melt",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "springsump-wetland",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "springsump-melt",
+      "name": "Springsump Melt",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -32.1,
+        "y": -3.11
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "frostspring-passage",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "springsump-basin",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-plain",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sandrift-steppe",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "springsump-wetland",
+      "name": "Springsump Wetland",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -38.43,
+        "y": 11.73
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-cross",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "dryvein-riverbed",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "springsump-basin",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "stalagmite-adit",
+      "name": "Stalagmite Adit",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "drytop-pillars",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "everwinter-shores",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "steppe-cross",
+      "name": "Steppe Cross",
+      "type": "city",
+      "tier": 2,
+      "mapPosition": {
+        "x": 0.11,
+        "y": -403.6
+      },
+      "ports": []
+    },
+    {
+      "id": "stonelake-fields",
+      "name": "Stonelake Fields",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -103.17,
+        "y": -3.75
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "stonelake-hillock",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "farshore-bay",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "farshore-lagoon",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sandrift-prairie",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "stonelake-hillock",
+      "name": "Stonelake Hillock",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -93.69,
+        "y": 11.1
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "stonelake-fields",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "dryvein-oasis",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "farshore-heath",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "stonemouth-bay",
+      "name": "Stonemouth Bay",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 32.05,
+        "y": -6.17
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "stonemouth-northbluff",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunstrand-shoal",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "stonemouth-northbluff",
+      "name": "Stonemouth Northbluff",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 49.99,
+        "y": -24.82
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitecliff-peak",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "stonemouth-bay",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "stonemouth-southbluff",
+      "name": "Stonemouth Southbluff",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 34.52,
+        "y": -41.21
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunstrand-delta",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunstrand-quicksands",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "stoneslip-passage",
+      "name": "Stoneslip Passage",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-peak",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everwinter-plain",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "sunfang-approach",
+      "name": "Sunfang Approach",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -37.05,
+        "y": 75.24
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunfang-ravine",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "dryvein-end",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunfang-dawn",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "sunfang-cliffs",
+      "name": "Sunfang Cliffs",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -52.68,
+        "y": 132.87
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunfang-wasteland",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "razorrock-gulch",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sunfang-dawn",
+      "name": "Sunfang Dawn",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -61.58,
+        "y": 87.18
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "razorrock-ravine",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunfang-approach",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "battlebrae-grassland",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sunfang-ravine",
+      "name": "Sunfang Ravine",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -16.83,
+        "y": 91.36
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "rivercopse-path",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunfang-approach",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sunfang-wasteland",
+      "name": "Sunfang Wasteland",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -29.49,
+        "y": 116.46
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "wailing-bulwark",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunfang-cliffs",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "razorrock-ravine",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sunkenbough-spring",
+      "name": "Sunkenbough Spring",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 21.73,
+        "y": 36.54
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "dryvein-end",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunkenbough-woods",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "firesink-trench",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "sunkenbough-woods",
+      "name": "Sunkenbough Woods",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 32.71,
+        "y": 55.59
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "firesink-caldera",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunkenbough-spring",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "rivercopse-curve",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "sunstrand-delta",
+      "name": "Sunstrand Delta",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 33.87,
+        "y": -64.6
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "stonemouth-southbluff",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "sunstrand-dunes",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "sunstrand-dunes",
+      "name": "Sunstrand Dunes",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 25.48,
+        "y": -77.12
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunstrand-quicksands",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sunstrand-delta",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "sunstrand-quicksands",
+      "name": "Sunstrand Quicksands",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 4.95,
+        "y": -60.25
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "stonemouth-southbluff",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "southgrove-thicket",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "southgrove-escarp",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "sunstrand-dunes",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "sunstrand-shoal",
+      "name": "Sunstrand Shoal",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 6.13,
+        "y": -38.28
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "southgrove-thicket",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostspring-volcano",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "stonemouth-bay",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "swamp-cross",
+      "name": "Swamp Cross",
+      "type": "city",
+      "tier": 2,
+      "mapPosition": {
+        "x": -52.44,
+        "y": -160.51
+      },
+      "ports": []
+    },
+    {
+      "id": "swiftsands-basin",
+      "name": "Swiftsands Basin",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 194.31,
+        "y": 181.02
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "swiftsands-plain",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timberslope-dell",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "swiftsands-chaparral",
+      "name": "Swiftsands Chaparral",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 192.55,
+        "y": 166.24
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "wetgrave-swale",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "swiftsands-plain",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timberslope-grove",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "swiftsands-plain",
+      "name": "Swiftsands Plain",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 205.06,
+        "y": 171.97
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "swiftsands-basin",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "swiftsands-chaparral",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "thetford",
+      "name": "Thetford",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -19.82,
+        "y": -187.29
+      },
+      "ports": [
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "thetford-portal",
+          "toPort": "SE4"
+        }
+      ]
+    },
+    {
+      "id": "thetford-portal",
+      "name": "Thetford Portal",
+      "type": "city",
+      "tier": 1,
+      "mapPosition": {
+        "x": -125.29,
+        "y": 337.02
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "widemoor-pool",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-estuary",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "widemoor-pool",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE2",
+          "direction": "SE",
+          "to": "willowshade-wetlands",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE2",
+          "direction": "NE",
+          "to": "widemoor-shore",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-delta",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE3",
+          "direction": "SE",
+          "to": "widemoor-estuary",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE4",
+          "direction": "SE",
+          "to": "thetford",
+          "toPort": "NE2"
+        }
+      ]
+    },
+    {
+      "id": "thirstwater-gully",
+      "name": "Thirstwater Gully",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 52.54,
+        "y": 6.01
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "nightbloom-track",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "thirstwater-steppe",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thirstwater-waste",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "thirstwater-steppe",
+      "name": "Thirstwater Steppe",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 62.37,
+        "y": -7.21
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thirstwater-gully",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-levee",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitecliff-peak",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "thirstwater-waste",
+      "name": "Thirstwater Waste",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 64.13,
+        "y": 15.63
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "firesink-caldera",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-levee",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "thirstwater-gully",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "thunderrock-ascent",
+      "name": "Thunderrock Ascent",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 31.25,
+        "y": 130.11
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thunderrock-draw",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "rivercopse-fount",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "darkbough-snag",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "thunderrock-draw",
+      "name": "Thunderrock Draw",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 58.34,
+        "y": 131.45
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "thunderrock-ascent",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "iceburn-firth",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "flammog-fork",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "thunderrock-rapids",
+      "name": "Thunderrock Rapids",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 62.97,
+        "y": 77.17
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everglow-deep",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-borderlands",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "hightree-lake",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "thunderrock-upland",
+      "name": "Thunderrock Upland",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 63.07,
+        "y": 95.46
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "rivercopse-curve",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "everglow-deep",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "rivercopse-fount",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "giantweald-roots",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "timberscar-copse",
+      "name": "Timberscar Copse",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -74.88,
+        "y": 330.45
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-end",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drownfield-wetland",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drytop-pillars",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "timberscar-dell",
+      "name": "Timberscar Dell",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -75.31,
+        "y": 302.29
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-end",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drownfield-wetland",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "willowshade-pools",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "timberslope-bridge",
+      "name": "Timberslope Bridge",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 162.02,
+        "y": 173.88
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "timberslope-grove",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "skylake-bridge",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "wetgrave-swale",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "timberslope-dell",
+      "name": "Timberslope Dell",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 166.24,
+        "y": 202.16
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "darkseep-core",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "floatshoal-bight",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "timberslope-grove",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "swiftsands-basin",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "timberslope-grove",
+      "name": "Timberslope Grove",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 170.2,
+        "y": 189.86
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "swiftsands-chaparral",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timberslope-dell",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "timberslope-bridge",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "timbertop-dale",
+      "name": "Timbertop Dale",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -20.01,
+        "y": 381.34
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "scuttlesink-pools",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timbertop-wood",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "northstrand-beach",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "timbertop-escarp",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "timbertop-escarp",
+      "name": "Timbertop Escarp",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -29.63,
+        "y": 372.43
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "shaleheath-hills",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "timbertop-dale",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "timbertop-wood",
+      "name": "Timbertop Wood",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -31.61,
+        "y": 393.36
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "northstrand-dunes",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "timbertop-dale",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "twinchannel-narrows",
+      "name": "Twinchannel Narrows",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -191.62,
+        "y": 192.65
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "glowmire-grotto",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "highstone-mound",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "unhallowed-cloister",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "unhallowed-cloister",
+      "name": "Unhallowed Cloister",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -178.57,
+        "y": 202.49
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "twinchannel-narrows",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "braemore-lowland",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "avalanche-ravine",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "willowshade-icemarsh",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "wailing-bulwark",
+      "name": "Wailing Bulwark",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": 2.62,
+        "y": 104.16
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sunfang-wasteland",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "rivercopse-crossing",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "watchwood-bluffs",
+      "name": "Watchwood Bluffs",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 161.22,
+        "y": 34.08
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "watchwood-grove",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "watchwood-precipice",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "skullmarsh-upper",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "slakesands-mesa",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "watchwood-grove",
+      "name": "Watchwood Grove",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 151.6,
+        "y": 26.3
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "hightree-isle",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "lymhurst-portal",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "watchwood-bluffs",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "skullmarsh-lower",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "watchwood-lakeside",
+      "name": "Watchwood Lakeside",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 155.28,
+        "y": 56.57
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "watchwood-precipice",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "munten-fell",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "watchwood-precipice",
+      "name": "Watchwood Precipice",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 144.67,
+        "y": 49.64
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "munten-rise",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "watchwood-lakeside",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "watchwood-bluffs",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "lymhurst-portal",
+          "toPort": "NE2"
+        }
+      ]
+    },
+    {
+      "id": "westweald-shore",
+      "name": "Westweald Shore",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -219.11,
+        "y": 193.77
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "westweald-thicket",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "sandmount-strand",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "frostbite-chasm",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "westweald-thicket",
+      "name": "Westweald Thicket",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -205.56,
+        "y": 176.1
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "glowmire-grotto",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "frostbite-mountain",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "westweald-shore",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "wetgrave-bog",
+      "name": "Wetgrave Bog",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 189.36,
+        "y": 144.96
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "wetgrave-swale",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "wetgrave-marsh",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "wetgrave-marsh",
+      "name": "Wetgrave Marsh",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 175.49,
+        "y": 130.86
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "drybasin-riverbed",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "flatrock-cliffs",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "wetgrave-bog",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "wetgrave-swale",
+      "name": "Wetgrave Swale",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 178.83,
+        "y": 159.45
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "wetgrave-bog",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "swiftsands-chaparral",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "timberslope-bridge",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "whitebank-cross",
+      "name": "Whitebank Cross",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 67.46,
+        "y": 251.59
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "deepwood-dell",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deepwood-gorge",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitebank-wall",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "fort-sterling-portal",
+          "toPort": "SW2"
+        }
+      ]
+    },
+    {
+      "id": "whitebank-descent",
+      "name": "Whitebank Descent",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 78.14,
+        "y": 297.76
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "meltwater-delta",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitebank-ridge",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "fort-sterling-portal",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "whitebank-ridge",
+      "name": "Whitebank Ridge",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 69.86,
+        "y": 282.56
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitebank-stream",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "everwinter-crossing",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitebank-descent",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "whitebank-shore",
+      "name": "Whitebank Shore",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 101.75,
+        "y": 256.89
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "frostpeak-ascent",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "fort-sterling-portal",
+          "toPort": "SE2"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deepwood-dell",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "fort-sterling-portal",
+          "toPort": "SE3"
+        }
+      ]
+    },
+    {
+      "id": "whitebank-stream",
+      "name": "Whitebank Stream",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": 76.65,
+        "y": 272.8
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "fort-sterling-portal",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitebank-ridge",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "fort-sterling-portal",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "whitebank-wall",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "whitebank-wall",
+      "name": "Whitebank Wall",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 57.35,
+        "y": 265.09
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "crosscut-skip",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitebank-stream",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitebank-cross",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "whitecap-cave",
+      "name": "Whitecap Cave",
+      "type": "passage",
+      "tier": 6,
+      "mapPosition": null,
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "shaleheath-steep",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "scuttlesink-marsh",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "whitecliff-expanse",
+      "name": "Whitecliff Expanse",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": 88.03,
+        "y": -35.57
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "hightree-cliffs",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitecliff-peak",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "whitecliff-peak",
+      "name": "Whitecliff Peak",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": 74.53,
+        "y": -26.73
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thirstwater-steppe",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitecliff-expanse",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "mudrock-burrow",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "stonemouth-northbluff",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "whitepeak-ascent",
+      "name": "Whitepeak Ascent",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -62.73,
+        "y": 259.75
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitepeak-spring",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "murdergulch-cross",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drownfield-quag",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "whitepeak-spring",
+      "name": "Whitepeak Spring",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -70.71,
+        "y": 278.03
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitepeak-ascent",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "willowshade-sink",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "willowshade-pools",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "whitepeak-tundra",
+      "name": "Whitepeak Tundra",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -49.02,
+        "y": 277.45
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drownfield-mire",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "drownfield-quag",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "whitewall-pass",
+      "name": "Whitewall Pass",
+      "type": "black",
+      "tier": 8,
+      "mapPosition": {
+        "x": -100.8,
+        "y": 51.3
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "longfen-veins",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "farshore-esker",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "arthurs-rest",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitewall-ridge",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "whitewall-ridge",
+      "name": "Whitewall Ridge",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -94.61,
+        "y": 35.5
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "battlebrae-peaks",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "whitewall-pass",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-delta",
+      "name": "Widemoor Delta",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -154.71,
+        "y": 330.08
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thetford-portal",
+          "toPort": "NW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "widemoor-flats",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-end",
+      "name": "Widemoor End",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -90.75,
+        "y": 325.24
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "timberscar-dell",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-pool",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "timberscar-copse",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-estuary",
+      "name": "Widemoor Estuary",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -135.99,
+        "y": 322.36
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thetford-portal",
+          "toPort": "SW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "thetford-portal",
+          "toPort": "SE3"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "widemoor-woods",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-flats",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-fen",
+      "name": "Widemoor Fen",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -161.72,
+        "y": 278.95
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "deathcap-channel",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "frostseep-ravine",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "widemoor-flats",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-flats",
+      "name": "Widemoor Flats",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -153.87,
+        "y": 291.05
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-fen",
+          "toPort": "NE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "widemoor-estuary",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-delta",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-hills",
+      "name": "Widemoor Hills",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -91.15,
+        "y": 354.37
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-shore",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "drytop-riverbed",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-pool",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-pool",
+      "name": "Widemoor Pool",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -96.03,
+        "y": 341.96
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "thetford-portal",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "widemoor-hills",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "widemoor-end",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thetford-portal",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-shore",
+      "name": "Widemoor Shore",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -108.05,
+        "y": 365.23
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "thetford-portal",
+          "toPort": "NE2"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "widemoor-hills",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "widemoor-woods",
+      "name": "Widemoor Woods",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -125.51,
+        "y": 300.17
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-estuary",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "willowshade-hills",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "willowshade-wetlands",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-hills",
+      "name": "Willowshade Hills",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -109.11,
+        "y": 276.41
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "widemoor-woods",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "willowshade-mire",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-icemarsh",
+      "name": "Willowshade Icemarsh",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -135.91,
+        "y": 244.23
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostseep-ravine",
+          "toPort": "SE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "driftwood-glen",
+          "toPort": "NW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "unhallowed-cloister",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-lake",
+      "name": "Willowshade Lake",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -106.7,
+        "y": 243.88
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "driftwood-glen",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "willowshade-mire",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "willowshade-sink",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-mire",
+      "name": "Willowshade Mire",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -123.53,
+        "y": 252.08
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "willowshade-hills",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "willowshade-lake",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostseep-crevasse",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-pools",
+      "name": "Willowshade Pools",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -89.73,
+        "y": 295.43
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "whitepeak-spring",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "timberscar-dell",
+          "toPort": "SW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "willowshade-wetlands",
+          "toPort": "SE"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-sink",
+      "name": "Willowshade Sink",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -92.42,
+        "y": 262.41
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "whitepeak-spring",
+          "toPort": "SW"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "willowshade-lake",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "murdergulch-cross",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "willowshade-wetlands",
+      "name": "Willowshade Wetlands",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -108.54,
+        "y": 304.27
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "widemoor-woods",
+          "toPort": "NE"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "thetford-portal",
+          "toPort": "SE2"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "willowshade-pools",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-border",
+      "name": "Windgrass Border",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -205.63,
+        "y": 150.47
+      },
+      "ports": [
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "martlock-portal",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "windgrass-fields",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "frostbite-mountain",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "bleachskull-steppe",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-coast",
+      "name": "Windgrass Coast",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -248.12,
+        "y": 159.31
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "windgrass-gully",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "sandmount-desert",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "windgrass-precipice",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-fields",
+      "name": "Windgrass Fields",
+      "type": "black",
+      "tier": 6,
+      "mapPosition": {
+        "x": -189.22,
+        "y": 138.59
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "bleachskull-desert",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "highstone-grassland",
+          "toPort": "NW"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "windgrass-border",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "windgrass-rill",
+          "toPort": "NE"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-gully",
+      "name": "Windgrass Gully",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -237.23,
+        "y": 152.1
+      },
+      "ports": [
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "frostbite-mountain",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "martlock-portal",
+          "toPort": "NW2"
+        },
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "windgrass-coast",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "martlock-portal",
+          "toPort": "NW3"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-precipice",
+      "name": "Windgrass Precipice",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -251.59,
+        "y": 146.37
+      },
+      "ports": [
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "martlock-portal",
+          "toPort": "NW"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "windgrass-coast",
+          "toPort": "SW"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-rill",
+      "name": "Windgrass Rill",
+      "type": "black",
+      "tier": 5,
+      "mapPosition": {
+        "x": -201.95,
+        "y": 127.28
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "martlock-portal",
+          "toPort": "SE2"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "martlock-portal",
+          "toPort": "SE"
+        },
+        {
+          "port": "NE",
+          "direction": "NE",
+          "to": "windgrass-fields",
+          "toPort": "SW"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "windgrass-terrace",
+          "toPort": "NW"
+        }
+      ]
+    },
+    {
+      "id": "windgrass-terrace",
+      "name": "Windgrass Terrace",
+      "type": "black",
+      "tier": 7,
+      "mapPosition": {
+        "x": -189.36,
+        "y": 110.31
+      },
+      "ports": [
+        {
+          "port": "NW",
+          "direction": "NW",
+          "to": "windgrass-rill",
+          "toPort": "SE"
+        },
+        {
+          "port": "SW",
+          "direction": "SW",
+          "to": "mudfoot-sump",
+          "toPort": "NE"
+        },
+        {
+          "port": "SE",
+          "direction": "SE",
+          "to": "greenhollow-copse",
+          "toPort": "NW"
+        }
+      ]
+    }
+  ]
+}

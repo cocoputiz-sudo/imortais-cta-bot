@@ -5,6 +5,7 @@ const {
   REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
 } = require("discord.js");
 const db = require("./db");
+const navigation = require("./navigation");
 const { PARTIES, WEAPONS } = require("./comps");
 
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
@@ -47,6 +48,27 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_finish").setDescription("Encerra um CTA (qualquer staff, qualquer caller)")
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
+      .addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Define um objetivo de navegação para o CTA")
+      .addStringOption(ctaOpt)
+      .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
+      .addStringOption((o) => o.setName("tipo").setDescription("Tipo do objetivo").setRequired(true).addChoices(
+        { name: "Vortex", value: "VORTEX" },
+        { name: "Território", value: "TERRITÓRIO" },
+        { name: "Castelo", value: "CASTELO" },
+        { name: "Outpost", value: "OUTPOST" },
+        { name: "Outro", value: "OBJETIVO" }
+      ))
+      .addStringOption((o) => o.setName("raridade").setDescription("Raridade/cor, se aplicável").addChoices(
+        { name: "Roxo", value: "ROXO" },
+        { name: "Azul", value: "AZUL" },
+        { name: "Amarelo", value: "AMARELO" },
+        { name: "Verde", value: "VERDE" },
+        { name: "Vermelho", value: "VERMELHO" }
+      ))
+      .addIntegerOption((o) => o.setName("minutos").setDescription("Tempo restante do objetivo").setMinValue(0).setMaxValue(240))
+      .addIntegerOption((o) => o.setName("segundos").setDescription("Segundos adicionais").setMinValue(0).setMaxValue(59)),
+    new SlashCommandBuilder().setName("objetivo_limpar").setDescription("(staff) Remove o objetivo de navegação do CTA")
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
     new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
@@ -149,6 +171,14 @@ async function handleAutocomplete(interaction) {
     const events = await db.getOpenEvents(interaction.guildId);
     const choices = events.map((e) => ({ name: `CTA ${e.time_label}`, value: e.time_label }));
     return interaction.respond(choices.slice(0, 25));
+  }
+  if (focused.name === "destino") {
+    const q = String(focused.value || "");
+    const zones = navigation.searchZones(q, { limit: 25, blackOnly: true });
+    return interaction.respond(zones.map((z) => ({
+      name: `${z.name}${z.tier ? ` (T${z.tier})` : ""}`,
+      value: z.name
+    })));
   }
   if (focused.name === "arma") {
     const q = (focused.value || "").toUpperCase();
