@@ -976,6 +976,11 @@ async function removePTCore(ev, visualPt, actor) {
   );
   pl.splice(v - 1, 1);
   await db.setPartyList(fresh.id, pl);
+  const locks = new Set(db.parseReallocationLocks(fresh));
+  if (locks.delete(raw)) {
+    await db.setReallocationLocks(fresh.id, [...locks]);
+    fresh.realloc_lock_parties = [...locks].join(",");
+  }
   const guild = client.guilds.cache.get(fresh.guild_id) || null;
   await applyReallocation(fresh, guild, null);
   return { ok: true, movidos: upd.rowCount || 0, pt: v };
@@ -1049,7 +1054,7 @@ async function applyConsolidation(ev, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
-  const result = consolidate(signups, pl.length, pl);
+  const result = consolidate(signups, pl.length, pl, await ctaOpts(fresh));
   for (const r of result) {
     if (r.moved) await db.moveSignupToSlot(fresh.id, r.user_id, r.partyIndex, r.slotIndex);
   }
