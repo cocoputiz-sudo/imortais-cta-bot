@@ -1200,7 +1200,7 @@ async function setNavigationObjectiveCore(ev, input = {}, actorId = null) {
       };
     }
   }
-  const rarityCheck = validateObjectiveRarity(type, input.rarity);
+  const rarityCheck = validateObjectiveRarity(type, type === "ORBS" ? "" : input.rarity);
   if (!rarityCheck.ok) return rarityCheck;
 
   const minutes = Math.max(0, Math.min(240, Number(input.minutes) || 0));
