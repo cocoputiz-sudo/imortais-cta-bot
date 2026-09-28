@@ -49,26 +49,34 @@ function commandDefs() {
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("cta_consolidar").setDescription("Amontoa os participantes nas PTs da frente (perto da hora)")
       .addStringOption(ctaOpt),
-    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Define um objetivo de navegação para o CTA")
+    new SlashCommandBuilder().setName("objetivo").setDescription("(staff) Adiciona um objetivo à rota encadeada do CTA")
       .addStringOption(ctaOpt)
       .addStringOption((o) => o.setName("destino").setDescription("Mapa de destino").setRequired(true).setAutocomplete(true))
       .addStringOption((o) => o.setName("tipo").setDescription("Tipo do objetivo").setRequired(true).addChoices(
         { name: "Vortex", value: "VORTEX" },
+        { name: "Node", value: "NODE" },
         { name: "Território", value: "TERRITÓRIO" },
         { name: "Castelo", value: "CASTELO" },
         { name: "Outpost", value: "OUTPOST" },
         { name: "Outro", value: "OBJETIVO" }
       ))
-      .addStringOption((o) => o.setName("raridade").setDescription("Raridade/cor, se aplicável").addChoices(
+      .addStringOption((o) => o.setName("raridade").setDescription("Cor do objetivo ou tier do Node").addChoices(
         { name: "Roxo", value: "ROXO" },
         { name: "Azul", value: "AZUL" },
         { name: "Amarelo", value: "AMARELO" },
         { name: "Verde", value: "VERDE" },
-        { name: "Vermelho", value: "VERMELHO" }
+        { name: "Vermelho", value: "VERMELHO" },
+        { name: "Node 4.4", value: "4.4" },
+        { name: "Node 5.4", value: "5.4" },
+        { name: "Node 6.4", value: "6.4" },
+        { name: "Node 7.4", value: "7.4" },
+        { name: "Node 8.4", value: "8.4" }
       ))
       .addIntegerOption((o) => o.setName("minutos").setDescription("Tempo restante do objetivo").setMinValue(0).setMaxValue(240))
       .addIntegerOption((o) => o.setName("segundos").setDescription("Segundos adicionais").setMinValue(0).setMaxValue(59)),
-    new SlashCommandBuilder().setName("objetivo_limpar").setDescription("(staff) Remove o objetivo de navegação do CTA")
+    new SlashCommandBuilder().setName("objetivo_proximo").setDescription("(staff) Marca o primeiro objetivo da rota como concluído")
+      .addStringOption(ctaOpt),
+    new SlashCommandBuilder().setName("objetivo_limpar").setDescription("(staff) Limpa toda a fila de objetivos do CTA")
       .addStringOption(ctaOpt),
     new SlashCommandBuilder().setName("attendance_daily").setDescription("Relatório de presença — hoje"),
     new SlashCommandBuilder().setName("attendance_week").setDescription("Relatório de presença — últimos 7 dias"),
