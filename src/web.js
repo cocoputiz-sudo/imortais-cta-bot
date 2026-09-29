@@ -1431,7 +1431,7 @@ const PAGE = `<!doctype html>
       btn.onclick=function(){
         var id=btn.getAttribute('data-nav-remove');
         if(!confirm('Remover este objetivo da rota?')) return;
-        fetch('/api/navigation/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,waypoint:id})})
+        fetch('/api/navigation/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({waypoint:id})})
           .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
           .then(function(){flash('● objetivo removido','var(--green)');renderNavigation();})
           .catch(function(e){flash('● '+e.message,'var(--red)');});
@@ -2004,7 +2004,7 @@ const PAGE = `<!doctype html>
             ? (d.meta.eventosUnicos+' loots únicos · '+(d.meta.duplicadosColapsados||0)+' cópias deduplicadas · '+(d.meta.eventosConsiderados||0)+' considerados')
             : ((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'');
           var filterBadge=(d.meta&&d.meta.filtroAtivo)
-            ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Filtro ativo: apenas participantes deste CTA da IMORTAIS entram no desempenho</div>'
+            ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Loot observado pelos Combat Clients · entram IMORTAIS, IMORTAIS ACADEMY e IMORTAIS 2; telemetria antiga sem guild usa a formação/party do CTA</div>'
             : '';
 
           var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
