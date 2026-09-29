@@ -1083,7 +1083,15 @@ function navigationDiscordText(state) {
 
   const first = queue[0];
   const firstLeg = state.itinerary?.legs?.[0] || null;
-  if (state.instruction?.arrived) {
+  if (state.instruction?.waiting) {
+    const ready = state.instruction.readyAt
+      ? Math.floor(new Date(state.instruction.readyAt).getTime() / 1000)
+      : null;
+    lines.push(
+      `⏳ **AGUARDAR EM ${first.targetZoneName}** · já estamos no mapa do objetivo.` +
+      (ready ? ` Disponível <t:${ready}:R> · <t:${ready}:T>.` : "")
+    );
+  } else if (state.instruction?.arrived) {
     const firstType = String(first?.type || "").toUpperCase();
     if (isTransportObjectiveType(firstType) && String(first?.status || "").toLowerCase() === "pending") {
       lines.push(`🔮 **CHEGAMOS AO OBJETIVO ${transportObjectiveName(firstType)} EM ${first.targetZoneName}** · quando pegar, use **/objetivo_proximo** para iniciar o transporte.`);
@@ -1142,7 +1150,7 @@ function navigationDiscordText(state) {
   if (legs.length > 6) lines.push(`… +${legs.length - 6} objetivo(s)`);
 
   lines.push("");
-  lines.push("🧠 VORTEX e ORB: o mapa cadastrado é **onde o objetivo está**. Vortex entrega em Thunderrock Upland, Rivercopse Curve, Giantweald Woods ou Deepwood Pines. Orb entrega nos HOs de Thunderrock Upland, Deepwood Pines, Murdergulch Trail, Sandmount Ascent ou Timberscar Copse. O transporte entra no cálculo dos próximos objetivos.");
+  lines.push("🧠 VORTEX e ORB: o mapa cadastrado é **onde o objetivo está**. Se um deles já estiver no mapa atual, o Waze prioriza ficar para a coleta quando isso não fizer outro objetivo ser perdido. Chegando antes do horário, manda aguardar. O transporte entra no cálculo dos próximos objetivos.");
   lines.push(`⏱️ estimativa inicial: **${state.itinerary?.secondsPerMap || 90}s por mapa**.`);
 
   const zones = state.positions?.zones || [];
@@ -1360,7 +1368,19 @@ async function slashNavigationNext(interaction, ev) {
   }
 
   const firstType = String(first.type || "").toUpperCase();
-  if (isTransportObjectiveType(firstType) && String(first.status || "pending").toLowerCase() === "pending") {
+  const firstStatus = String(first.status || "pending").toLowerCase();
+  if (isTransportObjectiveType(firstType) && firstStatus === "pending") {
+    if (!state.instruction?.arrived) {
+      return interaction.editReply({
+        content: `⚠️ Ainda não chegamos ao mapa de coleta: **${first.targetZoneName}**.`
+      });
+    }
+    if (state.instruction?.waiting && Number(state.instruction.waitSeconds || 0) > 0) {
+      return interaction.editReply({
+        content: `⏳ Já estamos em **${first.targetZoneName}**, mas o objetivo ainda não chegou. Aguarde **${fmtDurationShort(state.instruction.waitSeconds)}**.`
+      });
+    }
+
     const delivery = firstLeg?.delivery;
     if (!delivery?.zoneId || !delivery?.zoneName) {
       return interaction.editReply({ content: `⚠️ Ainda não consegui calcular o mapa de entrega desta ${transportObjectiveName(firstType)}.` });
@@ -1371,6 +1391,12 @@ async function slashNavigationNext(interaction, ev) {
     }
     return interaction.editReply({
       content: `🔮 Objetivo ${transportObjectiveName(firstType)} marcado como **PEGO**. Agora o Waze vai levar a massa até **${delivery.zoneName}** para entrega.`
+    });
+  }
+
+  if (firstStatus === "carrying" && !state.instruction?.arrived) {
+    return interaction.editReply({
+      content: `📦 Ainda estamos transportando para **${first.deliveryZoneName || firstLeg?.delivery?.zoneName || "?"}**. Só marque como entregue ao chegar.`
     });
   }
 
