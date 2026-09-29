@@ -518,34 +518,34 @@ async function handleComponent(interaction) {
 function coreStatus(p) {
   return p.core_verified ? "✅ confirmado" : p.core_claimed ? "🕐 declarado (aguardando staff)" : "—";
 }
-function fmtSlot(role, w1, w2) {
+function fmtSlot(role, w1, w2, es = false) {
   if (!role) return null;
-  const ws = [w1, w2].filter(Boolean).join(" / ") || "—";
-  return `${ROLE_DEFS[role]?.label || role} — ${ws}`;
+  const ws = [w1, w2].filter(Boolean).map(w => weaponDisplay(w, es)).join(" / ") || "—";
+  return `${roleDisplay(role, es)} — ${ws}`;
 }
 function turnosOf(p) {
   return (p.turnos || "").split(",").filter(Boolean);
 }
-function formatFull(p) {
+function formatFull(p, es = false) {
   const lines = [`👤 **${p.username || p.user_id}**`];
-  const main = fmtSlot(p.main_role, p.w1, p.w2); if (main) lines.push(`**Principal:** ${main}`);
-  const s2 = fmtSlot(p.role2, p.r2w1, p.r2w2);   if (s2)   lines.push(`**2ª função:** ${s2}`);
-  const sf = fmtSlot(p.fill_role, p.fw1, p.fw2);  if (sf)   lines.push(`**Fill:** ${sf}`);
+  const main = fmtSlot(p.main_role, p.w1, p.w2, es); if (main) lines.push(`**Principal:** ${main}`);
+  const s2 = fmtSlot(p.role2, p.r2w1, p.r2w2, es);   if (s2)   lines.push(`**${es ? "2ª función" : "2ª função"}:** ${s2}`);
+  const sf = fmtSlot(p.fill_role, p.fw1, p.fw2, es);  if (sf)   lines.push(`**Fill:** ${sf}`);
   const t = turnosOf(p).map((x) => TURNO_DEFS[x]?.label || x);
-  if (t.length) lines.push(`**Horários:** ${t.join(", ")}`);
+  if (t.length) lines.push(`**${es ? "Horarios" : "Horários"}:** ${t.join(", ")}`);
   const ip = [];
-  if (p.ip_ursinas) ip.push(`URSINAS ${p.ip_ursinas}`);
-  if (p.ip_cravadas) ip.push(`CRAVADAS ${p.ip_cravadas}`);
+  if (p.ip_ursinas) ip.push(`${weaponDisplay("URSINAS", es)} ${p.ip_ursinas}`);
+  if (p.ip_cravadas) ip.push(`${weaponDisplay("CRAVADAS", es)} ${p.ip_cravadas}`);
   if (ip.length) lines.push(`**IP:** ${ip.join(" · ")}`);
   lines.push(`**Core:** ${coreStatus(p)}`);
   return lines.join("\n");
 }
-function formatShort(p) {
-  let head = ROLE_DEFS[p.main_role]?.label || p.main_role || "?";
-  if (p.w1) head += ` (${p.w1})`;
+function formatShort(p, es = false) {
+  let head = roleDisplay(p.main_role, es) || "?";
+  if (p.w1) head += ` (${weaponDisplay(p.w1, es)})`;
   const parts = [head];
-  if (p.role2) parts.push(`2ª ${ROLE_DEFS[p.role2]?.label || p.role2}`);
-  if (p.fill_role) parts.push(`fill ${ROLE_DEFS[p.fill_role]?.label || p.fill_role}`);
+  if (p.role2) parts.push(`${es ? "2ª" : "2ª"} ${roleDisplay(p.role2, es)}`);
+  if (p.fill_role) parts.push(`fill ${roleDisplay(p.fill_role, es)}`);
   const t = turnosOf(p).map((x) => x[0]).join("");
   const flag = p.core_verified ? " ⭐" : p.core_claimed ? " 🕐" : "";
   return `**${p.username || p.user_id}** — ${parts.join(" · ")}${t ? ` · [${t}]` : ""}${flag}`;
@@ -559,19 +559,25 @@ async function allPlayers(guildId) {
 }
 
 async function viewOwn(interaction) {
+  const es = isSpanish(interaction);
   const p = await getPlayer(interaction.guildId, interaction.user.id);
-  if (!p) return interaction.reply({ content: "Você ainda não montou perfil. Usa **/perfil** ou o botão no canal de perfil.", flags: MessageFlags.Ephemeral });
-  return interaction.reply({ content: formatFull(p), flags: MessageFlags.Ephemeral });
+  if (!p) return interaction.reply({
+    content: es ? "Todavía no creaste tu perfil. Usa **/perfil** o el botón del canal de perfil." : "Você ainda não montou perfil. Usa **/perfil** ou o botão no canal de perfil.",
+    flags: MessageFlags.Ephemeral
+  });
+  return interaction.reply({ content: formatFull(p, es), flags: MessageFlags.Ephemeral });
 }
 
 async function viewOf(interaction) {
+  const es = isSpanish(interaction);
   const user = interaction.options.getUser("usuario");
   const p = await getPlayer(interaction.guildId, user.id);
-  if (!p) return interaction.reply({ content: `**${user.username}** ainda não tem perfil.`, flags: MessageFlags.Ephemeral });
-  return interaction.reply({ content: formatFull(p), flags: MessageFlags.Ephemeral });
+  if (!p) return interaction.reply({ content: es ? `**${user.username}** todavía no tiene perfil.` : `**${user.username}** ainda não tem perfil.`, flags: MessageFlags.Ephemeral });
+  return interaction.reply({ content: formatFull(p, es), flags: MessageFlags.Ephemeral });
 }
 
 async function listCmd(interaction) {
+  const es = isSpanish(interaction);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const funcao = interaction.options.getString("funcao");
   const turno = interaction.options.getString("turno");
@@ -587,7 +593,7 @@ async function listCmd(interaction) {
   const header = `📇 **Perfis** (${rows.length})${filtros ? ` — ${filtros}` : ""}`;
   if (!rows.length) return interaction.editReply({ content: header + "\n\n_(ninguém com esse filtro)_" });
 
-  const linhas = rows.map((p, i) => `${String(i + 1).padStart(3)}. ${formatShort(p)}`);
+  const linhas = rows.map((p, i) => `${String(i + 1).padStart(3)}. ${formatShort(p, es)}`);
   const msg = { content: `${header}\n\n${linhas.slice(0, 25).join("\n")}` };
   if (linhas.length > 25) {
     const plain = linhas.map((l) => l.replace(/\*/g, "")).join("\n");
