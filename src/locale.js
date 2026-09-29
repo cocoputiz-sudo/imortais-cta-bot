@@ -39,7 +39,7 @@ const WEAPON_ES = Object.freeze({
   "MANGUAL": "MAYAL",
   "CAMBRIANA": "CAMLANN",
   "SEGANÍMICA": "MAZA ÍNCUBO",
-  "CAJADO PRIMORDIAL": "BÁCULO PRIMORDIAL",
+  "CAJADO PRIMITIVO": "BÁCULO PRIMITIVO",
 
   "ARVORE": "BÁCULO ENRAIZADO",
   "JURADOR": "JURADORES",
@@ -144,6 +144,10 @@ const EXTRA_WEAPON_ALIASES_ES = Object.freeze({
   "longbow": "ARCO LONGO",
   "caída santa": "QUEDA SANTA",
   "hallowfall": "QUEDA SANTA",
+  "cajado primitivo": "CAJADO PRIMITIVO",
+  "cajado primordial": "CAJADO PRIMITIVO",
+  "báculo primitivo": "CAJADO PRIMITIVO",
+  "báculo primordial": "CAJADO PRIMITIVO",
 });
 
 function norm(v) {

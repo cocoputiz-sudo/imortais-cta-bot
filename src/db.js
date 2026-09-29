@@ -258,6 +258,13 @@ async function init() {
   await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS delivery_zone_name TEXT;`);
   await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS picked_at TIMESTAMPTZ;`);
 
+  // Correção de nome canônico: o item foi cadastrado originalmente como
+  // "CAJADO PRIMORDIAL", mas o nome correto usado pela comp é "CAJADO PRIMITIVO".
+  // Migra inscrições antigas para não quebrar encaixe/reallocation após o rename.
+  await pool.query(`UPDATE cta_signups SET weapon='CAJADO PRIMITIVO' WHERE upper(trim(weapon))='CAJADO PRIMORDIAL';`);
+  await pool.query(`UPDATE bomb_signups SET weapon='CAJADO PRIMITIVO' WHERE upper(trim(weapon))='CAJADO PRIMORDIAL';`);
+  await pool.query(`UPDATE castelo_signups SET weapon='CAJADO PRIMITIVO' WHERE upper(trim(weapon))='CAJADO PRIMORDIAL';`);
+
   // Migração compatível: transforma o objetivo único antigo no primeiro waypoint.
   await pool.query(`
     INSERT INTO cta_navigation_waypoints
