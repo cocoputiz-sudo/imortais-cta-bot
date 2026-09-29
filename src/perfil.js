@@ -109,6 +109,23 @@ async function initSchema(pool) {
   ]) {
     await pool.query(`ALTER TABLE players ADD COLUMN IF NOT EXISTS ${col};`);
   }
+
+  // Preserva perfis já salvos antes da correção do nome da arma.
+  await pool.query(`
+    UPDATE players
+       SET w1   = CASE WHEN upper(trim(COALESCE(w1,'')))='CAJADO PRIMORDIAL' THEN 'CAJADO PRIMITIVO' ELSE w1 END,
+           w2   = CASE WHEN upper(trim(COALESCE(w2,'')))='CAJADO PRIMORDIAL' THEN 'CAJADO PRIMITIVO' ELSE w2 END,
+           r2w1 = CASE WHEN upper(trim(COALESCE(r2w1,'')))='CAJADO PRIMORDIAL' THEN 'CAJADO PRIMITIVO' ELSE r2w1 END,
+           r2w2 = CASE WHEN upper(trim(COALESCE(r2w2,'')))='CAJADO PRIMORDIAL' THEN 'CAJADO PRIMITIVO' ELSE r2w2 END,
+           fw1  = CASE WHEN upper(trim(COALESCE(fw1,'')))='CAJADO PRIMORDIAL' THEN 'CAJADO PRIMITIVO' ELSE fw1 END,
+           fw2  = CASE WHEN upper(trim(COALESCE(fw2,'')))='CAJADO PRIMORDIAL' THEN 'CAJADO PRIMITIVO' ELSE fw2 END
+     WHERE upper(trim(COALESCE(w1,'')))='CAJADO PRIMORDIAL'
+        OR upper(trim(COALESCE(w2,'')))='CAJADO PRIMORDIAL'
+        OR upper(trim(COALESCE(r2w1,'')))='CAJADO PRIMORDIAL'
+        OR upper(trim(COALESCE(r2w2,'')))='CAJADO PRIMORDIAL'
+        OR upper(trim(COALESCE(fw1,'')))='CAJADO PRIMORDIAL'
+        OR upper(trim(COALESCE(fw2,'')))='CAJADO PRIMORDIAL'
+  `);
   console.log("✅ Tabela players pronta");
 }
 
