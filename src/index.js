@@ -792,18 +792,24 @@ function faltasCTA(signups, pl) {
   return faltam;
 }
 
-function faltasTexto(faltam) {
+function faltasTexto(faltam, es = false) {
   if (!faltam.length) return "";
-  return faltam.map(f => `**${f.qtd} ${f.funcao}** (${f.armas.slice(0,6).join(", ")}${f.armas.length>6?"...":""})`).join(" · ");
+  return faltam.map(f => {
+    const funcao = locale.roleLabel(f.funcao, es);
+    const armas = f.armas.slice(0, 6).map(w => locale.weaponLabel(w, es));
+    return `**${f.qtd} ${funcao}** (${armas.join(", ")}${f.armas.length > 6 ? "..." : ""})`;
+  }).join(" · ");
 }
 
 async function onPresence(interaction) {
   const [, eventId, presence, weapon, ipStr, ownerId] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
+  const shownWeapon = locale.weaponLabel(weapon, es);
   const ip = ipStr && ipStr !== "0" ? parseInt(ipStr, 10) : null;
   if (ownerId && interaction.user.id !== ownerId)
-    return interaction.reply({ content: "Esse botão é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: es ? "Este botón es de otra persona. Escribe tu rol en el hilo para abrir el tuyo." : "Esse botão é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const ev = await db.getEvent(eventId);
-  if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
+  if (!ev || ev.status !== "open") return interaction.update({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", components: [] });
 
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
@@ -819,47 +825,63 @@ async function onPresence(interaction) {
   if (CALLER_WEAPONS.includes(weapon.toUpperCase()) && interaction.user.id === ev.caller_id) {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`calleryes|${eventId}|${encodeURIComponent(weapon)}`)
-        .setLabel("👑 Sim, sou o caller").setStyle(ButtonStyle.Primary),
+        .setLabel(es ? "👑 Sí, soy el caller" : "👑 Sim, sou o caller").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`callerno|${eventId}`)
-        .setLabel("Não, sou jogador normal").setStyle(ButtonStyle.Secondary),
+        .setLabel(es ? "No, soy jugador normal" : "Não, sou jogador normal").setStyle(ButtonStyle.Secondary),
     );
     return interaction.editReply({
-      content: `Você escolheu **${weapon}**. Você é o **caller** deste CTA?`,
+      content: es
+        ? `Elegiste **${shownWeapon}**. ¿Eres el **caller** de este CTA?`
+        : `Você escolheu **${shownWeapon}**. Você é o **caller** deste CTA?`,
       components: [row],
     });
   }
 
-  const dest = myLoc ? `Party ${visualPt(pl, myLoc.partyIndex)} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
+  const dest = myLoc
+    ? (es ? `Party ${visualPt(pl, myLoc.partyIndex)} (puesto ${myLoc.slotIndex + 1})` : `Party ${visualPt(pl, myLoc.partyIndex)} (vaga ${myLoc.slotIndex + 1})`)
+    : "RESERVA";
   const pres = presence === "online" ? "🟢 já ON" : "🕐 entra no horário";
   await logStaff(interaction.guild, `➕ **${username}** entrou de **${weapon}** → ${dest} · ${pres} · CTA ${ev.time_label}`);
 
   const signupsNow = await db.getSignups(ev.id);
   const faltam = faltasCTA(signupsNow, pl);
-  const faltamTxt = faltasTexto(faltam);
+  const faltamTxt = faltasTexto(faltam, es);
 
   if (!myLoc && faltam.length) {
     const btns = faltam.slice(0, 5).map(f =>
-      new ButtonBuilder().setCustomId(`role|${eventId}|${f.funcao}`).setLabel(f.funcao).setStyle(ButtonStyle.Primary));
+      new ButtonBuilder().setCustomId(`role|${eventId}|${f.funcao}`).setLabel(locale.roleLabel(f.funcao, es)).setStyle(ButtonStyle.Primary));
     const row = new ActionRowBuilder().addComponents(btns);
     return interaction.editReply({
-      content: `📝 As vagas de **${weapon}** estão cheias. Mas falta: ${faltamTxt}\nQuer ir de uma dessas pra garantir vaga?`,
+      content: es
+        ? `📝 Los puestos de **${shownWeapon}** están llenos. Pero todavía falta: ${faltamTxt}\n¿Quieres cambiar a uno de estos roles para asegurar puesto?`
+        : `📝 As vagas de **${shownWeapon}** estão cheias. Mas falta: ${faltamTxt}\nQuer ir de uma dessas pra garantir vaga?`,
       components: [row],
     });
   }
 
   const msg = myLoc
-    ? `✅ Fechado! **Party ${visualPt(pl, myLoc.partyIndex)}**, vaga ${myLoc.slotIndex + 1} (${weapon}).`
-    : `📝 Anotado como **reserva** (${weapon}) — sem vaga nem por afinidade.`;
+    ? (es
+      ? `✅ ¡Listo! **Party ${visualPt(pl, myLoc.partyIndex)}**, puesto ${myLoc.slotIndex + 1} (${shownWeapon}).`
+      : `✅ Fechado! **Party ${visualPt(pl, myLoc.partyIndex)}**, vaga ${myLoc.slotIndex + 1} (${shownWeapon}).`)
+    : (es
+      ? `📝 Anotado como **reserva** (${shownWeapon}), sin puesto compatible disponible.`
+      : `📝 Anotado como **reserva** (${shownWeapon}) — sem vaga nem por afinidade.`);
   await interaction.editReply({ content: msg, components: [] });
 
   try {
     const minhaRole = (require("./comps").WEAPONS[weapon.toUpperCase()] || {}).role;
     const faltaMinhaRole = faltam.some(f => f.funcao === minhaRole);
     let dm = myLoc
-      ? `✅ Você entrou de **${weapon}** na **Party ${visualPt(pl, myLoc.partyIndex)}** do CTA ${ev.time_label} UTC. Tá tudo certo!`
-      : `📝 Você ficou na **reserva** do CTA ${ev.time_label} UTC (${weapon}).`;
+      ? (es
+        ? `✅ Entraste con **${shownWeapon}** en la **Party ${visualPt(pl, myLoc.partyIndex)}** del CTA ${ev.time_label} UTC. ¡Todo listo!`
+        : `✅ Você entrou de **${shownWeapon}** na **Party ${visualPt(pl, myLoc.partyIndex)}** do CTA ${ev.time_label} UTC. Tá tudo certo!`)
+      : (es
+        ? `📝 Quedaste en **reserva** del CTA ${ev.time_label} UTC (${shownWeapon}).`
+        : `📝 Você ficou na **reserva** do CTA ${ev.time_label} UTC (${shownWeapon}).`);
     if (faltamTxt && !faltaMinhaRole) {
-      dm += `\n\n💡 Se quiser ajudar mais, ainda falta: ${faltamTxt}. É só pingar de novo a função na thread.`;
+      dm += es
+        ? `\n\n💡 Si quieres ayudar más, todavía falta: ${faltamTxt}. Puedes volver a elegir un rol en el hilo.`
+        : `\n\n💡 Se quiser ajudar mais, ainda falta: ${faltamTxt}. É só pingar de novo a função na thread.`;
     }
     await interaction.user.send({ content: dm }).catch(()=>{});
   } catch (e) { }
@@ -867,8 +889,9 @@ async function onPresence(interaction) {
 
 async function onLooter(interaction) {
   const [, eventId] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
   const ev = await db.getEvent(eventId);
-  if (!ev || ev.status !== "open") return interaction.reply({ content: "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (!ev || ev.status !== "open") return interaction.reply({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const username = interaction.member?.displayName || interaction.user.username;
   await db.upsertSignup({
@@ -877,10 +900,14 @@ async function onLooter(interaction) {
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
   const pl = db.parsePartyList(ev);
-  const dest = myLoc ? `Party ${visualPt(pl, myLoc.partyIndex)} (vaga ${myLoc.slotIndex + 1})` : "RESERVA";
+  const dest = myLoc
+    ? (es ? `Party ${visualPt(pl, myLoc.partyIndex)} (puesto ${myLoc.slotIndex + 1})` : `Party ${visualPt(pl, myLoc.partyIndex)} (vaga ${myLoc.slotIndex + 1})`)
+    : "RESERVA";
   await logStaff(interaction.guild, `💰 **${username}** entrou como **Looter** → ${dest} · CTA ${ev.time_label}`);
   await interaction.editReply({
-    content: myLoc ? `💰 Você entrou como **Looter** em ${dest}. Cede a vaga se uma arma titular pingar.` : `💰 Anotado como **Looter** na reserva (sem buraco livre agora).`,
+    content: es
+      ? (myLoc ? `💰 Entraste como **Saqueador** en ${dest}. Cede el puesto si entra un arma titular.` : `💰 Anotado como **Saqueador** en reserva; no hay hueco libre ahora.`)
+      : (myLoc ? `💰 Você entrou como **Looter** em ${dest}. Cede a vaga se uma arma titular pingar.` : `💰 Anotado como **Looter** na reserva (sem buraco livre agora).`),
   });
 }
 
