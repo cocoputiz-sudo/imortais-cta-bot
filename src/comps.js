@@ -26,7 +26,7 @@ const WEAPONS = {
   "MANGUAL":                   { role: "Tank" },
   "CAMBRIANA":                 { role: "Tank" },
   "SEGANÍMICA":                { role: "Tank" },
-  "CAJADO PRIMORDIAL":         { role: "Tank" },
+  "CAJADO PRIMITIVO":         { role: "Tank" },
 
   // Supports
   "ARVORE":                    { role: "Support" },
@@ -110,7 +110,7 @@ const F = {
     ["GOLEM", 1], ["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1],
     ["MAÇA DE UMA MÃO", 1], ["MARTELO DE UMA MÃO", 1], ["MAÇA PESADA W RUNA GUARDA", 1],
     ["BRUXO DE UMA MÃO", 1], ["MONARCA", 1], ["MANGUAL", 1], ["CAMBRIANA", 1],
-    ["SEGANÍMICA", 1], ["CAJADO PRIMORDIAL", 1],
+    ["SEGANÍMICA", 1], ["CAJADO PRIMITIVO", 1],
   ],
   DPS_LIVRE: [
     ["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
@@ -195,7 +195,7 @@ const PARTY4 = mirror();
 const PARTY5 = [
   slot("Tank",    [["MONARCA", 1]]),                                                    // 01
   slot("Tank",    [["MARTELO DE BATALHA", 1]]),                                         // 02
-  slot("Tank",    [["CAJADO PRIMORDIAL", 1]]),                                          // 03
+  slot("Tank",    [["CAJADO PRIMITIVO", 1]]),                                          // 03
   slot("Tank",    [["MARTELO DE UMA MÃO", 1]]),                                         // 04
   slot("Melee",   [["QUEBRA REINOS", 1]]),                                              // 05
   slot("Tank",    [["SEGANÍMICA", 1], ["CAMBRIANA", 1], ["MANGUAL", 1]]),               // 06
@@ -271,7 +271,7 @@ const FAMILIES = {
   TANKS_MACA: [
     "MAÇA PESADA", "MAÇA PÉTREA", "MARTELO DE BATALHA", "MARTELO DE UMA MÃO",
     "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "GOLEM", "MONARCA",
-    "MAÇA PESADA W RUNA GUARDA", "MANGUAL", "CAMBRIANA", "SEGANÍMICA", "CAJADO PRIMORDIAL",
+    "MAÇA PESADA W RUNA GUARDA", "MANGUAL", "CAMBRIANA", "SEGANÍMICA", "CAJADO PRIMITIVO",
   ],
   SUPORTE:       ["G.A", "ARVORE", "SILENCE", "JURADOR", "LOCUS"],
   HEALER_HOLY:   ["QUEDA SANTA", "EXALTADO", "CORROMPIDO"],
