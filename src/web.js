@@ -372,9 +372,7 @@ function startWebServer(client, opts) {
   app.post("/api/navigation/objective", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
     const body = req.body || {};
-    const event = String(body.event || "").trim();
     const targetZone = String(body.targetZone || "").trim();
-    if (!event) return res.status(400).json({ error: "event" });
     if (!targetZone) return res.status(400).json({ error: "Informe o mapa de destino." });
     const input = {
       targetZone,
@@ -384,7 +382,7 @@ function startWebServer(client, opts) {
       seconds: Math.max(0, Math.min(59, Number(body.seconds) || 0)),
     };
     const result = _act.setNavigationObjective
-      ? await _act.setNavigationObjective(event, input, sess.id)
+      ? await _act.setNavigationObjective(null, input, sess.id)
       : { ok: false, error: "indisponível" };
     res.status(result && result.ok === false ? 400 : 200).json(result);
   });
@@ -392,15 +390,14 @@ function startWebServer(client, opts) {
   app.post("/api/navigation/pickup", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
     const body = req.body || {};
-    const event = String(body.event || "").trim();
     const waypoint = String(body.waypoint || "").trim();
     const deliveryZoneId = String(body.deliveryZoneId || "").trim();
     const deliveryZoneName = String(body.deliveryZoneName || "").trim();
-    if (!event || !waypoint || !deliveryZoneId || !deliveryZoneName) {
-      return res.status(400).json({ error: "event/waypoint/delivery" });
+    if (!waypoint || !deliveryZoneId || !deliveryZoneName) {
+      return res.status(400).json({ error: "waypoint/delivery" });
     }
     const result = _act.startNavigationCarry
-      ? await _act.startNavigationCarry(event, waypoint, deliveryZoneId, deliveryZoneName, sess.id)
+      ? await _act.startNavigationCarry(null, waypoint, deliveryZoneId, deliveryZoneName, sess.id)
       : { ok: false, error: "indisponível" };
     res.status(result && result.ok === false ? 400 : 200).json(result);
   });
@@ -408,11 +405,10 @@ function startWebServer(client, opts) {
   app.post("/api/navigation/complete", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
     const body = req.body || {};
-    const event = String(body.event || "").trim();
     const waypoint = String(body.waypoint || "").trim();
-    if (!event || !waypoint) return res.status(400).json({ error: "event/waypoint" });
+    if (!waypoint) return res.status(400).json({ error: "waypoint" });
     const result = _act.completeNavigationObjective
-      ? await _act.completeNavigationObjective(event, waypoint, sess.id)
+      ? await _act.completeNavigationObjective(null, waypoint, sess.id)
       : { ok: false, error: "indisponível" };
     res.status(result && result.ok === false ? 400 : 200).json(result);
   });
@@ -420,21 +416,18 @@ function startWebServer(client, opts) {
   app.post("/api/navigation/remove", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
     const body = req.body || {};
-    const event = String(body.event || "").trim();
     const waypoint = String(body.waypoint || "").trim();
-    if (!event || !waypoint) return res.status(400).json({ error: "event/waypoint" });
+    if (!waypoint) return res.status(400).json({ error: "waypoint" });
     const result = _act.removeNavigationObjective
-      ? await _act.removeNavigationObjective(event, waypoint, sess.id)
+      ? await _act.removeNavigationObjective(null, waypoint, sess.id)
       : { ok: false, error: "indisponível" };
     res.status(result && result.ok === false ? 400 : 200).json(result);
   });
 
   app.post("/api/navigation/clear", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
-    const event = String((req.body || {}).event || "").trim();
-    if (!event) return res.status(400).json({ error: "event" });
     const result = _act.clearNavigationObjective
-      ? await _act.clearNavigationObjective(event, sess.id)
+      ? await _act.clearNavigationObjective(null, sess.id)
       : { ok: false, error: "indisponível" };
     res.status(result && result.ok === false ? 400 : 200).json(result);
   });
@@ -1249,7 +1242,7 @@ const PAGE = `<!doctype html>
   // ===================== NAVEGAÇÃO / WAZE ZVZ =====================
   var navZoneSearchTimer=null;
   var navDraftByEvent={};
-  function navDraftKey(){ return String(current||''); }
+  function navDraftKey(){ return 'global'; }
   function navFormIsFocused(){
     var a=document.activeElement;
     return !!(a && a.closest && a.closest('#view-navigation .nav2-form'));
@@ -1378,12 +1371,10 @@ const PAGE = `<!doctype html>
 
     var set=document.getElementById('nav-set');
     if(set) set.onclick=function(){
-      if(!current) return;
       var selectedType=document.getElementById('nav-type').value;
       var dest=(document.getElementById('nav-target').value||'').trim();
       if(!dest){ flash('● informe o destino','var(--red)'); return; }
       var payload={
-        event:current,
         targetZone:dest,
         type:selectedType,
         rarity:document.getElementById('nav-rarity').value,
@@ -1402,8 +1393,8 @@ const PAGE = `<!doctype html>
 
     var clear=document.getElementById('nav-clear');
     if(clear) clear.onclick=function(){
-      if(!current||!confirm('Limpar TODA a fila de objetivos deste CTA?')) return;
-      fetch('/api/navigation/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current})})
+      if(!confirm('Limpar TODA a fila global de objetivos da navegação?')) return;
+      fetch('/api/navigation/clear',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
         .then(function(r){return r.json();})
         .then(function(){
           delete navDraftByEvent[navDraftKey()];
@@ -1419,7 +1410,7 @@ const PAGE = `<!doctype html>
         var deliveryId=btn.getAttribute('data-delivery-id')||'';
         var deliveryName=btn.getAttribute('data-delivery-name')||'';
         fetch('/api/navigation/pickup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          event:current,waypoint:id,deliveryZoneId:deliveryId,deliveryZoneName:deliveryName
+          waypoint:id,deliveryZoneId:deliveryId,deliveryZoneName:deliveryName
         })})
           .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
           .then(function(){flash('● objetivo pego · iniciando transporte','var(--green)');renderNavigation();})
@@ -1430,7 +1421,7 @@ const PAGE = `<!doctype html>
     Array.prototype.forEach.call(document.querySelectorAll('[data-nav-complete]'),function(btn){
       btn.onclick=function(){
         var id=btn.getAttribute('data-nav-complete');
-        fetch('/api/navigation/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,waypoint:id})})
+        fetch('/api/navigation/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({waypoint:id})})
           .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
           .then(function(){flash('● objetivo concluído','var(--green)');renderNavigation();})
           .catch(function(e){flash('● '+e.message,'var(--red)');});
@@ -1440,7 +1431,7 @@ const PAGE = `<!doctype html>
       btn.onclick=function(){
         var id=btn.getAttribute('data-nav-remove');
         if(!confirm('Remover este objetivo da rota?')) return;
-        fetch('/api/navigation/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({event:current,waypoint:id})})
+        fetch('/api/navigation/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({waypoint:id})})
           .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok||j.ok===false)throw new Error(j.error||'erro');return j;});})
           .then(function(){flash('● objetivo removido','var(--green)');renderNavigation();})
           .catch(function(e){flash('● '+e.message,'var(--red)');});
@@ -1449,11 +1440,10 @@ const PAGE = `<!doctype html>
   }
 
   function renderNavigation(silent){
-    if(!current){ noCta('view-navigation','🧭 Navegação'); return; }
     if(silent && navFormIsFocused()) return;
     if(!silent) loading('view-navigation','🧭 Navegação');
 
-    fetchTelemetry('/api/navigation/state?event='+encodeURIComponent(current)).then(function(d){
+    fetchTelemetry('/api/navigation/state').then(function(d){
       var queue=d.objectives||[], o=d.objective||null, cur=d.current||null, inst=d.instruction||null;
       var legs=(d.itinerary&&d.itinerary.legs)||[];
       var draft=navDraftForObjective();
@@ -1573,7 +1563,7 @@ const PAGE = `<!doctype html>
       var opt=(d.itinerary&&d.itinerary.optimization)||{};
       var optimizerNote='<div style="margin:0 0 10px;padding:8px 9px;border:1px solid #3a4b61;border-radius:8px;background:#0d151f;color:#9fb4cd;font-size:9px">🧠 <b>ORDEM AUTOMÁTICA</b> · primeiro evita perder horários; se Vortex/Orb já estiver no mapa atual, prefere ficar e aguardar a coleta em vez de sair e voltar, desde que isso não faça outro objetivo ser perdido. Depois otimiza horários, entrega e distância.</div>';
       var right='<div class="nav2-card"><h3>ROTA OTIMIZADA</h3>'+optimizerNote+currentHtml+next+queueHtml+spreadHtml+'</div>';
-      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Você cadastra os objetivos sem ordenar. O bot escolhe a sequência usando deadline e distância entre mapas.</p></div>'
+      var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Navegação global da guilda: funciona com ou sem CTA aberto. Você cadastra os objetivos sem ordenar e o bot escolhe a sequência usando deadline e distância entre mapas.</p></div>'
         +'<span class="nav2-status">'+esc(queue.length)+' objetivo(s) · '+esc((d.graph&&d.graph.zones)||0)+' mapas</span></div>'
         +'<div class="nav2-layout">'+form+right+'</div></div>';
       setView('view-navigation',html);
@@ -1585,6 +1575,26 @@ const PAGE = `<!doctype html>
 
   // ===================== DADOS DO JOGO — TELEMETRIA REAL =====================
   function fmtS(v){ if(v==null) return '—'; if(v>=1e6) return (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+'M'; if(v>=1e3) return Math.round(v/1e3)+'K'; return String(v); }
+  function pad2(v){ return String(v).padStart(2,'0'); }
+  function fmtUtcDate(ts){
+    var d=new Date(ts||0); if(!isFinite(d.getTime())) return 'data desconhecida';
+    return pad2(d.getUTCDate())+'/'+pad2(d.getUTCMonth()+1)+'/'+d.getUTCFullYear();
+  }
+  function fmtUtcTime(ts,withSeconds){
+    var d=new Date(ts||0); if(!isFinite(d.getTime())) return '—';
+    return pad2(d.getUTCHours())+':'+pad2(d.getUTCMinutes())+(withSeconds?(':'+pad2(d.getUTCSeconds())):'');
+  }
+  function fmtUtcDateTime(ts,withSeconds){
+    var d=new Date(ts||0); if(!isFinite(d.getTime())) return '—';
+    return fmtUtcDate(d)+' '+fmtUtcTime(d,!!withSeconds)+' UTC';
+  }
+  function ctaHistoryLabel(x){
+    x=x||{};
+    var stamp=x.ctaAt||x.createdAt||x.closedAt;
+    var day=fmtUtcDate(stamp);
+    var time=String(x.time||'').trim() || fmtUtcTime(stamp,false);
+    return day+' · CTA '+time+' UTC';
+  }
   function liveBadge(note){ return '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">● Telemetria conectada'+(note?' · '+esc(note):'')+'</div>'; }
   function loading(id,title){ document.getElementById(id).innerHTML='<div class="modhead">'+title+'</div><div class="empty-note">Carregando telemetria…</div>'; }
   function noCta(id,title){ document.getElementById(id).innerHTML='<div class="modhead">'+title+'</div><div class="empty-note">Selecione/abra um CTA para visualizar estes dados.</div>'; }
@@ -1990,30 +2000,30 @@ const PAGE = `<!doctype html>
 
         fetchTelemetry('/api/telemetry/loot?event='+encodeURIComponent(lootSelectedEvent)).then(function(d){
           var r=d.resumo||{};
-          var lootNote=(d.meta&&d.meta.eventosConsiderados!=null)
-            ? (d.meta.eventosConsiderados+' considerados · '+(d.meta.eventosIgnorados||0)+' ignorados')
+          var lootNote=(d.meta&&d.meta.eventosUnicos!=null)
+            ? (d.meta.eventosUnicos+' loots únicos · '+(d.meta.duplicadosColapsados||0)+' cópias deduplicadas · '+(d.meta.eventosConsiderados||0)+' considerados')
             : ((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de loot'):'');
           var filterBadge=(d.meta&&d.meta.filtroAtivo)
-            ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Filtro ativo: apenas participantes deste CTA da IMORTAIS entram no desempenho</div>'
+            ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Loot observado pelos Combat Clients · entram IMORTAIS, IMORTAIS ACADEMY e IMORTAIS 2; telemetria antiga sem guild usa a formação/party do CTA</div>'
             : '';
 
           var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
             +ctas.map(function(x){
               var on=String(x.id)===String(lootSelectedEvent);
-              var label='CTA '+esc(x.time)+(x.status==='closed'?' · encerrado':' · ao vivo');
-              return '<button class="tab loot-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+label+' <span style="color:var(--muted)">('+x.lootEvents+')</span></button>';
+              var label=ctaHistoryLabel(x)+(x.status==='closed'?' · encerrado':' · ao vivo');
+              return '<button class="tab loot-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+esc(label)+' <span style="color:var(--muted)">('+(x.lootEventsRaw==null?x.lootEvents:x.lootEventsRaw)+' brutos)</span></button>';
             }).join('')
             +'</div><div class="note" style="margin-top:10px">CTAs encerrados ficam disponíveis aqui por 3 dias para conferência de loot.</div></div>';
 
-          var html=picker+liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot</div>'
+          var html=picker+liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot · '+esc(ctaHistoryLabel(selected))+'</div>'
             +'<div class="statgrid">'
             +'<div class="stat b"><div class="k">Capturado</div><div class="v">'+fmtS(r.capturado)+'</div></div>'
             +'<div class="stat g"><div class="k">Entregue</div><div class="v">'+fmtS(r.entregue)+'</div></div>'
             +'<div class="stat a"><div class="k">Pendente</div><div class="v">'+fmtS(r.pendente)+'</div></div>'
             +'<div class="stat p"><div class="k">Divergências</div><div class="v">'+fmtS(r.divergencias)+'</div></div></div>'
             +'<div class="split"><div class="panel"><h3>Top looters</h3>'+topList(d.top||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>Itens recentes</h3><table class="dtable"><thead><tr><th>Jogador</th><th>Item</th><th>Qtd</th><th>Valor</th><th>Status</th></tr></thead><tbody>'
-            +(d.itens||[]).map(function(i){ return '<tr><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+fmtS(i.v)+'</td><td><span class="pill '+esc(i.st)+'">'+esc(i.st)+'</span></td></tr>'; }).join('')
+            +'<div class="panel"><h3>Itens recentes · deduplicados</h3><table class="dtable"><thead><tr><th>Quando (UTC)</th><th>Jogador</th><th>Item</th><th>Qtd</th><th>Origem</th><th>Valor</th><th>Observers</th><th>Status</th></tr></thead><tbody>'
+            +(d.itens||[]).map(function(i){ return '<tr><td>'+esc(fmtUtcDateTime(i.at,true))+'</td><td><b>'+esc(i.jog)+'</b></td><td>'+esc(i.item)+'</td><td>'+i.qtd+'</td><td>'+esc(i.origem||'—')+'</td><td>'+fmtS(i.v)+'</td><td>'+esc(i.observers||1)+(Number(i.deduped||0)>0?' <span style="color:var(--muted)">('+(i.deduped)+' cópia'+(Number(i.deduped)===1?'':'s')+' fundida'+(Number(i.deduped)===1?'':'s')+')</span>':'')+'</td><td><span class="pill '+esc(i.st)+'">'+esc(i.st)+'</span></td></tr>'; }).join('')
             +'</tbody></table></div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
           setView('view-loot',html);
@@ -2052,8 +2062,8 @@ const PAGE = `<!doctype html>
           var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
             +ctas.map(function(x){
               var on=String(x.id)===String(combatSelectedEvent);
-              var label='CTA '+esc(x.time)+(x.status==='closed'?' · encerrado':' · ao vivo');
-              return '<button class="tab combat-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+label+' <span style="color:var(--muted)">('+x.combatEvents+')</span></button>';
+              var label=ctaHistoryLabel(x)+(x.status==='closed'?' · encerrado':' · ao vivo');
+              return '<button class="tab combat-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+esc(label)+' <span style="color:var(--muted)">('+x.combatEvents+')</span></button>';
             }).join('')
             +'</div><div class="note" style="margin-top:10px">Os rankings detalhados de combate ficam disponíveis por 3 dias após o encerramento do CTA.</div></div>';
 
@@ -2067,7 +2077,7 @@ const PAGE = `<!doctype html>
           }).join(' · ');
           var unclassified=a.unclassifiedCanonicalSample||[];
           var unclassifiedRows=unclassified.map(function(x){
-            var when=x.occurredAt?new Date(x.occurredAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
+            var when=x.occurredAt?fmtUtcDateTime(x.occurredAt,true):'—';
             var label=x.classification==='ambos_nossos'?'AMBOS NOSSOS':'NENHUM NOSSO';
             return '<tr><td>'+esc(when)+'</td><td>'+esc(x.map||'Mapa desconhecido')+'</td><td><b>'+esc(x.killer||'?')+'</b></td><td><b>'+esc(x.victim||'?')+'</b></td>'
               +'<td>'+esc((x.killerGuilds||[]).join(', ')||'—')+'</td><td>'+esc((x.victimGuilds||[]).join(', ')||'—')+'</td>'
@@ -2079,9 +2089,9 @@ const PAGE = `<!doctype html>
           function renderFightBlock(f){
             var fr=f.resumo||{}, fd=f.resumoDedup||fr, fa=f.audit||{}, players=f.players||[], fwhen='';
             if(f.firstAt&&f.lastAt){
-              var ffi=new Date(f.firstAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-              var fla=new Date(f.lastAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-              fwhen=ffi+'–'+fla;
+              var ffi=fmtUtcDateTime(f.firstAt,false);
+              var fla=fmtUtcDateTime(f.lastAt,false);
+              fwhen=ffi+' → '+fla;
             }
             var playerTable='<div style="overflow-x:auto;margin-top:12px"><table class="dtable"><thead><tr>'
               +'<th>#</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Dano bruto</th><th>Cura bruta</th>'
@@ -2110,9 +2120,9 @@ const PAGE = `<!doctype html>
             var mr=m.resumo||{}, md=m.resumoDedup||mr, ma=m.audit||{}, fights=m.fights||[];
             var when='';
             if(m.firstAt&&m.lastAt){
-              var fi=new Date(m.firstAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-              var la=new Date(m.lastAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-              when=' · '+fi+'–'+la;
+              var fi=fmtUtcDateTime(m.firstAt,false);
+              var la=fmtUtcDateTime(m.lastAt,false);
+              when=' · '+fi+' → '+la;
             }
             return '<div class="panel">'
               +'<h3>🗺️ '+esc(m.map||'Mapa desconhecido')+when+'</h3>'
@@ -2128,7 +2138,7 @@ const PAGE = `<!doctype html>
               +'</div>';
           }
           var rd=d.resumoDedup||r;
-          var html=picker+liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate</div>'
+          var html=picker+liveBadge((d.meta&&d.meta.totalEventos!=null)?(d.meta.totalEventos+' eventos de combate'):'')+'<div class="modhead">⚔️ Combate · '+esc(ctaHistoryLabel(selected))+'</div>'
             +'<div class="statgrid">'
             +'<div class="stat r"><div class="k">Dano dedup. · conservador</div><div class="v">'+fmtS(rd.damage||0)+'</div></div>'
             +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(rd.healing||0)+'</div></div>'

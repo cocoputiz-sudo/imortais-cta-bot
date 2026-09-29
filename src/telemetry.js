@@ -13,6 +13,10 @@ const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER
 const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
 const COMBAT_DEATH_DEDUP_MS = Math.max(5_000, Number(process.env.COMBAT_DEATH_DEDUP_MS) || 30_000);
 const COMBAT_BATTLE_MIN_EVENTS = Math.max(1, Number(process.env.COMBAT_BATTLE_MIN_EVENTS) || 5);
+// Um mesmo loot costuma ser observado por vários Combat Clients. Reenvio do MESMO
+// client já é deduplicado pelo event_id; esta janela serve apenas para fundir cópias
+// semânticas vindas de observers diferentes, preservando loots repetidos reais.
+const LOOT_DEDUP_MS = Math.max(250, Number(process.env.LOOT_DEDUP_MS) || 2500);
 let zoneChangeHandler = null;
 
 function setZoneChangeHandler(handler) {
@@ -1262,38 +1266,64 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
   };
 }
 
-async function getNavigationState(db, eventId) {
-  const ev = await db.getEvent(eventId).catch(() => null);
-  if (!ev) return null;
+async function getNavigationState(db, eventId = null) {
+  const globalMode = !eventId || String(eventId).trim().toLowerCase() === "global";
+  const ev = globalMode ? null : await db.getEvent(eventId).catch(() => null);
+  if (!globalMode && !ev) return null;
 
-  const objectives = await db.getNavigationObjectives(eventId, { includeDone: true }).catch(() => []);
+  const objectives = globalMode
+    ? await db.getGlobalNavigationObjectives({ includeDone: true }).catch(() => [])
+    : await db.getNavigationObjectives(eventId, { includeDone: true }).catch(() => []);
   const active = objectives.filter(o => {
     const status = String(o.status || "pending").toLowerCase();
     return status === "pending" || status === "carrying";
   });
-  const session = await db.getNavigationSession(eventId).catch(() => null);
+  const session = globalMode
+    ? await db.getGlobalNavigationSession().catch(() => null)
+    : await db.getNavigationSession(eventId).catch(() => null);
   const secondsPerMap = Math.max(
     20,
     Math.min(600, Number(session?.seconds_per_map || process.env.NAV_SECONDS_PER_MAP || 90) || 90)
   );
 
-  const { rows } = await pool.query(`
-    WITH ranked AS (
-      SELECT device_id, player_name, payload, occurred_at, received_at,
-             ROW_NUMBER() OVER (
-               PARTITION BY device_id
-               ORDER BY occurred_at DESC, received_at DESC
-             ) AS rn
-        FROM albion_telemetry_events
-       WHERE cta_event_id=$1
-         AND type='zone_change'
-         AND received_at >= now() - interval '15 minutes'
-    )
-    SELECT device_id, player_name, payload, occurred_at, received_at
-      FROM ranked
-     WHERE rn=1
-     ORDER BY received_at DESC
-  `, [eventId]);
+  // No modo global a posição do zerg vem dos últimos zone_change de cada dispositivo,
+  // mesmo quando não existe CTA aberto. O vínculo a CTA continua disponível apenas
+  // para compatibilidade com comandos/filas legadas.
+  const positionSql = globalMode
+    ? `
+      WITH ranked AS (
+        SELECT device_id, player_name, payload, occurred_at, received_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY device_id
+                 ORDER BY occurred_at DESC, received_at DESC
+               ) AS rn
+          FROM albion_telemetry_events
+         WHERE type='zone_change'
+           AND received_at >= now() - interval '15 minutes'
+      )
+      SELECT device_id, player_name, payload, occurred_at, received_at
+        FROM ranked
+       WHERE rn=1
+       ORDER BY received_at DESC
+    `
+    : `
+      WITH ranked AS (
+        SELECT device_id, player_name, payload, occurred_at, received_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY device_id
+                 ORDER BY occurred_at DESC, received_at DESC
+               ) AS rn
+          FROM albion_telemetry_events
+         WHERE cta_event_id=$1
+           AND type='zone_change'
+           AND received_at >= now() - interval '15 minutes'
+      )
+      SELECT device_id, player_name, payload, occurred_at, received_at
+        FROM ranked
+       WHERE rn=1
+       ORDER BY received_at DESC
+    `;
+  const { rows } = await pool.query(positionSql, globalMode ? [] : [eventId]);
 
   const positions = [];
   const byZone = new Map();
@@ -1354,7 +1384,7 @@ async function getNavigationState(db, eventId) {
     const expiresMs = o?.expires_at ? new Date(o.expires_at).getTime() - nowMs : null;
     return {
       id: String(o.id),
-      ctaEventId: String(o.cta_event_id),
+      ctaEventId: globalMode ? null : String(o.cta_event_id),
       position: Number(o.position),
       status: String(o.status || "pending"),
       type: o.objective_type,
@@ -1502,7 +1532,9 @@ async function getNavigationState(db, eventId) {
   }
 
   return {
-    event: { id: String(ev.id), time: ev.time_label, status: ev.status },
+    event: globalMode
+      ? { id: "global", time: null, status: "active", scope: "global" }
+      : { id: String(ev.id), time: ev.time_label, status: ev.status, scope: "cta" },
     objective: activeOut[0] || null,
     objectives: activeOut,
     allObjectives: allOut,
@@ -1549,11 +1581,11 @@ async function getNavigationState(db, eventId) {
 
 async function getLoot(db, eventId) {
   const { rows } = await pool.query(`
-    SELECT event_id, device_id, occurred_at, player_name, payload
-    FROM albion_telemetry_events
-    WHERE cta_event_id=$1 AND type='loot'
-    ORDER BY occurred_at DESC
-    LIMIT 5000
+    SELECT event_id, device_id, occurred_at, received_at, player_name, payload
+      FROM albion_telemetry_events
+     WHERE cta_event_id=$1 AND type='loot'
+     ORDER BY occurred_at ASC, received_at ASC
+     LIMIT 5000
   `, [eventId]);
 
   // Identidades legadas: versões antigas do Combat Client não enviavam a guild
@@ -1582,33 +1614,135 @@ async function getLoot(db, eventId) {
     }
   }
 
+  // O EventId elimina reenvio do mesmo client no INSERT. O que ainda sobra são
+  // cópias do MESMO pickup vistas por vários observers. Sem objectId nativo no
+  // payload de loot, a deduplicação canônica combina identidade semântica + janela
+  // curta e, principalmente, NUNCA funde dois registros do mesmo device. Assim,
+  // dois pickups reais e iguais feitos em sequência continuam separados.
+  const canonical = [];
+  const byBase = new Map();
+
+  function cleanLootText(v) {
+    return String(v || "").trim().toLowerCase();
+  }
+  function lootTime(v) {
+    const t = new Date(v).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+  function compatibleText(a, b) {
+    return !a || !b || a === b;
+  }
+
+  for (const row of rows) {
+    const p = row.payload || {};
+    const rawName = String(p.lootedBy || row.player_name || "?").trim() || "?";
+    const item = String(p.item || "?").trim() || "?";
+    const quantity = Math.max(0, num(p.quantity, 0));
+    const unitValue = Math.max(0, num(p.estimatedValue));
+    const origin = cleanLootText(p.lootedFrom);
+    const cluster = cleanLootText(p.cluster);
+    const guild = String(p.lootedByGuild || p.guild || "").trim();
+    const deviceId = String(row.device_id || "sem-device");
+    const occurredMs = lootTime(row.occurred_at);
+    const receivedMs = lootTime(row.received_at);
+    const baseKey = [
+      normName(rawName),
+      cleanLootText(item),
+      String(quantity),
+      String(Math.round(unitValue * 100))
+    ].join("|");
+
+    if (!byBase.has(baseKey)) byBase.set(baseKey, []);
+    const candidates = byBase.get(baseKey);
+    let hit = null;
+
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const x = candidates[i];
+      // Mesmo observer = pode ser um segundo loot real idêntico. Não colapsar.
+      if (x.devices.has(deviceId)) continue;
+
+      const occurredClose = occurredMs && x.lastOccurredMs
+        ? Math.abs(occurredMs - x.lastOccurredMs) <= LOOT_DEDUP_MS
+        : false;
+      const receivedClose = receivedMs && x.lastReceivedMs
+        ? Math.abs(receivedMs - x.lastReceivedMs) <= LOOT_DEDUP_MS
+        : false;
+      if (!occurredClose && !receivedClose) continue;
+      if (!compatibleText(origin, x.origin) || !compatibleText(cluster, x.cluster)) continue;
+
+      hit = x;
+      break;
+    }
+
+    if (!hit) {
+      hit = {
+        baseKey,
+        rawName,
+        item,
+        quantity,
+        unitValue,
+        origin,
+        cluster,
+        guilds: new Set(),
+        devices: new Set(),
+        eventIds: [],
+        copies: 0,
+        occurredAt: row.occurred_at,
+        receivedAt: row.received_at,
+        lastOccurredMs: occurredMs,
+        lastReceivedMs: receivedMs,
+      };
+      candidates.push(hit);
+      canonical.push(hit);
+    }
+
+    hit.devices.add(deviceId);
+    hit.eventIds.push(String(row.event_id));
+    hit.copies++;
+    if (guild) hit.guilds.add(guild);
+    if (!hit.origin && origin) hit.origin = origin;
+    if (!hit.cluster && cluster) hit.cluster = cluster;
+    if (occurredMs >= hit.lastOccurredMs) {
+      hit.lastOccurredMs = occurredMs;
+      hit.occurredAt = row.occurred_at;
+    }
+    if (receivedMs >= hit.lastReceivedMs) {
+      hit.lastReceivedMs = receivedMs;
+      hit.receivedAt = row.received_at;
+    }
+  }
+
   let capturado = 0;
   let ignorados = 0;
+  let considerados = 0;
   let legacyConsiderados = 0;
   let guildConsiderados = 0;
   const byPlayer = new Map();
   const itens = [];
+  const allowedGuilds = new Set(["imortais", "imortaisacademy", "imortais2"]);
 
-  for (const r of rows) {
-    const p = r.payload || {};
-    const rawName = String(p.lootedBy || r.player_name || "?");
-    const key = normName(rawName);
-    const guild = String(p.lootedByGuild || p.guild || "").trim();
+  const orderedCanonical = canonical.slice().sort((a, b) =>
+    b.lastOccurredMs - a.lastOccurredMs || b.lastReceivedMs - a.lastReceivedMs
+  );
+
+  for (const r of orderedCanonical) {
+    const key = normName(r.rawName);
+    const guilds = [...r.guilds];
+    const familyGuild = guilds.find(g => allowedGuilds.has(normGuild(g))) || "";
+    const hasGuildEvidence = guilds.length > 0;
 
     let allowed = false;
-    let displayName = rawName;
+    let displayName = r.rawName;
     let filterMode = "";
 
-    if (guild) {
-      const allowedGuilds = new Set(["imortais", "imortaisacademy", "imortais2"]);
-      allowed = allowedGuilds.has(normGuild(guild));
+    if (familyGuild) {
+      allowed = true;
       filterMode = "guild";
-      if (allowed) guildConsiderados++;
-    } else if (key && legacyAllowed.has(key)) {
-      // Compatibilidade com telemetria anterior ao campo lootedByGuild.
+      guildConsiderados++;
+    } else if (!hasGuildEvidence && key && legacyAllowed.has(key)) {
       allowed = true;
       filterMode = "legacy_party";
-      displayName = legacyAllowed.get(key) || rawName;
+      displayName = legacyAllowed.get(key) || r.rawName;
       legacyConsiderados++;
     }
 
@@ -1617,27 +1751,26 @@ async function getLoot(db, eventId) {
       continue;
     }
 
-    // AverageEstMarketValue enviado pelo Combat Client é VALOR UNITÁRIO.
-    // O cálculo abaixo replica exatamente LootLoggerStats.RecordLoot do client.
-    const unitValue = Math.max(0, num(p.estimatedValue));
-    const quantity = Math.max(0, num(p.quantity, 0));
-    const value = unitValue * quantity;
-
+    considerados++;
+    const value = r.unitValue * r.quantity;
     capturado += value;
     byPlayer.set(displayName, (byPlayer.get(displayName) || 0) + value);
 
     if (itens.length < 100) {
       itens.push({
         jog: displayName,
-        item: String(p.item || "?"),
-        qtd: quantity,
-        unit: unitValue,
-        origem: String(p.lootedFrom || p.cluster || ""),
-        guild: guild || null,
+        item: r.item,
+        qtd: r.quantity,
+        unit: r.unitValue,
+        origem: r.origin || r.cluster || "",
+        guild: familyGuild || (guilds[0] || null),
         filtro: filterMode,
         v: value,
         st: "capturado",
-        at: r.occurred_at,
+        at: r.occurredAt,
+        observers: r.devices.size,
+        copies: r.copies,
+        deduped: Math.max(0, r.copies - 1),
       });
     }
   }
@@ -1647,24 +1780,32 @@ async function getLoot(db, eventId) {
     .sort((a, b) => b.v - a.v)
     .slice(0, 20);
 
+  const collapsed = Math.max(0, rows.length - canonical.length);
   return {
     resumo: { capturado, entregue: null, pendente: null, divergencias: null },
     top,
     itens,
     meta: {
       totalEventos: rows.length,
-      battleMinRelevantEvents: COMBAT_BATTLE_MIN_EVENTS,
-      deathDedupWindowMs: COMBAT_DEATH_DEDUP_MS,
-      eventosConsiderados: rows.length - ignorados,
+      totalEventosRaw: rows.length,
+      eventosUnicos: canonical.length,
+      duplicadosColapsados: collapsed,
+      lootDedupWindowMs: LOOT_DEDUP_MS,
+      eventosConsiderados: considerados,
       eventosIgnorados: ignorados,
       guildConsiderados,
       legacyConsiderados,
       filtroAtivo: true,
       filtro: "guild_imortais_family",
       comparatorReady: false,
-      note: legacyConsiderados > 0
-        ? "Filtro ativo: guilds IMORTAIS, IMORTAIS ACADEMY e IMORTAIS 2 quando o client informa guild. Neste CTA há eventos antigos sem guild; neles o sistema usa como compatibilidade quem apareceu na formação/party do CTA."
-        : "Filtro ativo: somente loot de jogadores cuja guild informada pelo Combat Client é IMORTAIS, IMORTAIS ACADEMY ou IMORTAIS 2. Entrega em baú ainda depende do Loot Comparator."
+      note:
+        "Loot deduplicado no servidor: reenvios do mesmo EventId são eliminados no banco e cópias do mesmo pickup vistas por observers diferentes são fundidas por jogador + item + quantidade + valor, origem/mapa compatíveis e janela de " +
+        Math.round(LOOT_DEDUP_MS / 100) / 10 +
+        "s. Registros do mesmo device nunca são fundidos. " +
+        (legacyConsiderados > 0
+          ? "Guilds IMORTAIS, IMORTAIS ACADEMY e IMORTAIS 2 são aceitas; eventos antigos sem guild usam como compatibilidade quem apareceu na formação/party do CTA."
+          : "Somente loot cuja guild informada é IMORTAIS, IMORTAIS ACADEMY ou IMORTAIS 2 entra no desempenho.") +
+        " Entrega em baú ainda depende do Loot Comparator."
     }
   };
 }
@@ -3115,6 +3256,12 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const { rows } = await pool.query(`
         SELECT e.id, e.time_label, e.status, e.created_at,
                COALESCE(e.closed_at, e.created_at) AS closed_at,
+               COALESCE(
+                 e.remind_30 + interval '30 minutes',
+                 e.remind_10 + interval '10 minutes',
+                 MIN(t.occurred_at),
+                 e.created_at
+               ) AS cta_at,
                COUNT(t.event_id)::int AS loot_events
           FROM cta_events e
           LEFT JOIN albion_telemetry_events t
@@ -3137,7 +3284,9 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         status: r.status,
         createdAt: r.created_at,
         closedAt: r.closed_at,
-        lootEvents: Number(r.loot_events || 0)
+        ctaAt: r.cta_at,
+        lootEvents: Number(r.loot_events || 0),
+        lootEventsRaw: Number(r.loot_events || 0)
       })));
     } catch (e) {
       console.error("/api/telemetry/loot-ctas:", e);
@@ -3157,6 +3306,12 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const { rows } = await pool.query(`
         SELECT e.id, e.time_label, e.status, e.created_at,
                COALESCE(e.closed_at, e.created_at) AS closed_at,
+               COALESCE(
+                 e.remind_30 + interval '30 minutes',
+                 e.remind_10 + interval '10 minutes',
+                 MIN(t.occurred_at),
+                 e.created_at
+               ) AS cta_at,
                COUNT(t.event_id)::int AS combat_events
           FROM cta_events e
           LEFT JOIN albion_telemetry_events t
@@ -3180,6 +3335,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         status: r.status,
         createdAt: r.created_at,
         closedAt: r.closed_at,
+        ctaAt: r.cta_at,
         combatEvents: Number(r.combat_events || 0)
       })));
     } catch (e) {
@@ -3213,9 +3369,8 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     if (!requireMember(req, res)) return;
     try {
       const id = String(req.query.event || "").trim();
-      if (!id) return res.status(400).json({ error: "event" });
-      const state = await getNavigationState(db, id);
-      if (!state) return res.status(404).json({ error: "event" });
+      const state = await getNavigationState(db, id || null);
+      if (!state) return res.status(404).json({ error: "navigation" });
       res.json(state);
     } catch (e) {
       console.error("/api/navigation/state:", e);
