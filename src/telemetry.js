@@ -1388,6 +1388,7 @@ async function getNavigationState(db, eventId) {
   const legs = [];
   let sourceName = sourceNameInitial;
   let cumulativeTravelSeconds = 0;
+  let cumulativeElapsedSeconds = 0;
 
   for (let i = 0; i < plan.length; i++) {
     const entry = plan[i];
@@ -1404,10 +1405,9 @@ async function getNavigationState(db, eventId) {
     const deliveryMaps = validRoute && t.deliveryMaps != null ? Number(t.deliveryMaps || 0) : null;
     const totalMaps = validRoute && t.totalMaps != null ? Number(t.totalMaps || 0) : null;
 
-    const elapsedBefore = cumulativeTravelSeconds;
-    const pickupArrivalSeconds = stage === "carrying"
-      ? null
-      : (validRoute ? elapsedBefore + Number(t.deadlineTravelSeconds || 0) : null);
+    const elapsedBefore = cumulativeElapsedSeconds;
+    const timing = navTransitionTiming(objective, t, elapsedBefore, nowMs);
+    const pickupArrivalSeconds = timing.pickupArrivalSeconds;
 
     const deadlineMs = objective.expires_at ? new Date(objective.expires_at).getTime() : null;
     const chainMassByMs = Number.isFinite(deadlineMs) && pickupArrivalSeconds != null
@@ -1419,11 +1419,17 @@ async function getNavigationState(db, eventId) {
     const arrivalIfLeaveNowMs = pickupArrivalSeconds != null
       ? nowMs + pickupArrivalSeconds * 1000
       : null;
+    const scheduledPickupAtMs = timing.pickupAtSeconds != null
+      ? nowMs + timing.pickupAtSeconds * 1000
+      : null;
     const slackSeconds = Number.isFinite(deadlineMs) && Number.isFinite(arrivalIfLeaveNowMs)
       ? Math.floor((deadlineMs - arrivalIfLeaveNowMs) / 1000)
       : null;
 
-    if (validRoute) cumulativeTravelSeconds += totalTravelSeconds;
+    if (validRoute) {
+      cumulativeTravelSeconds += totalTravelSeconds;
+      cumulativeElapsedSeconds = timing.elapsedAfter;
+    }
 
     const primaryRoute = stage === "carrying"
       ? t?.deliveryRoute
@@ -1456,13 +1462,18 @@ async function getNavigationState(db, eventId) {
         travelSeconds: deliveryTravelSeconds,
       } : null,
       cumulativeTravelSeconds: validRoute ? cumulativeTravelSeconds : null,
+      cumulativeElapsedSeconds: validRoute ? cumulativeElapsedSeconds : null,
+      waitSeconds: validRoute ? Math.max(0, Math.ceil(Number(timing.waitSeconds || 0))) : null,
+      scheduledPickupAt: Number.isFinite(scheduledPickupAtMs)
+        ? new Date(scheduledPickupAtMs).toISOString()
+        : null,
       massBy: Number.isFinite(chainMassByMs) ? new Date(chainMassByMs).toISOString() : null,
       massInSeconds: Number.isFinite(chainMassByMs) ? Math.floor((chainMassByMs - nowMs) / 1000) : null,
       leavePreviousBy: Number.isFinite(legDepartureByMs) ? new Date(legDepartureByMs).toISOString() : null,
       leavePreviousInSeconds: Number.isFinite(legDepartureByMs) ? Math.floor((legDepartureByMs - nowMs) / 1000) : null,
       arrivalIfLeaveNow: Number.isFinite(arrivalIfLeaveNowMs) ? new Date(arrivalIfLeaveNowMs).toISOString() : null,
       finishIfLeaveNow: validRoute
-        ? new Date(nowMs + cumulativeTravelSeconds * 1000).toISOString()
+        ? new Date(nowMs + cumulativeElapsedSeconds * 1000).toISOString()
         : null,
       slackSeconds,
       feasibleIfLeaveNow: slackSeconds == null ? null : slackSeconds >= 0,
@@ -1474,6 +1485,19 @@ async function getNavigationState(db, eventId) {
   if (legs[0]?.route?.ok) {
     route = legs[0].route;
     instruction = navigation.nextInstruction(route);
+    if (
+      instruction?.arrived &&
+      legs[0].stage !== "carrying" &&
+      Number(legs[0].waitSeconds || 0) > 0
+    ) {
+      instruction = {
+        ...instruction,
+        waiting: true,
+        waitSeconds: Number(legs[0].waitSeconds || 0),
+        readyAt: legs[0].objective?.expiresAt || null,
+        text: `AGUARDAR NO MAPA · objetivo em ${Math.ceil(Number(legs[0].waitSeconds || 0))}s`,
+      };
+    }
   }
 
   return {
@@ -1485,13 +1509,16 @@ async function getNavigationState(db, eventId) {
       secondsPerMap,
       totalPending: activeOut.length,
       totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
+      totalElapsedSeconds: legs.length
+        ? Number(legs[legs.length - 1].cumulativeElapsedSeconds || 0)
+        : 0,
       vortexDeliveryZones: transportDeliveryZoneNames("VORTEX").slice(),
       orbsDeliveryZones: transportDeliveryZoneNames("ORBS").slice(),
       optimization: {
         mode: optimized.mode,
         score: optimized.score,
         estimatedScenarios: optimized.estimatedScenarios ?? null,
-        rule: "hit pickup deadlines first; include transport delivery travel; then minimize lateness and map travel"
+        rule: "avoid missed objective times; prefer transport pickups already on the current map; wait until objective time when early; then minimize schedule priority and map travel"
       },
       legs,
     },
