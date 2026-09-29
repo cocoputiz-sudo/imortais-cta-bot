@@ -19,6 +19,7 @@ const telemetry = require("./telemetry");
 const navigation = require("./navigation");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
+const locale = require("./locale");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
@@ -44,6 +45,20 @@ const client = new Client({
 });
 
 function catalog(role) { return WEAPON_CATALOG[role] || []; }
+
+function isSpanish(target) {
+  return locale.isSpanishMember(target?.member || target);
+}
+function localizedRole(role, target) {
+  return locale.roleLabel(role, isSpanish(target));
+}
+function localizedWeapon(weapon, target) {
+  return locale.weaponLabel(weapon, isSpanish(target));
+}
+function localizedWeaponOptions(weapons, target) {
+  const es = isSpanish(target);
+  return weapons.map((w) => locale.weaponOption(w, es));
+}
 
 function timeToTodayUTC(label) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(label.trim());
@@ -242,14 +257,11 @@ async function onThreadText(msg) {
 
   const ev = await db.getEventByThread(msg.channelId);
   if (ev && ev.status === "open") {
-    const weapons = Object.keys(WEAPONS);
-    let matchedWeapon = null;
-    for (const w of weapons) {
-      if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
-    }
+    const matchedWeapon = locale.canonicalWeapon(text);
     if (matchedWeapon) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, null, matchedWeapon); }
     for (const word of words) {
-      if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, ROLE_WORDS[word], null); }
+      const role = ROLE_WORDS[word] || locale.roleFromWord(word);
+      if (role) { await msg.delete().catch(() => {}); return startSignupFromText(msg, ev, role, null); }
     }
     if (/^\d{1,2}$/.test(text)) {
       const vaga = parseInt(text, 10);
@@ -267,14 +279,11 @@ async function onThreadText(msg) {
 
 // reconhecimento de texto no castelo: arma, papel, ou número de vaga
 async function onCasteloText(msg, cast, text, words) {
-  const weapons = Object.keys(WEAPONS);
-  let matchedWeapon = null;
-  for (const w of weapons) {
-    if (norm(w) === text || text.includes(norm(w))) { matchedWeapon = w; break; }
-  }
+  const matchedWeapon = locale.canonicalWeapon(text);
   if (matchedWeapon) { await msg.delete().catch(() => {}); return casteloSignupWeapon(msg, cast, matchedWeapon); }
   for (const word of words) {
-    if (ROLE_WORDS[word]) { await msg.delete().catch(() => {}); return casteloSignupRole(msg, cast, ROLE_WORDS[word]); }
+    const role = ROLE_WORDS[word] || locale.roleFromWord(word);
+    if (role) { await msg.delete().catch(() => {}); return casteloSignupRole(msg, cast, role); }
   }
   if (/^\d{1,2}$/.test(text)) {
     const vaga = parseInt(text, 10);
@@ -284,20 +293,34 @@ async function onCasteloText(msg, cast, text, words) {
 
 async function casteloSignupWeapon(msg, cast, weapon) {
   const username = msg.member?.displayName || msg.author.username;
+  const es = isSpanish(msg.member);
+  const shownWeapon = locale.weaponLabel(weapon, es);
   await db.upsertCasteloSignup({ casteloId: cast.id, userId: msg.author.id, username, weapon, presence: "online", partyIndex: null, slotIndex: null });
   const loc = await applyCasteloReallocation(cast, msg.author.id);
   const txt = loc
-    ? `✅ ${msg.author}, você entrou de **${weapon}** no castelo (Party ${castelo.CASTELO_PT_INDEX.indexOf(loc.partyIndex)+1}, vaga ${loc.slotIndex+1}).`
-    : `📝 ${msg.author}, **${weapon}** anotado como reserva no castelo.`;
+    ? (es
+      ? `✅ ${msg.author}, entraste con **${shownWeapon}** al castillo (Party ${castelo.CASTELO_PT_INDEX.indexOf(loc.partyIndex)+1}, puesto ${loc.slotIndex+1}).`
+      : `✅ ${msg.author}, você entrou de **${shownWeapon}** no castelo (Party ${castelo.CASTELO_PT_INDEX.indexOf(loc.partyIndex)+1}, vaga ${loc.slotIndex+1}).`)
+    : (es
+      ? `📝 ${msg.author}, **${shownWeapon}** anotado como reserva del castillo.`
+      : `📝 ${msg.author}, **${shownWeapon}** anotado como reserva no castelo.`);
   await msg.channel.send({ content: txt }).catch(() => {});
 }
 
 async function casteloSignupRole(msg, cast, role) {
   const armas = WEAPON_CATALOG[role] || [];
   if (!armas.length) return;
+  const es = isSpanish(msg.member);
+  const shownRole = locale.roleLabel(role, es);
   const menu = new StringSelectMenuBuilder().setCustomId(`cweapon|${cast.id}|${msg.author.id}`)
-    .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await msg.channel.send({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+    .setPlaceholder(es ? `Tu arma de ${shownRole}` : `Tua arma de ${shownRole}`)
+    .addOptions(armas.slice(0, 25).map((w) => locale.weaponOption(w, es)));
+  await msg.channel.send({
+    content: es
+      ? `${msg.author}, elige tu arma (${shownRole}):`
+      : `${msg.author}, escolhe tua arma (${shownRole}):`,
+    components: [new ActionRowBuilder().addComponents(menu)]
+  }).catch(() => {});
 }
 
 async function casteloSignupSlotNumber(msg, cast, vaga) {
@@ -309,10 +332,23 @@ async function casteloSignupSlotNumber(msg, cast, vaga) {
     for (const a of slot.accepts) armasSet.add(a.weapon);
   }
   const armas = [...armasSet];
-  if (!armas.length) { await msg.channel.send({ content: `${msg.author}, a vaga ${vaga} não tem armas pra escolher.` }).catch(() => {}); return; }
+  const es = isSpanish(msg.member);
+  if (!armas.length) {
+    await msg.channel.send({ content: es
+      ? `${msg.author}, el puesto ${vaga} no tiene armas disponibles para elegir.`
+      : `${msg.author}, a vaga ${vaga} não tem armas pra escolher.`
+    }).catch(() => {});
+    return;
+  }
   const menu = new StringSelectMenuBuilder().setCustomId(`cweapon|${cast.id}|${msg.author.id}`)
-    .setPlaceholder(`Arma da vaga ${vaga}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await msg.channel.send({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+    .setPlaceholder(es ? `Arma del puesto ${vaga}` : `Arma da vaga ${vaga}`)
+    .addOptions(armas.slice(0, 25).map((w) => locale.weaponOption(w, es)));
+  await msg.channel.send({
+    content: es
+      ? `${msg.author}, el puesto **${vaga}** acepta estas armas, elige la tuya:`
+      : `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`,
+    components: [new ActionRowBuilder().addComponents(menu)]
+  }).catch(() => {});
 }
 
 async function startSignupFromText(msg, ev, role, weapon) {
