@@ -209,6 +209,40 @@ async function init() {
       created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Navegação global do War Room. Não depende de CTA aberto nem de horário.
+    CREATE TABLE IF NOT EXISTS navigation_global_waypoints (
+      id                 BIGSERIAL PRIMARY KEY,
+      scope_key          TEXT NOT NULL DEFAULT 'global',
+      position           INT NOT NULL,
+      objective_type     TEXT NOT NULL,
+      rarity             TEXT,
+      target_zone_id     TEXT NOT NULL,
+      target_zone_name   TEXT NOT NULL,
+      expires_at         TIMESTAMPTZ,
+      created_by         TEXT,
+      status             TEXT NOT NULL DEFAULT 'pending',
+      delivery_zone_id   TEXT,
+      delivery_zone_name TEXT,
+      picked_at          TIMESTAMPTZ,
+      completed_at       TIMESTAMPTZ,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (scope_key, position)
+    );
+    CREATE INDEX IF NOT EXISTS idx_nav_global_scope
+      ON navigation_global_waypoints(scope_key, status, position);
+    CREATE INDEX IF NOT EXISTS idx_nav_global_expiry
+      ON navigation_global_waypoints(expires_at);
+
+    CREATE TABLE IF NOT EXISTS navigation_global_sessions (
+      scope_key          TEXT PRIMARY KEY,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
+      seconds_per_map    INT NOT NULL DEFAULT 90,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
@@ -250,6 +284,35 @@ async function init() {
   // A tabela antiga era de objetivo único. Depois de migrar, esvaziamos para que
   // um "limpar fila" não faça o objetivo legado reaparecer no próximo restart.
   await pool.query(`DELETE FROM cta_navigation_objectives`);
+
+  // Migração única e conservadora para a fila global: se ela ainda estiver vazia,
+  // copia objetivos pendentes/carregando do CTA aberto. Depois disso a navegação
+  // passa a viver fora do ciclo de vida dos CTAs.
+  await pool.query(`
+    INSERT INTO navigation_global_waypoints
+      (scope_key, position, objective_type, rarity, target_zone_id, target_zone_name,
+       expires_at, created_by, status, delivery_zone_id, delivery_zone_name,
+       picked_at, completed_at, created_at, updated_at)
+    SELECT 'global',
+           ROW_NUMBER() OVER (ORDER BY e.created_at, w.position, w.id)::int,
+           w.objective_type, w.rarity, w.target_zone_id, w.target_zone_name,
+           w.expires_at, w.created_by, w.status, w.delivery_zone_id, w.delivery_zone_name,
+           w.picked_at, w.completed_at, w.created_at, w.updated_at
+      FROM cta_navigation_waypoints w
+      JOIN cta_events e ON e.id=w.cta_event_id
+     WHERE e.status='open'
+       AND w.status IN ('pending','carrying')
+       AND NOT EXISTS (
+         SELECT 1 FROM navigation_global_waypoints g WHERE g.scope_key='global'
+       )
+     ORDER BY e.created_at, w.position, w.id
+    ON CONFLICT (scope_key, position) DO NOTHING
+  `);
+  await pool.query(`
+    INSERT INTO navigation_global_sessions(scope_key, updated_at)
+    VALUES ('global', now())
+    ON CONFLICT (scope_key) DO NOTHING
+  `);
 }
 
 async function createEvent({ guildId, channelId, callerId, timeLabel, remind30, remind10, brief = {} }) {
@@ -831,6 +894,163 @@ async function getOpenNavigationObjectives(guildId = null) {
   return rows;
 }
 
+// ---- NAVEGAÇÃO GLOBAL / WAZE (independente de CTA) ----
+async function addGlobalNavigationObjective({
+  objectiveType,
+  rarity = null,
+  targetZoneId,
+  targetZoneName,
+  expiresAt = null,
+  createdBy = null,
+  scopeKey = "global",
+}) {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Serializa inclusões na mesma fila para não disputar a posição MAX+1.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["nav:" + scope]);
+    const { rows } = await client.query(
+      `INSERT INTO navigation_global_waypoints
+         (scope_key, position, objective_type, rarity, target_zone_id, target_zone_name,
+          expires_at, created_by, status, updated_at)
+       SELECT $1,
+              COALESCE(MAX(position),0)+1,
+              $2,$3,$4,$5,$6,$7,'pending',now()
+         FROM navigation_global_waypoints
+        WHERE scope_key=$1
+       RETURNING *`,
+      [
+        scope,
+        String(objectiveType || "OBJETIVO").trim().slice(0, 80),
+        rarity ? String(rarity).trim().slice(0, 40) : null,
+        String(targetZoneId || "").trim(),
+        String(targetZoneName || "").trim(),
+        expiresAt || null,
+        createdBy || null,
+      ]
+    );
+    await client.query(
+      `INSERT INTO navigation_global_sessions(scope_key, updated_at)
+       VALUES ($1,now())
+       ON CONFLICT (scope_key) DO UPDATE SET updated_at=now()`,
+      [scope]
+    );
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function getGlobalNavigationObjectives({ includeDone = true, scopeKey = "global" } = {}) {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const statusWhere = includeDone ? "" : "AND status IN ('pending','carrying')";
+  const { rows } = await pool.query(
+    `SELECT * FROM navigation_global_waypoints
+      WHERE scope_key=$1
+        ${statusWhere}
+      ORDER BY position ASC, id ASC`,
+    [scope]
+  );
+  return rows;
+}
+
+async function compactGlobalNavigationPositions(scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  await pool.query(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (ORDER BY position,id)::int AS new_pos
+         FROM navigation_global_waypoints
+        WHERE scope_key=$1
+     )
+     UPDATE navigation_global_waypoints w
+        SET position=r.new_pos, updated_at=now()
+       FROM ranked r
+      WHERE w.id=r.id AND w.position<>r.new_pos`,
+    [scope]
+  );
+}
+
+async function removeGlobalNavigationObjective(waypointId, scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const { rows } = await pool.query(
+    `DELETE FROM navigation_global_waypoints
+      WHERE scope_key=$1 AND id=$2
+      RETURNING *`,
+    [scope, waypointId]
+  );
+  if (rows[0]) await compactGlobalNavigationPositions(scope);
+  return rows[0] || null;
+}
+
+async function startGlobalNavigationCarry(waypointId, deliveryZoneId, deliveryZoneName, scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const { rows } = await pool.query(
+    `UPDATE navigation_global_waypoints
+        SET status='carrying',
+            delivery_zone_id=$3,
+            delivery_zone_name=$4,
+            picked_at=COALESCE(picked_at,now()),
+            updated_at=now()
+      WHERE scope_key=$1
+        AND id=$2
+        AND objective_type IN ('VORTEX','ORBS')
+        AND status='pending'
+      RETURNING *`,
+    [scope, waypointId, String(deliveryZoneId || "").trim(), String(deliveryZoneName || "").trim()]
+  );
+  return rows[0] || null;
+}
+
+async function completeGlobalNavigationObjective(waypointId, scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const { rows } = await pool.query(
+    `UPDATE navigation_global_waypoints
+        SET status='done', completed_at=now(), updated_at=now()
+      WHERE scope_key=$1 AND id=$2
+      RETURNING *`,
+    [scope, waypointId]
+  );
+  return rows[0] || null;
+}
+
+async function clearGlobalNavigationObjectives(scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const { rows } = await pool.query(
+    `DELETE FROM navigation_global_waypoints WHERE scope_key=$1 RETURNING *`,
+    [scope]
+  );
+  return rows;
+}
+
+async function getGlobalNavigationSession(scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const { rows } = await pool.query(
+    `SELECT * FROM navigation_global_sessions WHERE scope_key=$1 LIMIT 1`,
+    [scope]
+  );
+  return rows[0] || null;
+}
+
+async function setGlobalNavigationSecondsPerMap(secondsPerMap, scopeKey = "global") {
+  const scope = String(scopeKey || "global").trim() || "global";
+  const value = Math.max(20, Math.min(600, Number(secondsPerMap) || 90));
+  const { rows } = await pool.query(
+    `INSERT INTO navigation_global_sessions(scope_key, seconds_per_map, updated_at)
+     VALUES ($1,$2,now())
+     ON CONFLICT (scope_key) DO UPDATE SET
+       seconds_per_map=EXCLUDED.seconds_per_map,
+       updated_at=now()
+     RETURNING *`,
+    [scope, value]
+  );
+  return rows[0];
+}
+
 // ---- ROAMING ----
 async function createRoaming({ guildId, nome, ownerId, vagas }) {
   const { rows } = await pool.query(
@@ -904,6 +1124,9 @@ module.exports = {
   removeNavigationObjective, startNavigationCarry, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
   compactNavigationPositions, getNavigationSession, setNavigationObjectiveMessage,
   setNavigationSecondsPerMap, getOpenNavigationObjectives,
+  addGlobalNavigationObjective, getGlobalNavigationObjectives, removeGlobalNavigationObjective,
+  startGlobalNavigationCarry, completeGlobalNavigationObjective, clearGlobalNavigationObjectives,
+  compactGlobalNavigationPositions, getGlobalNavigationSession, setGlobalNavigationSecondsPerMap,
   createRoaming, getRoaming, getRoamingById, getOpenRoamings, setRoamingField,
   upsertRoamingSignup, getRoamingSignups, deleteRoamingSignup,
   roamingVoiceJoin, roamingVoiceLeave, roamingCloseAllOpen, getRoamingPresence,
