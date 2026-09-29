@@ -1320,6 +1320,75 @@ async function clearNavigationObjectiveCore(ev) {
   return { ok: true, cleared: true };
 }
 
+async function setGlobalNavigationObjectiveCore(input = {}, actorId = null) {
+  const type = String(input.type || "OBJETIVO").trim().toUpperCase().slice(0, 80) || "OBJETIVO";
+  const requestedTarget = input.targetZone || input.targetZoneName || input.targetZoneId;
+
+  if (!requestedTarget) {
+    return { ok: false, error: "Informe o mapa de destino." };
+  }
+
+  const resolved = navigation.resolveZone(requestedTarget);
+  if (!resolved.zone) {
+    return {
+      ok: false,
+      error: "Mapa de destino não encontrado.",
+      matches: resolved.matches.map(navigation.zoneDisplay),
+    };
+  }
+
+  const rarityCheck = validateObjectiveRarity(type, type === "ORBS" ? "" : input.rarity);
+  if (!rarityCheck.ok) return rarityCheck;
+
+  const minutes = Math.max(0, Math.min(240, Number(input.minutes) || 0));
+  const seconds = Math.max(0, Math.min(59, Number(input.seconds) || 0));
+  const durationSeconds = minutes * 60 + seconds;
+  const expiresAt = durationSeconds > 0 ? new Date(Date.now() + durationSeconds * 1000) : null;
+
+  const saved = await db.addGlobalNavigationObjective({
+    objectiveType: type,
+    rarity: rarityCheck.rarity,
+    targetZoneId: resolved.zone.id,
+    targetZoneName: resolved.zone.name,
+    expiresAt,
+    createdBy: actorId ? String(actorId) : null,
+  });
+  const state = await telemetry.getNavigationState(db, null);
+  return { ok: true, objective: saved, state };
+}
+
+async function startGlobalNavigationCarryCore(waypointId, deliveryZoneId, deliveryZoneName) {
+  if (!deliveryZoneId || !deliveryZoneName) {
+    return { ok: false, error: "Mapa de entrega do objetivo transportável não foi calculado." };
+  }
+  const picked = await db.startGlobalNavigationCarry(
+    waypointId,
+    deliveryZoneId,
+    deliveryZoneName
+  ).catch(() => null);
+  if (!picked) return { ok: false, error: "Não foi possível marcar o objetivo como pego." };
+  return { ok: true, objective: picked, state: await telemetry.getNavigationState(db, null) };
+}
+
+async function completeGlobalNavigationObjectiveCore(waypointId) {
+  const done = await db.completeGlobalNavigationObjective(waypointId).catch(() => null);
+  if (!done) return { ok: false, error: "Objetivo não encontrado." };
+  return { ok: true, objective: done, state: await telemetry.getNavigationState(db, null) };
+}
+
+async function removeGlobalNavigationObjectiveCore(waypointId) {
+  const removed = await db.removeGlobalNavigationObjective(waypointId).catch(() => null);
+  if (!removed) return { ok: false, error: "Objetivo não encontrado." };
+  return { ok: true, objective: removed, state: await telemetry.getNavigationState(db, null) };
+}
+
+async function clearGlobalNavigationObjectiveCore() {
+  const previous = await db.getGlobalNavigationObjectives({ includeDone: true }).catch(() => []);
+  if (!previous.length) return { ok: true, cleared: false };
+  await db.clearGlobalNavigationObjectives();
+  return { ok: true, cleared: true, state: await telemetry.getNavigationState(db, null) };
+}
+
 async function slashNavigationObjective(interaction, ev) {
   const targetZone = interaction.options.getString("destino");
   const type = interaction.options.getString("tipo");
@@ -3085,32 +3154,18 @@ const webActions = {
     return { ok: true };
   },
   navigationZones: (query) => navigation.searchZones(query, { limit: 25, blackOnly: true }),
-  navigationState: async (eventId) => telemetry.getNavigationState(db, eventId),
-  setNavigationObjective: async (eventId, input, actorId) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
-    return setNavigationObjectiveCore(ev, input || {}, actorId);
-  },
-  startNavigationCarry: async (eventId, waypointId, deliveryZoneId, deliveryZoneName) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
-    return startNavigationCarryCore(ev, waypointId, deliveryZoneId, deliveryZoneName);
-  },
-  completeNavigationObjective: async (eventId, waypointId) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
-    return completeNavigationObjectiveCore(ev, waypointId);
-  },
-  removeNavigationObjective: async (eventId, waypointId) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev || ev.status !== "open") return { ok: false, error: "CTA não encontrado ou encerrado." };
-    return removeNavigationObjectiveCore(ev, waypointId);
-  },
-  clearNavigationObjective: async (eventId) => {
-    const ev = await db.getEvent(eventId).catch(() => null);
-    if (!ev) return { ok: false, error: "CTA não encontrado." };
-    return clearNavigationObjectiveCore(ev);
-  },
+  // Navegação do site é global e permanece disponível com ou sem CTA aberto.
+  navigationState: async () => telemetry.getNavigationState(db, null),
+  setNavigationObjective: async (_eventId, input, actorId) =>
+    setGlobalNavigationObjectiveCore(input || {}, actorId),
+  startNavigationCarry: async (_eventId, waypointId, deliveryZoneId, deliveryZoneName) =>
+    startGlobalNavigationCarryCore(waypointId, deliveryZoneId, deliveryZoneName),
+  completeNavigationObjective: async (_eventId, waypointId) =>
+    completeGlobalNavigationObjectiveCore(waypointId),
+  removeNavigationObjective: async (_eventId, waypointId) =>
+    removeGlobalNavigationObjectiveCore(waypointId),
+  clearNavigationObjective: async () =>
+    clearGlobalNavigationObjectiveCore(),
   flashmass: async (time, actorId) => {
     const ch = await client.channels.fetch(CFG.ctaChannelId).catch(() => null);
     if (!ch) return { ok: false, error: "Canal do CTA não configurado." };
