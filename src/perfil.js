@@ -15,6 +15,7 @@ const {
   MessageFlags,
 } = require("discord.js");
 const { WEAPONS, WEAPON_FAMILY } = require("./comps");
+const locale = require("./locale");
 
 const PROFILE_CHANNEL_ID = process.env.PROFILE_CHANNEL_ID || "1550716945718972467";
 const STAFF_LOG_CHANNEL_ID = process.env.STAFF_LOG_CHANNEL_ID || null;
@@ -52,6 +53,17 @@ const TURNO_ORDER = ["Diurno", "Noturno"];
 // os três blocos de função
 const SLOTS = ["main", "second", "fill"];
 const SLOT_LABEL = { main: "Principal", second: "2ª função", fill: "Fill" };
+const SLOT_LABEL_ES = { main: "Principal", second: "2ª función", fill: "Fill" };
+
+function isSpanish(interaction) {
+  return locale.isSpanishMember(interaction?.member);
+}
+function roleDisplay(role, es = false) {
+  return es ? locale.roleLabel(role, true) : (ROLE_DEFS[role]?.label || role);
+}
+function weaponDisplay(weapon, es = false) {
+  return locale.weaponLabel(weapon, es);
+}
 
 const U = (w) => (w || "").trim().toUpperCase();
 const IP_WEAPONS = ["URSINAS", "CRAVADAS"];
@@ -167,64 +179,66 @@ function allWeapons(d) {
 function needsIP(d) { return allWeapons(d).some((w) => IP_WEAPONS.includes(U(w))); }
 function rolesChosen(d) { return SLOTS.map((s) => d.slots[s].role).filter(Boolean); }
 
-function summary(d) {
-  const line = (s) => {
-    const sl = d.slots[s];
+function summary(d, es = false) {
+  const line = (slot) => {
+    const sl = d.slots[slot];
     if (!sl.role) return null;
-    const ws = [sl.w1, sl.w2].filter(Boolean).join(" / ") || "—";
-    return `**${SLOT_LABEL[s]}:** ${ROLE_DEFS[sl.role].label} — ${ws}`;
+    const ws = [sl.w1, sl.w2].filter(Boolean).map(w => weaponDisplay(w, es)).join(" / ") || "—";
+    const slotLabel = es ? SLOT_LABEL_ES[slot] : SLOT_LABEL[slot];
+    return `**${slotLabel}:** ${roleDisplay(sl.role, es)} — ${ws}`;
   };
   const ip = [];
-  if (d.ipUrsinas) ip.push(`URSINAS ${d.ipUrsinas}`);
-  if (d.ipCravadas) ip.push(`CRAVADAS ${d.ipCravadas}`);
+  if (d.ipUrsinas) ip.push(`${weaponDisplay("URSINAS", es)} ${d.ipUrsinas}`);
+  if (d.ipCravadas) ip.push(`${weaponDisplay("CRAVADAS", es)} ${d.ipCravadas}`);
   return SLOTS.map(line).filter(Boolean)
-    .concat((d.turnos || []).length ? [`**Horários:** ${d.turnos.map((t) => TURNO_DEFS[t]?.label || t).join(", ")}`] : [])
+    .concat((d.turnos || []).length ? [`**${es ? "Horarios" : "Horários"}:** ${d.turnos.map((t) => TURNO_DEFS[t]?.label || t).join(", ")}`] : [])
     .concat(ip.length ? [`**IP:** ${ip.join(" · ")}`] : [])
-    .join("\n") || "_(nada preenchido ainda)_";
+    .join("\n") || (es ? "_(todavía no has completado nada)_" : "_(nada preenchido ainda)_");
 }
 
 // ---------------------------------------------------------------------------
 // COMPONENTES
 // ---------------------------------------------------------------------------
-function roleRow(slot, exclude = [], skipLabel = null) {
-  const ph = slot === "main" ? "Tua função principal"
-    : slot === "second" ? "Tua 2ª função" : "Função de fill";
+function roleRow(slot, exclude = [], skipLabel = null, es = false) {
+  const ph = es
+    ? (slot === "main" ? "Tu rol principal" : slot === "second" ? "Tu 2º rol" : "Rol de fill")
+    : (slot === "main" ? "Tua função principal" : slot === "second" ? "Tua 2ª função" : "Função de fill");
   const menu = new StringSelectMenuBuilder().setCustomId(`perfil|role|${slot}`).setPlaceholder(ph);
   for (const r of ROLE_ORDER) {
     if (exclude.includes(r)) continue;
-    menu.addOptions({ label: ROLE_DEFS[r].label, value: r, emoji: ROLE_DEFS[r].emoji });
+    menu.addOptions({ label: roleDisplay(r, es), value: r, emoji: ROLE_DEFS[r].emoji });
   }
   if (skipLabel) menu.addOptions({ label: skipLabel, value: "__skip__", emoji: "🚫" });
   return new ActionRowBuilder().addComponents(menu);
 }
 
-function weaponRow(role, slot, which, withNone) {
+function weaponRow(role, slot, which, withNone, es = false) {
   const menu = new StringSelectMenuBuilder().setCustomId(`perfil|${which}|${slot}`)
-    .setPlaceholder(which === "w1" ? "1ª arma" : "2ª arma (opcional)");
+    .setPlaceholder(which === "w1" ? (es ? "1ª arma" : "1ª arma") : (es ? "2ª arma (opcional)" : "2ª arma (opcional)"));
   const ws = weaponsForRole(role).slice(0, withNone ? 24 : 25);
-  for (const w of ws) menu.addOptions({ label: w.slice(0, 100), value: w });
-  if (withNone) menu.addOptions({ label: "— nenhuma —", value: "__none__" });
+  for (const w of ws) menu.addOptions({ label: weaponDisplay(w, es).slice(0, 100), value: w });
+  if (withNone) menu.addOptions({ label: es ? "— ninguna —" : "— nenhuma —", value: "__none__" });
   return new ActionRowBuilder().addComponents(menu);
 }
 
-function turnoRow() {
+function turnoRow(es = false) {
   const menu = new StringSelectMenuBuilder().setCustomId("perfil|turnos")
-    .setPlaceholder("Em quais horários você costuma jogar?")
+    .setPlaceholder(es ? "¿En qué horarios sueles jugar?" : "Em quais horários você costuma jogar?")
     .setMinValues(1).setMaxValues(TURNO_ORDER.length);
   for (const t of TURNO_ORDER) menu.addOptions({ label: TURNO_DEFS[t].label, value: t, emoji: TURNO_DEFS[t].emoji });
   return new ActionRowBuilder().addComponents(menu);
 }
 
-function ipButtonRow() {
+function ipButtonRow(es = false) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("perfil|ipopen").setLabel("Informar IP").setEmoji("🔢").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId("perfil|ipopen").setLabel(es ? "Informar IP" : "Informar IP").setEmoji("🔢").setStyle(ButtonStyle.Primary)
   );
 }
 
-function coreRow() {
+function coreRow(es = false) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("perfil|core|sim").setLabel("Sou core").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("perfil|core|nao").setLabel("Não sou core").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("perfil|core|sim").setLabel(es ? "Soy core" : "Sou core").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("perfil|core|nao").setLabel(es ? "No soy core" : "Não sou core").setStyle(ButtonStyle.Secondary)
   );
 }
 
