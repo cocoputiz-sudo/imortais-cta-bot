@@ -352,32 +352,53 @@ async function casteloSignupSlotNumber(msg, cast, vaga) {
 }
 
 async function startSignupFromText(msg, ev, role, weapon) {
+  const es = isSpanish(msg.member);
   if (role === "Looter") {
     const username = msg.member?.displayName || msg.author.username;
     await db.upsertSignup({ eventId: ev.id, userId: msg.author.id, username, weapon: "LOOTER", presence: "online", partyIndex: null, slotIndex: null, ip: null });
     await applyReallocationMsg(ev, msg.guild);
-    await msg.channel.send({ content: `💰 ${msg.author}, você entrou como **Looter**.` }).catch(() => {});
+    await msg.channel.send({ content: es
+      ? `💰 ${msg.author}, entraste como **Saqueador**.`
+      : `💰 ${msg.author}, você entrou como **Looter**.`
+    }).catch(() => {});
     return;
   }
   if (weapon) {
     const role2 = WEAPONS[weapon]?.role;
+    const shownWeapon = locale.weaponLabel(weapon, es);
+    const shownRole = locale.roleLabel(role2, es);
     const IP_WEAPONS = ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"];
     if (IP_WEAPONS.includes(weapon.toUpperCase())) {
-      await msg.channel.send({ content: `${msg.author}, **${weapon}** precisa do IP. Clica no botão **${role2}** na planilha acima pra escolher e informar o IP.` }).catch(() => {});
+      await msg.channel.send({ content: es
+        ? `${msg.author}, **${shownWeapon}** necesita IP. Pulsa el botón **${shownRole}** de la planilla para elegirla e informar el IP.`
+        : `${msg.author}, **${shownWeapon}** precisa do IP. Clica no botão **${shownRole}** na planilha acima pra escolher e informar o IP.`
+      }).catch(() => {});
       return;
     }
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}|0|${msg.author.id}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}|0|${msg.author.id}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`presence|${ev.id}|online|${weapon}|0|${msg.author.id}`).setLabel(es ? "Ya estoy ON" : "Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`presence|${ev.id}|later|${weapon}|0|${msg.author.id}`).setLabel(es ? "Entro a la hora" : "Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
     );
-    await msg.channel.send({ content: `${msg.author}, **${weapon}** — e aí, presença?`, components: [row] }).catch(() => {});
+    await msg.channel.send({
+      content: es
+        ? `${msg.author}, **${shownWeapon}** seleccionada. ¿Presencia?`
+        : `${msg.author}, **${shownWeapon}** — e aí, presença?`,
+      components: [row]
+    }).catch(() => {});
     return;
   }
   const armas = WEAPON_CATALOG[role] || [];
   if (!armas.length) return;
+  const shownRole = locale.roleLabel(role, es);
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
-    .setPlaceholder(`Tua arma de ${role}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await msg.channel.send({ content: `${msg.author}, escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+    .setPlaceholder(es ? `Tu arma de ${shownRole}` : `Tua arma de ${shownRole}`)
+    .addOptions(armas.slice(0, 25).map((w) => locale.weaponOption(w, es)));
+  await msg.channel.send({
+    content: es
+      ? `${msg.author}, elige tu arma (${shownRole}):`
+      : `${msg.author}, escolhe tua arma (${shownRole}):`,
+    components: [new ActionRowBuilder().addComponents(menu)]
+  }).catch(() => {});
 }
 
 async function startSignupFromSlotNumber(msg, ev, vaga) {
@@ -390,13 +411,23 @@ async function startSignupFromSlotNumber(msg, ev, vaga) {
     for (const a of slot.accepts) armasSet.add(a.weapon);
   }
   const armas = [...armasSet];
+  const es = isSpanish(msg.member);
   if (!armas.length) {
-    await msg.channel.send({ content: `${msg.author}, a vaga ${vaga} não tem armas pra escolher (ou é a vaga do caller).` }).catch(() => {});
+    await msg.channel.send({ content: es
+      ? `${msg.author}, el puesto ${vaga} no tiene armas para elegir (o es el puesto del caller).`
+      : `${msg.author}, a vaga ${vaga} não tem armas pra escolher (ou é a vaga do caller).`
+    }).catch(() => {});
     return;
   }
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${ev.id}|${msg.author.id}`)
-    .setPlaceholder(`Arma da vaga ${vaga}`).addOptions(armas.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await msg.channel.send({ content: `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`, components: [new ActionRowBuilder().addComponents(menu)] }).catch(() => {});
+    .setPlaceholder(es ? `Arma del puesto ${vaga}` : `Arma da vaga ${vaga}`)
+    .addOptions(armas.slice(0, 25).map((w) => locale.weaponOption(w, es)));
+  await msg.channel.send({
+    content: es
+      ? `${msg.author}, el puesto **${vaga}** acepta estas armas, elige la tuya:`
+      : `${msg.author}, a vaga **${vaga}** aceita estas armas — escolhe a tua:`,
+    components: [new ActionRowBuilder().addComponents(menu)]
+  }).catch(() => {});
 }
 
 async function applyReallocationMsg(ev, guild) {
@@ -656,51 +687,66 @@ function buildRolePicker(eventId) {
 
 async function onRolePick(interaction) {
   const [, eventId, role] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
+  const shownRole = locale.roleLabel(role, es);
   const ev = await db.getEvent(eventId);
   if (!ev)
-    return interaction.reply({ content: "⚠️ Não achei esse CTA no sistema. Avisa o caller.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: es ? "⚠️ No encontré este CTA en el sistema. Avísale al caller." : "⚠️ Não achei esse CTA no sistema. Avisa o caller.", flags: MessageFlags.Ephemeral });
   if (ev.status !== "open")
-    return interaction.reply({ content: `Esse CTA está **${ev.status === "cancelled" ? "cancelado" : "fechado"}**.`, flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: es
+      ? `Este CTA está **${ev.status === "cancelled" ? "cancelado" : "cerrado"}**.`
+      : `Esse CTA está **${ev.status === "cancelled" ? "cancelado" : "fechado"}**.`,
+      flags: MessageFlags.Ephemeral
+    });
   const weapons = catalog(role);
-  if (!weapons.length) return interaction.reply({ content: "Sem armas nesse papel.", flags: MessageFlags.Ephemeral });
+  if (!weapons.length) return interaction.reply({ content: es ? "No hay armas para este rol." : "Sem armas nesse papel.", flags: MessageFlags.Ephemeral });
   const menu = new StringSelectMenuBuilder().setCustomId(`weapon|${eventId}`)
-    .setPlaceholder(`Tua arma de ${role}`).addOptions(weapons.slice(0, 25).map((w) => ({ label: w, value: w })));
-  await interaction.reply({ content: `Escolhe tua arma (${role}):`, components: [new ActionRowBuilder().addComponents(menu)], flags: MessageFlags.Ephemeral });
+    .setPlaceholder(es ? `Tu arma de ${shownRole}` : `Tua arma de ${shownRole}`)
+    .addOptions(weapons.slice(0, 25).map((w) => locale.weaponOption(w, es)));
+  await interaction.reply({
+    content: es ? `Elige tu arma (${shownRole}):` : `Escolhe tua arma (${shownRole}):`,
+    components: [new ActionRowBuilder().addComponents(menu)],
+    flags: MessageFlags.Ephemeral
+  });
 }
 
 async function onWeaponPick(interaction) {
   const [, eventId, ownerId] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
   if (ownerId && interaction.user.id !== ownerId)
-    return interaction.reply({ content: "Esse menu é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: es ? "Este menú es de otra persona. Escribe tu rol en el hilo para abrir el tuyo." : "Esse menu é de outra pessoa. Escreve tua função na thread pra pingar a tua.", flags: MessageFlags.Ephemeral });
   const weapon = interaction.values[0];
+  const shownWeapon = locale.weaponLabel(weapon, es);
   const IP_WEAPONS = ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"];
   if (IP_WEAPONS.includes(weapon.toUpperCase())) {
     const modal = new ModalBuilder().setCustomId(`ipmodal|${eventId}|${encodeURIComponent(weapon)}`)
-      .setTitle(`IP da tua ${weapon}`);
-    const input = new TextInputBuilder().setCustomId("ip").setLabel("Qual teu IP? (ex: 1450)")
+      .setTitle((es ? `IP de ${shownWeapon}` : `IP da tua ${shownWeapon}`).slice(0, 45));
+    const input = new TextInputBuilder().setCustomId("ip").setLabel(es ? "¿Cuál es tu IP? (ej: 1450)" : "Qual teu IP? (ex: 1450)")
       .setStyle(TextInputStyle.Short).setRequired(true).setMinLength(3).setMaxLength(5);
     modal.addComponents(new ActionRowBuilder().addComponents(input));
     return interaction.showModal(modal);
   }
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}|0|${ownerId || ""}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}|0|${ownerId || ""}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}|0|${ownerId || ""}`).setLabel(es ? "Ya estoy ON" : "Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}|0|${ownerId || ""}`).setLabel(es ? "Entro a la hora" : "Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
   );
-  await interaction.update({ content: `**${weapon}** selecionada. E aí:`, components: [row] });
+  await interaction.update({ content: es ? `**${shownWeapon}** seleccionada. ¿Presencia?` : `**${shownWeapon}** selecionada. E aí:`, components: [row] });
 }
 
 async function onIpModal(interaction) {
   const [, eventId, wEnc] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
   const weapon = decodeURIComponent(wEnc);
+  const shownWeapon = locale.weaponLabel(weapon, es);
   const raw = interaction.fields.getTextInputValue("ip").replace(/\D/g, "");
   const ip = parseInt(raw, 10);
   if (!ip || ip < 100 || ip > 2000)
-    return interaction.reply({ content: "IP inválido. Digita só o número, ex: 1450.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: es ? "IP inválido. Escribe solo el número, ej: 1450." : "IP inválido. Digita só o número, ex: 1450.", flags: MessageFlags.Ephemeral });
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}|${ip}`).setLabel("Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}|${ip}`).setLabel("Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|online|${weapon}|${ip}`).setLabel(es ? "Ya estoy ON" : "Já estou ON").setEmoji("🟢").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`presence|${eventId}|later|${weapon}|${ip}`).setLabel(es ? "Entro a la hora" : "Entro no horário").setEmoji("🕐").setStyle(ButtonStyle.Secondary),
   );
-  await interaction.reply({ content: `**${weapon}** (IP ${ip}) selecionada. E aí:`, components: [row], flags: MessageFlags.Ephemeral });
+  await interaction.reply({ content: es ? `**${shownWeapon}** (IP ${ip}) seleccionada. ¿Presencia?` : `**${shownWeapon}** (IP ${ip}) selecionada. E aí:`, components: [row], flags: MessageFlags.Ephemeral });
 }
 
 // ---- numeração: planilha (ordem visual) <-> índice fixo do catálogo ----
