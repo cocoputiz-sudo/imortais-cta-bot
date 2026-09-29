@@ -1503,7 +1503,7 @@ const PAGE = `<!doctype html>
               ? ''
               : '<div class="nav2-mass'+massClass+'">'+(Number(leg.massInSeconds)<=0?'🚨 MASSAR/SAIR AGORA':'📣 MASSAR/SAIR EM '+navDelta(leg.massInSeconds)+(massClock?' · ATÉ '+esc(massClock):''))+'</div>';
           var deadline=obj.expiresAt
-            ? '<span>⏳ '+(obj.expired?'EXPIRADO':navCountdown(obj.remainingSeconds))+'</span>'
+            ? '<span>⏳ '+(obj.ready?'PRONTO':navCountdown(obj.remainingSeconds))+'</span>'
             : '<span>⏳ sem limite</span>';
           function stepHtml(route,label){
             if(!route||!route.ok||!route.steps) return '';
@@ -1538,7 +1538,8 @@ const PAGE = `<!doctype html>
             } else if(carrying){
               acts='<div class="nav2-qactions"><button class="btn ghost" '+(arrivedHere?'data-nav-complete="'+esc(obj.id)+'"':'disabled')+'>'+(arrivedHere?'✓ Entregue':'📦 Em transporte')+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
             } else {
-              acts='<div class="nav2-qactions"><button class="btn ghost" data-nav-complete="'+esc(obj.id)+'">✓ Concluído</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+              var canComplete=arrivedHere&&Number(leg.waitSeconds||0)<=0;
+              acts='<div class="nav2-qactions"><button class="btn ghost" '+(canComplete?'data-nav-complete="'+esc(obj.id)+'"':'disabled')+'>'+(canComplete?'✓ Concluído':(arrivedHere?'⏳ Aguardar '+esc(navDelta(leg.waitSeconds||0)):'🔒 Aguardar vez'))+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
             }
           }
           var targetLine=isTransport
