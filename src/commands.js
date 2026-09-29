@@ -7,6 +7,7 @@ const {
 const db = require("./db");
 const navigation = require("./navigation");
 const { PARTIES, WEAPONS } = require("./comps");
+const locale = require("./locale");
 
 const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 
@@ -190,9 +191,17 @@ async function handleAutocomplete(interaction) {
     })));
   }
   if (focused.name === "arma") {
-    const q = (focused.value || "").toUpperCase();
-    const all = Object.keys(WEAPONS).filter((w) => w.includes(q));
-    return interaction.respond(all.slice(0, 25).map((w) => ({ name: w, value: w })));
+    const es = locale.isSpanishMember(interaction.member);
+    const q = String(focused.value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const all = Object.keys(WEAPONS).filter((w) => {
+      const canonical = w.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const shown = locale.weaponLabel(w, es).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      return canonical.includes(q) || shown.includes(q);
+    });
+    return interaction.respond(all.slice(0, 25).map((w) => ({
+      name: locale.weaponLabel(w, es),
+      value: w
+    })));
   }
   if (focused.name === "nome") {
     const rs = await db.getOpenRoamings(interaction.guildId);
