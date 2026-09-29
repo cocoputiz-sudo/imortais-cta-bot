@@ -1400,6 +1400,19 @@ async function slashNavigationNext(interaction, ev) {
     });
   }
 
+  if (firstStatus === "pending") {
+    if (!state.instruction?.arrived) {
+      return interaction.editReply({
+        content: `⚠️ Ainda não chegamos ao objetivo em **${first.targetZoneName}**.`
+      });
+    }
+    if (state.instruction?.waiting && Number(state.instruction.waitSeconds || 0) > 0) {
+      return interaction.editReply({
+        content: `⏳ Já estamos em **${first.targetZoneName}**, mas faltam **${fmtDurationShort(state.instruction.waitSeconds)}** para o horário do objetivo.`
+      });
+    }
+  }
+
   const result = await completeNavigationObjectiveCore(ev, first.id);
   if (!result.ok) {
     return interaction.editReply({ content: "⚠️ " + (result.error || "Não foi possível concluir o objetivo.") });
