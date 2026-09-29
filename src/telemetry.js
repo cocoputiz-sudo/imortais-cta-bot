@@ -1363,6 +1363,7 @@ async function getNavigationState(db, eventId) {
       targetZoneName: o.target_zone_name,
       expiresAt: o.expires_at,
       remainingSeconds: Number.isFinite(expiresMs) ? Math.floor(expiresMs / 1000) : null,
+      ready: Number.isFinite(expiresMs) ? expiresMs <= 0 : true,
       expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
       deliveryZoneId: o.delivery_zone_id || plannedDelivery?.id || null,
       deliveryZoneName: o.delivery_zone_name || plannedDelivery?.name || null,
