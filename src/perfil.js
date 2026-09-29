@@ -246,37 +246,49 @@ function coreRow(es = false) {
 // FLUXO
 // ---------------------------------------------------------------------------
 async function openWizard(interaction) {
+  const es = isSpanish(interaction);
   drafts.set(dkey(interaction), freshDraft());
   const atual = await getPlayer(interaction.guildId, interaction.user.id);
   const nota = atual
-    ? `Você já tem perfil. Refazer sobrescreve o anterior.\n\n`
+    ? (es ? `Ya tienes un perfil. Si lo rehaces, sustituirá al anterior.\n\n` : `Você já tem perfil. Refazer sobrescreve o anterior.\n\n`)
     : "";
   return interaction.reply({
-    content: `📋 **Montar meu perfil**\n${nota}Escolhe tua **função principal** 👇`,
-    components: [roleRow("main")],
+    content: es
+      ? `📋 **Crear mi perfil**\n${nota}Elige tu **rol principal** 👇`
+      : `📋 **Montar meu perfil**\n${nota}Escolhe tua **função principal** 👇`,
+    components: [roleRow("main", [], null, es)],
     flags: MessageFlags.Ephemeral,
   });
 }
 
 async function askSecond(interaction) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   return interaction.update({
-    content: `${summary(d)}\n\nVocê joga uma **2ª função**? 👇`,
-    components: [roleRow("second", rolesChosen(d), "Não tenho 2ª função")],
+    content: es
+      ? `${summary(d, es)}\n\n¿Juegas un **2º rol**? 👇`
+      : `${summary(d, es)}\n\nVocê joga uma **2ª função**? 👇`,
+    components: [roleRow("second", rolesChosen(d), es ? "No tengo 2º rol" : "Não tenho 2ª função", es)],
   });
 }
 async function askFill(interaction) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   return interaction.update({
-    content: `${summary(d)}\n\nTem uma **função de fill** (que você pega pra tapar buraco)? 👇`,
-    components: [roleRow("fill", rolesChosen(d), "Não tenho fill")],
+    content: es
+      ? `${summary(d, es)}\n\n¿Tienes un **rol de fill** para cubrir huecos? 👇`
+      : `${summary(d, es)}\n\nTem uma **função de fill** (que você pega pra tapar buraco)? 👇`,
+    components: [roleRow("fill", rolesChosen(d), es ? "No tengo fill" : "Não tenho fill", es)],
   });
 }
 async function askTurnos(interaction) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   return interaction.update({
-    content: `${summary(d)}\n\nEm quais **horários** você costuma jogar? 👇`,
-    components: [turnoRow()],
+    content: es
+      ? `${summary(d, es)}\n\n¿En qué **horarios** sueles jugar? 👇`
+      : `${summary(d, es)}\n\nEm quais **horários** você costuma jogar? 👇`,
+    components: [turnoRow(es)],
   });
 }
 async function advanceAfterSlot(interaction, slot) {
@@ -287,20 +299,27 @@ async function advanceAfterSlot(interaction, slot) {
 
 async function onRolePick(interaction, slot) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   const v = interaction.values[0];
   if (v === "__skip__") return advanceAfterSlot(interaction, slot);
   d.slots[slot] = { role: v };
+  const slotLabel = es ? SLOT_LABEL_ES[slot] : SLOT_LABEL[slot];
   return interaction.update({
-    content: `${SLOT_LABEL[slot]}: **${ROLE_DEFS[v].label}**.\nTua **1ª arma** nessa função 👇`,
-    components: [weaponRow(v, slot, "w1", false)],
+    content: es
+      ? `${slotLabel}: **${roleDisplay(v, es)}**.\nElige tu **1ª arma** para este rol 👇`
+      : `${slotLabel}: **${roleDisplay(v, es)}**.\nTua **1ª arma** nessa função 👇`,
+    components: [weaponRow(v, slot, "w1", false, es)],
   });
 }
 async function onW1(interaction, slot) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   d.slots[slot].w1 = interaction.values[0];
   return interaction.update({
-    content: `1ª arma: **${d.slots[slot].w1}**.\n**2ª arma** nessa função (ou nenhuma) 👇`,
-    components: [weaponRow(d.slots[slot].role, slot, "w2", true)],
+    content: es
+      ? `1ª arma: **${weaponDisplay(d.slots[slot].w1, es)}**.\nElige tu **2ª arma** para este rol (o ninguna) 👇`
+      : `1ª arma: **${weaponDisplay(d.slots[slot].w1, es)}**.\n**2ª arma** nessa função (ou nenhuma) 👇`,
+    components: [weaponRow(d.slots[slot].role, slot, "w2", true, es)],
   });
 }
 async function onW2(interaction, slot) {
@@ -312,30 +331,36 @@ async function onW2(interaction, slot) {
 
 async function onTurnos(interaction) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   d.turnos = interaction.values.slice();
   if (needsIP(d)) {
     return interaction.update({
-      content: `${summary(d)}\n\nVocê marcou uma arma de IP (URSINAS/CRAVADAS). Clica pra informar o IP 👇`,
-      components: [ipButtonRow()],
+      content: es
+        ? `${summary(d, es)}\n\nMarcaste un arma que necesita IP (${weaponDisplay("URSINAS", es)}/${weaponDisplay("CRAVADAS", es)}). Pulsa para informar el IP 👇`
+        : `${summary(d, es)}\n\nVocê marcou uma arma de IP (URSINAS/CRAVADAS). Clica pra informar o IP 👇`,
+      components: [ipButtonRow(es)],
     });
   }
   return interaction.update({
-    content: `${summary(d)}\n\nÚltima: você se considera **core**? (a staff confirma depois) 👇`,
-    components: [coreRow()],
+    content: es
+      ? `${summary(d, es)}\n\nÚltima pregunta: ¿te consideras **core**? (la staff lo confirma después) 👇`
+      : `${summary(d, es)}\n\nÚltima: você se considera **core**? (a staff confirma depois) 👇`,
+    components: [coreRow(es)],
   });
 }
 
 async function onIpOpen(interaction) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   const ws = allWeapons(d).map(U);
-  const modal = new ModalBuilder().setCustomId("perfil|ipmodal").setTitle("IP das tuas armas");
+  const modal = new ModalBuilder().setCustomId("perfil|ipmodal").setTitle(es ? "IP de tus armas" : "IP das tuas armas");
   if (ws.includes("URSINAS"))
     modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("ip_ursinas").setLabel("IP URSINAS (ex: 1450)")
+      new TextInputBuilder().setCustomId("ip_ursinas").setLabel(`IP ${weaponDisplay("URSINAS", es)} (${es ? "ej" : "ex"}: 1450)`.slice(0, 45))
         .setStyle(TextInputStyle.Short).setRequired(false)));
   if (ws.includes("CRAVADAS"))
     modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("ip_cravadas").setLabel("IP CRAVADAS (ex: 1450)")
+      new TextInputBuilder().setCustomId("ip_cravadas").setLabel(`IP ${weaponDisplay("CRAVADAS", es)} (${es ? "ej" : "ex"}: 1450)`.slice(0, 45))
         .setStyle(TextInputStyle.Short).setRequired(false)));
   return interaction.showModal(modal);
 }
@@ -350,9 +375,12 @@ async function onIpModal(interaction) {
   };
   d.ipUrsinas = parse("ip_ursinas") ?? d.ipUrsinas ?? null;
   d.ipCravadas = parse("ip_cravadas") ?? d.ipCravadas ?? null;
+  const es = isSpanish(interaction);
   const payload = {
-    content: `${summary(d)}\n\nÚltima: você se considera **core**? (a staff confirma depois) 👇`,
-    components: [coreRow()],
+    content: es
+      ? `${summary(d, es)}\n\nÚltima pregunta: ¿te consideras **core**? (la staff lo confirma después) 👇`
+      : `${summary(d, es)}\n\nÚltima: você se considera **core**? (a staff confirma depois) 👇`,
+    components: [coreRow(es)],
   };
   if (interaction.isFromMessage && interaction.isFromMessage()) return interaction.update(payload);
   return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
@@ -360,6 +388,7 @@ async function onIpModal(interaction) {
 
 async function onCore(interaction, claimed) {
   const d = draft(interaction);
+  const es = isSpanish(interaction);
   const username = interaction.member?.displayName || interaction.user.username;
   await upsertPlayer({
     guildId: interaction.guildId, userId: interaction.user.id, username,
@@ -372,17 +401,30 @@ async function onCore(interaction, claimed) {
 
   const cargo = await applyRoleCargo(interaction, d.slots.main.role);
   const cargoLine = cargo.ok
-    ? `\n🏷️ Cargo **${ROLE_DEFS[d.slots.main.role].label}** aplicado.`
-    : `\n⚠️ Não consegui aplicar o cargo. Confere se o bot tem **Gerenciar Cargos** e se o cargo dele está **acima** dos cargos de função.`;
+    ? (es
+      ? `\n🏷️ Rol **${roleDisplay(d.slots.main.role, es)}** aplicado.`
+      : `\n🏷️ Cargo **${roleDisplay(d.slots.main.role, es)}** aplicado.`)
+    : (es
+      ? `\n⚠️ No pude aplicar el rol. Comprueba que el bot tenga **Gestionar roles** y esté por encima de los roles de función.`
+      : `\n⚠️ Não consegui aplicar o cargo. Confere se o bot tem **Gerenciar Cargos** e se o cargo dele está **acima** dos cargos de função.`);
 
   let extra = "";
   if (claimed) {
     const ok = await notifyStaffCore(interaction, username);
-    extra = ok
-      ? "\n\n🕐 Você se declarou **core** — mandei pra staff confirmar."
-      : "\n\n🕐 Você se declarou **core** — a staff vai confirmar (não achei o canal de staff, avisa um Mestre de Guerra).";
+    extra = es
+      ? (ok
+        ? "\n\n🕐 Te declaraste **core**; envié la solicitud a la staff."
+        : "\n\n🕐 Te declaraste **core**; la staff lo confirmará después.")
+      : (ok
+        ? "\n\n🕐 Você se declarou **core** — mandei pra staff confirmar."
+        : "\n\n🕐 Você se declarou **core** — a staff vai confirmar (não achei o canal de staff, avisa um Mestre de Guerra).");
   }
-  return interaction.update({ content: `✅ **Perfil salvo!**\n\n${summary(d)}${cargoLine}${extra}`, components: [] });
+  return interaction.update({
+    content: es
+      ? `✅ **¡Perfil guardado!**\n\n${summary(d, es)}${cargoLine}${extra}`
+      : `✅ **Perfil salvo!**\n\n${summary(d, es)}${cargoLine}${extra}`,
+    components: []
+  });
 }
 
 // Dá o cargo da função principal e tira os outros cargos de função (troca).
