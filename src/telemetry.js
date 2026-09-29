@@ -780,13 +780,72 @@ function navDeadlineMs(objective) {
 
 function navPlanCompare(a, b) {
   if (!b) return -1;
-  const keys = ["impossible", "missed", "lateSeconds", "travelSeconds", "deadlineTie"];
+  // Primeiro preserva objetivos; depois evita sair de um pickup transportável que já
+  // está no mapa atual; só então usa horário e distância como desempate.
+  const keys = [
+    "impossible",
+    "missed",
+    "lateSeconds",
+    "localPickupDeferrals",
+    "deadlineTie",
+    "travelSeconds",
+  ];
   for (const key of keys) {
     const av = Number(a?.[key] || 0);
     const bv = Number(b?.[key] || 0);
     if (av !== bv) return av < bv ? -1 : 1;
   }
   return 0;
+}
+
+function navTransitionTiming(objective, transition, elapsedBefore, nowMs) {
+  const elapsed = Math.max(0, Number(elapsedBefore) || 0);
+  if (!transition?.ok) {
+    return {
+      pickupArrivalSeconds: null,
+      pickupAtSeconds: null,
+      waitSeconds: 0,
+      lateSeconds: null,
+      elapsedAfter: elapsed,
+    };
+  }
+
+  const status = String(objective?.status || "pending").toLowerCase();
+  if (status === "carrying") {
+    return {
+      pickupArrivalSeconds: null,
+      pickupAtSeconds: null,
+      waitSeconds: 0,
+      lateSeconds: 0,
+      elapsedAfter: elapsed + Number(transition.totalSeconds || 0),
+    };
+  }
+
+  const pickupTravelSeconds = Number(
+    transition.deadlineTravelSeconds ?? transition.pickupTravelSeconds ?? 0
+  ) || 0;
+  const deliveryTravelSeconds = Number(transition.deliveryTravelSeconds || 0) || 0;
+  const pickupArrivalSeconds = elapsed + pickupTravelSeconds;
+  const objectiveMs = navDeadlineMs(objective);
+  const objectiveOffsetSeconds = objectiveMs == null
+    ? null
+    : (objectiveMs - nowMs) / 1000;
+
+  const waitSeconds = objectiveOffsetSeconds == null
+    ? 0
+    : Math.max(0, objectiveOffsetSeconds - pickupArrivalSeconds);
+  const lateSeconds = objectiveOffsetSeconds == null
+    ? 0
+    : Math.max(0, pickupArrivalSeconds - objectiveOffsetSeconds);
+  const pickupAtSeconds = pickupArrivalSeconds + waitSeconds;
+
+  return {
+    pickupArrivalSeconds,
+    pickupAtSeconds,
+    waitSeconds,
+    lateSeconds,
+    elapsedAfter: pickupAtSeconds + deliveryTravelSeconds,
+  };
 }
 
 function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, nowMs) {
@@ -801,6 +860,7 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     impossible: 0,
     missed: 0,
     lateSeconds: 0,
+    localPickupDeferrals: 0,
     travelSeconds: 0,
     deadlineTie: 0,
   };
@@ -961,22 +1021,38 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
 
   const insertionOrder = new Map(pending.map((o, i) => [String(o.id), i]));
 
-  function addTransitionScore(score, transition, objective, elapsedBefore, position, totalCount) {
+  function isTransportPickupAt(current, objective) {
+    if (!transportDeliveryZoneNames(objective?.objective_type).length) return false;
+    const pickupId = objective?.target_zone_id || objective?.target_zone_name;
+    const pickupLeg = edge(current, pickupId);
+    return !!pickupLeg?.ok && Number(pickupLeg.maps || 0) === 0;
+  }
+
+  function addTransitionScore(
+    score,
+    transition,
+    objective,
+    elapsedBefore,
+    position,
+    totalCount,
+    localPickupDeferred = false
+  ) {
     const next = { ...score };
     if (!transition?.ok) {
       next.impossible++;
       return next;
     }
 
-    const pickupArrivalSeconds = elapsedBefore + Number(transition.deadlineTravelSeconds || 0);
+    const timing = navTransitionTiming(objective, transition, elapsedBefore, nowMs);
     const deadline = navDeadlineMs(objective);
     if (deadline != null) {
-      const late = Math.max(0, Math.floor((nowMs + pickupArrivalSeconds * 1000 - deadline) / 1000));
+      const late = Math.max(0, Math.floor(Number(timing.lateSeconds || 0)));
       if (late > 0) next.missed++;
       next.lateSeconds += late;
       next.deadlineTie += (totalCount - position + 1) *
         Math.max(0, Math.floor((deadline - nowMs) / 1000));
     }
+    if (localPickupDeferred) next.localPickupDeferrals++;
     next.travelSeconds += Number(transition.totalSeconds || 0);
     return next;
   }
@@ -986,6 +1062,9 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     if (score.impossible !== best.impossible) return score.impossible > best.impossible;
     if (score.missed !== best.missed) return score.missed > best.missed;
     if (score.lateSeconds !== best.lateSeconds) return score.lateSeconds > best.lateSeconds;
+    if (score.localPickupDeferrals !== best.localPickupDeferrals) {
+      return score.localPickupDeferrals > best.localPickupDeferrals;
+    }
     return false;
   }
 
@@ -1021,10 +1100,19 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
         return;
       }
 
+      const localPickupIndexes = new Set();
+      for (let j = 0; j < pending.length; j++) {
+        if (!used[j] && isTransportPickupAt(current, pending[j])) {
+          localPickupIndexes.add(j);
+        }
+      }
+
       for (let i = 0; i < pending.length; i++) {
         if (used[i]) continue;
         const objective = pending[i];
         const options = transitionOptions(current, objective);
+        const localPickupDeferred =
+          localPickupIndexes.size > 0 && !localPickupIndexes.has(i);
 
         for (const transition of options) {
           const position = prefixPlan.length + plan.length + 1;
@@ -1035,15 +1123,15 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
             objective,
             elapsed,
             position,
-            totalCount
+            totalCount,
+            localPickupDeferred
           );
           if (partialDefinitelyWorse(nextScore, bestScore)) continue;
 
           used[i] = true;
           plan.push({ objective, transition });
-          const nextElapsed = transition?.ok
-            ? elapsed + Number(transition.totalSeconds || 0)
-            : elapsed;
+          const timing = navTransitionTiming(objective, transition, elapsed, nowMs);
+          const nextElapsed = transition?.ok ? timing.elapsedAfter : elapsed;
           const nextCurrent = transition?.ok ? transition.end : current;
           walk(nextCurrent, nextElapsed, nextScore);
           plan.pop();
@@ -1067,8 +1155,9 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     };
   }
 
-  // Filas maiores: escolhe iterativamente o objetivo com menor folga para o deadline;
-  // para Vortex/Orb, testa os mapas de entrega válidos e usa distância total no desempate.
+  // Filas maiores usam heurística, mas preservam a mesma regra operacional:
+  // evitar perdas primeiro e, se isso não piorar a viabilidade, coletar Vortex/Orb
+  // que já esteja no mapa atual antes de sair dele.
   const remaining = pending.slice();
   const greedyPlan = [];
   let current = prefixSource;
@@ -1076,24 +1165,65 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
   let score = { ...prefixScore };
 
   while (remaining.length) {
+    const hasLocalPickup = remaining.some(objective =>
+      isTransportPickupAt(current, objective)
+    );
     const candidates = [];
+
     for (const objective of remaining) {
       for (const transition of transitionOptions(current, objective)) {
+        const timing = navTransitionTiming(objective, transition, elapsed, nowMs);
         const deadline = navDeadlineMs(objective);
-        const pickupTravel = transition?.ok ? Number(transition.deadlineTravelSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000;
-        const pickupArrival = nowMs + (elapsed + pickupTravel) * 1000;
-        const slack = deadline == null ? Number.POSITIVE_INFINITY : (deadline - pickupArrival) / 1000;
+        const pickupArrival = timing.pickupArrivalSeconds == null
+          ? Number.POSITIVE_INFINITY
+          : nowMs + timing.pickupArrivalSeconds * 1000;
+        const slack = deadline == null
+          ? Number.POSITIVE_INFINITY
+          : (deadline - pickupArrival) / 1000;
+        const localPickup = isTransportPickupAt(current, objective);
+
+        let projectedMisses = Number(timing.lateSeconds || 0) > 0 ? 1 : 0;
+        if (transition?.ok) {
+          const nextCurrent = transition.end;
+          const nextElapsed = timing.elapsedAfter;
+          for (const other of remaining) {
+            if (other === objective) continue;
+            const otherDeadline = navDeadlineMs(other);
+            if (otherDeadline == null) continue;
+            const otherOptions = transitionOptions(nextCurrent, other);
+            const otherTransition = otherOptions.find(x => x?.ok) || otherOptions[0];
+            if (!otherTransition?.ok) {
+              projectedMisses++;
+              continue;
+            }
+            const otherPickupTravel = Number(
+              otherTransition.deadlineTravelSeconds ??
+              otherTransition.pickupTravelSeconds ??
+              0
+            ) || 0;
+            const otherArrivalMs = nowMs + (nextElapsed + otherPickupTravel) * 1000;
+            if (otherArrivalMs > otherDeadline) projectedMisses++;
+          }
+        }
+
         candidates.push({
           objective,
           transition,
+          timing,
+          localPickup,
+          projectedMisses,
           slack,
-          total: transition?.ok ? Number(transition.totalSeconds || 0) : Number.MAX_SAFE_INTEGER / 1000,
+          total: transition?.ok
+            ? Number(transition.totalSeconds || 0)
+            : Number.MAX_SAFE_INTEGER / 1000,
         });
       }
     }
 
     candidates.sort((a, b) => {
       if (!!a.transition?.ok !== !!b.transition?.ok) return a.transition?.ok ? -1 : 1;
+      if (a.projectedMisses !== b.projectedMisses) return a.projectedMisses - b.projectedMisses;
+      if (hasLocalPickup && a.localPickup !== b.localPickup) return a.localPickup ? -1 : 1;
       if (a.slack !== b.slack) return a.slack - b.slack;
       if (a.total !== b.total) return a.total - b.total;
       return (insertionOrder.get(String(a.objective.id)) || 0) -
@@ -1103,11 +1233,20 @@ function optimizeNavigationObjectives(activeObjectives, source, secondsPerMap, n
     const pick = candidates[0];
     const position = prefixPlan.length + greedyPlan.length + 1;
     const totalCount = prefixPlan.length + pending.length;
-    score = addTransitionScore(score, pick.transition, pick.objective, elapsed, position, totalCount);
+    const localPickupDeferred = hasLocalPickup && !pick.localPickup;
+    score = addTransitionScore(
+      score,
+      pick.transition,
+      pick.objective,
+      elapsed,
+      position,
+      totalCount,
+      localPickupDeferred
+    );
     greedyPlan.push({ objective: pick.objective, transition: pick.transition });
 
     if (pick.transition?.ok) {
-      elapsed += Number(pick.transition.totalSeconds || 0);
+      elapsed = pick.timing.elapsedAfter;
       current = pick.transition.end;
     }
     remaining.splice(remaining.indexOf(pick.objective), 1);
@@ -1224,6 +1363,7 @@ async function getNavigationState(db, eventId) {
       targetZoneName: o.target_zone_name,
       expiresAt: o.expires_at,
       remainingSeconds: Number.isFinite(expiresMs) ? Math.floor(expiresMs / 1000) : null,
+      ready: Number.isFinite(expiresMs) ? expiresMs <= 0 : true,
       expired: Number.isFinite(expiresMs) ? expiresMs <= 0 : false,
       deliveryZoneId: o.delivery_zone_id || plannedDelivery?.id || null,
       deliveryZoneName: o.delivery_zone_name || plannedDelivery?.name || null,
@@ -1249,6 +1389,7 @@ async function getNavigationState(db, eventId) {
   const legs = [];
   let sourceName = sourceNameInitial;
   let cumulativeTravelSeconds = 0;
+  let cumulativeElapsedSeconds = 0;
 
   for (let i = 0; i < plan.length; i++) {
     const entry = plan[i];
@@ -1265,10 +1406,9 @@ async function getNavigationState(db, eventId) {
     const deliveryMaps = validRoute && t.deliveryMaps != null ? Number(t.deliveryMaps || 0) : null;
     const totalMaps = validRoute && t.totalMaps != null ? Number(t.totalMaps || 0) : null;
 
-    const elapsedBefore = cumulativeTravelSeconds;
-    const pickupArrivalSeconds = stage === "carrying"
-      ? null
-      : (validRoute ? elapsedBefore + Number(t.deadlineTravelSeconds || 0) : null);
+    const elapsedBefore = cumulativeElapsedSeconds;
+    const timing = navTransitionTiming(objective, t, elapsedBefore, nowMs);
+    const pickupArrivalSeconds = timing.pickupArrivalSeconds;
 
     const deadlineMs = objective.expires_at ? new Date(objective.expires_at).getTime() : null;
     const chainMassByMs = Number.isFinite(deadlineMs) && pickupArrivalSeconds != null
@@ -1280,11 +1420,17 @@ async function getNavigationState(db, eventId) {
     const arrivalIfLeaveNowMs = pickupArrivalSeconds != null
       ? nowMs + pickupArrivalSeconds * 1000
       : null;
+    const scheduledPickupAtMs = timing.pickupAtSeconds != null
+      ? nowMs + timing.pickupAtSeconds * 1000
+      : null;
     const slackSeconds = Number.isFinite(deadlineMs) && Number.isFinite(arrivalIfLeaveNowMs)
       ? Math.floor((deadlineMs - arrivalIfLeaveNowMs) / 1000)
       : null;
 
-    if (validRoute) cumulativeTravelSeconds += totalTravelSeconds;
+    if (validRoute) {
+      cumulativeTravelSeconds += totalTravelSeconds;
+      cumulativeElapsedSeconds = timing.elapsedAfter;
+    }
 
     const primaryRoute = stage === "carrying"
       ? t?.deliveryRoute
@@ -1317,13 +1463,18 @@ async function getNavigationState(db, eventId) {
         travelSeconds: deliveryTravelSeconds,
       } : null,
       cumulativeTravelSeconds: validRoute ? cumulativeTravelSeconds : null,
+      cumulativeElapsedSeconds: validRoute ? cumulativeElapsedSeconds : null,
+      waitSeconds: validRoute ? Math.max(0, Math.ceil(Number(timing.waitSeconds || 0))) : null,
+      scheduledPickupAt: Number.isFinite(scheduledPickupAtMs)
+        ? new Date(scheduledPickupAtMs).toISOString()
+        : null,
       massBy: Number.isFinite(chainMassByMs) ? new Date(chainMassByMs).toISOString() : null,
       massInSeconds: Number.isFinite(chainMassByMs) ? Math.floor((chainMassByMs - nowMs) / 1000) : null,
       leavePreviousBy: Number.isFinite(legDepartureByMs) ? new Date(legDepartureByMs).toISOString() : null,
       leavePreviousInSeconds: Number.isFinite(legDepartureByMs) ? Math.floor((legDepartureByMs - nowMs) / 1000) : null,
       arrivalIfLeaveNow: Number.isFinite(arrivalIfLeaveNowMs) ? new Date(arrivalIfLeaveNowMs).toISOString() : null,
       finishIfLeaveNow: validRoute
-        ? new Date(nowMs + cumulativeTravelSeconds * 1000).toISOString()
+        ? new Date(nowMs + cumulativeElapsedSeconds * 1000).toISOString()
         : null,
       slackSeconds,
       feasibleIfLeaveNow: slackSeconds == null ? null : slackSeconds >= 0,
@@ -1335,6 +1486,19 @@ async function getNavigationState(db, eventId) {
   if (legs[0]?.route?.ok) {
     route = legs[0].route;
     instruction = navigation.nextInstruction(route);
+    if (
+      instruction?.arrived &&
+      legs[0].stage !== "carrying" &&
+      Number(legs[0].waitSeconds || 0) > 0
+    ) {
+      instruction = {
+        ...instruction,
+        waiting: true,
+        waitSeconds: Number(legs[0].waitSeconds || 0),
+        readyAt: legs[0].objective?.expiresAt || null,
+        text: `AGUARDAR NO MAPA · objetivo em ${Math.ceil(Number(legs[0].waitSeconds || 0))}s`,
+      };
+    }
   }
 
   return {
@@ -1346,13 +1510,16 @@ async function getNavigationState(db, eventId) {
       secondsPerMap,
       totalPending: activeOut.length,
       totalTravelSeconds: legs.reduce((sum, x) => sum + (Number(x.travelSeconds) || 0), 0),
+      totalElapsedSeconds: legs.length
+        ? Number(legs[legs.length - 1].cumulativeElapsedSeconds || 0)
+        : 0,
       vortexDeliveryZones: transportDeliveryZoneNames("VORTEX").slice(),
       orbsDeliveryZones: transportDeliveryZoneNames("ORBS").slice(),
       optimization: {
         mode: optimized.mode,
         score: optimized.score,
         estimatedScenarios: optimized.estimatedScenarios ?? null,
-        rule: "hit pickup deadlines first; include transport delivery travel; then minimize lateness and map travel"
+        rule: "avoid missed objective times; prefer transport pickups already on the current map; wait until objective time when early; then minimize schedule priority and map travel"
       },
       legs,
     },

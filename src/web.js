@@ -1467,7 +1467,7 @@ const PAGE = `<!doctype html>
           +'<div class="nav2-field"><label>Segundos</label><input id="nav-sec" type="number" min="0" max="59" value="'+esc(draft.seconds==null?'0':draft.seconds)+'"></div></div>'
           +'<div class="nav2-actions"><button class="btn primary" id="nav-set">＋ Adicionar à rota</button>'
           +(queue.length?'<button class="btn danger" id="nav-clear">Limpar fila</button>':'')+'</div>'
-          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX/ORB: informe o mapa onde o objetivo foi encontrado. Vortex entrega em Thunderrock Upland, Rivercopse Curve, Giantweald Woods ou Deepwood Pines. Orb entrega nos HOs de Thunderrock Upland, Deepwood Pines, Murdergulch Trail, Sandmount Ascent ou Timberscar Copse. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. O bot decide a ordem por prazo + distância total. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
+          +'<div style="color:var(--faint);font-size:9px;margin-top:6px">VORTEX/ORB: informe o mapa onde o objetivo foi encontrado. Se já estivermos nesse mapa, o Waze prioriza ficar para a coleta quando isso não fizer outro objetivo ser perdido; chegando cedo, manda aguardar o horário. Vortex entrega em Thunderrock Upland, Rivercopse Curve, Giantweald Woods ou Deepwood Pines. Orb entrega nos HOs de Thunderrock Upland, Deepwood Pines, Murdergulch Trail, Sandmount Ascent ou Timberscar Copse. NODE: 4.4 / 5.4 / 6.4 / 7.4 / 8.4. ETA inicial: '+esc((d.itinerary&&d.itinerary.secondsPerMap)||90)+'s por mapa.</div>'
           +'</div></div>'
         : '';
 
@@ -1479,7 +1479,9 @@ const PAGE = `<!doctype html>
       var next='';
       if(o&&cur){
         var firstLeg=legs[0]||{}, firstType=String(o.type||'').toUpperCase(), firstTransport=navIsTransport(firstType), firstName=navTransportName(firstType), firstCarrying=String(o.status||'').toLowerCase()==='carrying';
-        if(inst&&inst.arrived){
+        if(inst&&inst.waiting){
+          next='<div class="nav2-next"><small>AGUARDAR NO MAPA</small><strong>⏳ '+esc(o.targetZoneName)+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Já estamos no mapa certo. Faltam '+esc(navDelta(inst.waitSeconds||0))+' para o objetivo; não saia para voltar depois.</div></div>';
+        } else if(inst&&inst.arrived){
           if(firstTransport&&!firstCarrying) next='<div class="nav2-next"><small>'+esc(firstName)+' #1</small><strong>🔮 PEGAR EM '+esc(o.targetZoneName)+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Depois clique em “'+esc(firstName)+' pego”; o Waze muda para a rota de entrega em '+esc(o.deliveryZoneName||firstLeg.delivery&&firstLeg.delivery.zoneName||'?')+'.</div></div>';
           else if(firstCarrying) next='<div class="nav2-next"><small>ENTREGA · '+esc(firstName)+'</small><strong>📦 '+esc(o.deliveryZoneName||firstLeg.delivery&&firstLeg.delivery.zoneName||'?')+'</strong><div style="margin-top:4px;color:#8eacc4;font-size:10px">Depois de entregar, marque como entregue.</div></div>';
           else next='<div class="nav2-next"><small>OBJETIVO #1</small><strong>✅ '+esc(o.targetZoneName)+'</strong></div>';
@@ -1494,11 +1496,14 @@ const PAGE = `<!doctype html>
           var obj=leg.objective||{};
           var massClass=(leg.massInSeconds!=null&&Number(leg.massInSeconds)<=0)?' late':'';
           var massClock=leg.massBy?new Date(leg.massBy).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
-          var mass=leg.massInSeconds==null
-            ? ''
-            : '<div class="nav2-mass'+massClass+'">'+(Number(leg.massInSeconds)<=0?'🚨 MASSAR/SAIR AGORA':'📣 MASSAR/SAIR EM '+navDelta(leg.massInSeconds)+(massClock?' · ATÉ '+esc(massClock):''))+'</div>';
+          var waitingHere=Number(leg.index)===1&&Number(leg.waitSeconds||0)>0&&leg.pickup&&Number(leg.pickup.maps||0)===0;
+          var mass=waitingHere
+            ? '<div class="nav2-mass">⏳ AGUARDAR AQUI · '+navDelta(leg.waitSeconds||0)+' até o objetivo</div>'
+            : leg.massInSeconds==null
+              ? ''
+              : '<div class="nav2-mass'+massClass+'">'+(Number(leg.massInSeconds)<=0?'🚨 MASSAR/SAIR AGORA':'📣 MASSAR/SAIR EM '+navDelta(leg.massInSeconds)+(massClock?' · ATÉ '+esc(massClock):''))+'</div>';
           var deadline=obj.expiresAt
-            ? '<span>⏳ '+(obj.expired?'EXPIRADO':navCountdown(obj.remainingSeconds))+'</span>'
+            ? '<span>⏳ '+(obj.ready?'PRONTO':navCountdown(obj.remainingSeconds))+'</span>'
             : '<span>⏳ sem limite</span>';
           function stepHtml(route,label){
             if(!route||!route.ok||!route.steps) return '';
@@ -1523,10 +1528,18 @@ const PAGE = `<!doctype html>
           }
           var acts='';
           if(authState.canEdit){
+            var arrivedHere=Number(leg.index)===1&&leg.route&&leg.route.ok&&leg.route.steps&&leg.route.steps.length===1;
             if(isTransport&&!carrying&&leg.delivery&&leg.delivery.zoneId){
-              acts='<div class="nav2-qactions"><button class="btn primary" data-nav-pickup="'+esc(obj.id)+'" data-delivery-id="'+esc(leg.delivery.zoneId)+'" data-delivery-name="'+esc(leg.delivery.zoneName)+'">🔮 '+esc(transportName)+' pego</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+              if(arrivedHere&&Number(leg.waitSeconds||0)<=0){
+                acts='<div class="nav2-qactions"><button class="btn primary" data-nav-pickup="'+esc(obj.id)+'" data-delivery-id="'+esc(leg.delivery.zoneId)+'" data-delivery-name="'+esc(leg.delivery.zoneName)+'">🔮 '+esc(transportName)+' pego</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+              } else {
+                acts='<div class="nav2-qactions"><button class="btn ghost" disabled>'+(arrivedHere?'⏳ Aguardar '+esc(navDelta(leg.waitSeconds||0)):'🔒 Aguardar vez')+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+              }
+            } else if(carrying){
+              acts='<div class="nav2-qactions"><button class="btn ghost" '+(arrivedHere?'data-nav-complete="'+esc(obj.id)+'"':'disabled')+'>'+(arrivedHere?'✓ Entregue':'📦 Em transporte')+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
             } else {
-              acts='<div class="nav2-qactions"><button class="btn ghost" data-nav-complete="'+esc(obj.id)+'">'+(carrying?'✓ Entregue':'✓ Concluído')+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
+              var canComplete=arrivedHere&&Number(leg.waitSeconds||0)<=0;
+              acts='<div class="nav2-qactions"><button class="btn ghost" '+(canComplete?'data-nav-complete="'+esc(obj.id)+'"':'disabled')+'>'+(canComplete?'✓ Concluído':(arrivedHere?'⏳ Aguardar '+esc(navDelta(leg.waitSeconds||0)):'🔒 Aguardar vez'))+'</button><button class="btn danger" data-nav-remove="'+esc(obj.id)+'">✕ Remover</button></div>';
             }
           }
           var targetLine=isTransport
@@ -1558,7 +1571,7 @@ const PAGE = `<!doctype html>
         : '';
 
       var opt=(d.itinerary&&d.itinerary.optimization)||{};
-      var optimizerNote='<div style="margin:0 0 10px;padding:8px 9px;border:1px solid #3a4b61;border-radius:8px;background:#0d151f;color:#9fb4cd;font-size:9px">🧠 <b>ORDEM AUTOMÁTICA</b> · Vortex e Orb = buscar no mapa cadastrado + transportar até um destino permitido. O transporte entra no custo antes do próximo objetivo. O bot tenta cumprir os horários e reduzir o total de mapas.</div>';
+      var optimizerNote='<div style="margin:0 0 10px;padding:8px 9px;border:1px solid #3a4b61;border-radius:8px;background:#0d151f;color:#9fb4cd;font-size:9px">🧠 <b>ORDEM AUTOMÁTICA</b> · primeiro evita perder horários; se Vortex/Orb já estiver no mapa atual, prefere ficar e aguardar a coleta em vez de sair e voltar, desde que isso não faça outro objetivo ser perdido. Depois otimiza horários, entrega e distância.</div>';
       var right='<div class="nav2-card"><h3>ROTA OTIMIZADA</h3>'+optimizerNote+currentHtml+next+queueHtml+spreadHtml+'</div>';
       var html='<div class="nav2-shell"><div class="nav2-head"><div><h2>🧭 Waze da Black</h2><p>Você cadastra os objetivos sem ordenar. O bot escolhe a sequência usando deadline e distância entre mapas.</p></div>'
         +'<span class="nav2-status">'+esc(queue.length)+' objetivo(s) · '+esc((d.graph&&d.graph.zones)||0)+' mapas</span></div>'
