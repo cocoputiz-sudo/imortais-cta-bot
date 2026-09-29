@@ -439,7 +439,8 @@ function startWebServer(client, opts) {
     if (!w || !WEAPONS[w.toUpperCase()]) return res.status(400).json({ error: "weapon" });
     const ev = await db.getEvent(event).catch(() => null);
     if (!ev) return res.status(404).json({ error: "event" });
-    await db.pool.query("UPDATE cta_signups SET weapon=$3 WHERE event_id=$1 AND user_id=$2", [ev.id, userId, w.toUpperCase()]);
+    // Fixa a pessoa na vaga atual (manual=true) para o motor nao reposiciona-la depois da troca de arma.
+    await db.pool.query("UPDATE cta_signups SET weapon=$3, manual=(COALESCE(manual,false) OR (party_index IS NOT NULL AND slot_index IS NOT NULL)) WHERE event_id=$1 AND user_id=$2", [ev.id, userId, w.toUpperCase()]);
     if (_act.applyEdit) await _act.applyEdit(ev.id);
     res.json({ ok: true });
   });
@@ -1038,14 +1039,17 @@ const PAGE = `<!doctype html>
     if(!s.options||!s.options.length) return;
     if(wspan.nextSibling && wspan.nextSibling.className==='wsel') return;
     var sel=document.createElement('select'); sel.className='wsel';
-    s.options.forEach(function(w){ var o=document.createElement('option'); o.value=w; o.textContent=w; if(w===s.weapon)o.selected=true; sel.appendChild(o); });
+    var opts=s.options.slice(); if(s.weapon && opts.indexOf(s.weapon)<0) opts.unshift(s.weapon);
+    opts.forEach(function(w){ var o=document.createElement('option'); o.value=w; o.textContent=w; if(w===s.weapon)o.selected=true; sel.appendChild(o); });
     wspan.style.display='none'; wspan.parentNode.insertBefore(sel,wspan.nextSibling); sel.focus();
-    function close(){ if(sel.parentNode) sel.parentNode.removeChild(sel); wspan.style.display=''; }
+    function close(){ if(sel.parentNode) sel.parentNode.removeChild(sel); wspan.style.display=''; if(pendingRenderData){ var pd=pendingRenderData; pendingRenderData=null; render(pd); } }
     sel.addEventListener('change',function(){ var v=sel.value; close(); if(v!==s.weapon) doSetWeapon(s.userId,v); });
     sel.addEventListener('blur',close);
   }
 
+  var pendingRenderData=null;
   function render(data){
+    if(document.querySelector('.wsel')){ pendingRenderData=data; return; }
     // status
     var alloc=0, total=0; (data.parties||[]).forEach(function(pt){ pt.slots.forEach(function(s){ if(s.filled) alloc++; }); });
     var wait=(data.reserves||[]).length; total=alloc+wait;
