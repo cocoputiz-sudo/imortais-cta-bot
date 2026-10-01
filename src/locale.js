@@ -40,6 +40,7 @@ const WEAPON_ES = Object.freeze({
   "CAMBRIANA": "CAMLANN",
   "SEGANÍMICA": "MAZA ÍNCUBO",
   "CAJADO PRIMITIVO": "BÁCULO PRIMITIVO",
+  "HAND OF JUSTICE": "MANO DE JUSTICIA",
 
   "ARVORE": "BÁCULO ENRAIZADO",
   "JURADOR": "JURADORES",
@@ -148,6 +149,9 @@ const EXTRA_WEAPON_ALIASES_ES = Object.freeze({
   "cajado primordial": "CAJADO PRIMITIVO",
   "báculo primitivo": "CAJADO PRIMITIVO",
   "báculo primordial": "CAJADO PRIMITIVO",
+  "mano de justicia": "HAND OF JUSTICE",
+  "hand of justice": "HAND OF JUSTICE",
+  "hoj": "HAND OF JUSTICE",
 });
 
 function norm(v) {

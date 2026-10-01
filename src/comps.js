@@ -27,6 +27,7 @@ const WEAPONS = {
   "CAMBRIANA":                 { role: "Tank" },
   "SEGANÍMICA":                { role: "Tank" },
   "CAJADO PRIMITIVO":         { role: "Tank" },
+  "HAND OF JUSTICE":           { role: "Tank" },
 
   // Supports
   "ARVORE":                    { role: "Support" },
@@ -110,7 +111,7 @@ const F = {
     ["GOLEM", 1], ["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1],
     ["MAÇA DE UMA MÃO", 1], ["MARTELO DE UMA MÃO", 1], ["MAÇA PESADA W RUNA GUARDA", 1],
     ["BRUXO DE UMA MÃO", 1], ["MONARCA", 1], ["MANGUAL", 1], ["CAMBRIANA", 1],
-    ["SEGANÍMICA", 1], ["CAJADO PRIMITIVO", 1],
+    ["SEGANÍMICA", 1], ["CAJADO PRIMITIVO", 1], ["HAND OF JUSTICE", 1],
   ],
   DPS_LIVRE: [
     ["BRAÇADEIRAS", 1], ["QUEBRA REINOS", 1], ["CANÇÃO", 1],
@@ -128,7 +129,7 @@ const slot = (role, accepts) => ({
 // PARTY 1
 // ---------------------------------------------------------------------------
 const PARTY1 = [
-  { ...slot("Tank", [["GOLEM", 1], ["MAÇA DE UMA MÃO", 1], ["BRUXO DE UMA MÃO", 1]]), locked: true }, // 01 caller
+  { ...slot("Tank", [["GOLEM", 1], ["MAÇA DE UMA MÃO", 1], ["BRUXO DE UMA MÃO", 1], ["HAND OF JUSTICE", 1]]), locked: true }, // 01 caller
   slot("Tank",    [["MAÇA PESADA", 1]]),                                        // 02
   slot("Tank",    [["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1]]), // 03
   slot("Tank",    [["MAÇA PESADA", 1], ["MAÇA PÉTREA", 1], ["MARTELO DE BATALHA", 1]]), // 04
@@ -155,7 +156,7 @@ const PARTY1 = [
 // ---------------------------------------------------------------------------
 const PARTY2 = [
   slot("Tank",    [["MAÇA PESADA", 2], ["MARTELO DE BATALHA", 2], ["MAÇA DE UMA MÃO", 2],
-                   ["BRUXO DE UMA MÃO", 1], ["GOLEM", 1], ["MONARCA", 1]]),          // 01
+                   ["BRUXO DE UMA MÃO", 1], ["GOLEM", 1], ["MONARCA", 1], ["HAND OF JUSTICE", 1]]), // 01
   slot("Tank",    [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]]), // 02
   slot("Tank",    [["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1], ["MAÇA DE UMA MÃO", 1]]), // 03
   { ...slot("Tank",    [["ARVORE", 1], ["MAÇA PESADA", 1], ["MARTELO DE BATALHA", 1],
