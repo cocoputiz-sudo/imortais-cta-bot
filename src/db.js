@@ -157,6 +157,7 @@ async function init() {
       slot_index  INT,
       ip          INT,
       manual      BOOLEAN NOT NULL DEFAULT false,
+      second_caller BOOLEAN NOT NULL DEFAULT false,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE (event_id, user_id)
     );
@@ -248,6 +249,12 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS num_parties INT NOT NULL DEFAULT 4;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS party_list TEXT DEFAULT '0';`);
   await pool.query(`ALTER TABLE cta_signups ADD COLUMN IF NOT EXISTS manual BOOLEAN NOT NULL DEFAULT false;`);
+  await pool.query(`ALTER TABLE cta_signups ADD COLUMN IF NOT EXISTS second_caller BOOLEAN NOT NULL DEFAULT false;`);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cta_signups_second_caller
+      ON cta_signups(event_id)
+      WHERE second_caller=true
+  `);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS realloc_lock_parties TEXT NOT NULL DEFAULT '';`);
@@ -435,18 +442,31 @@ async function getSignup(eventId, userId) {
 async function upsertSignup(row) {
   const { rows } = await pool.query(
     `INSERT INTO cta_signups
-       (event_id, user_id, username, weapon, presence, party_index, slot_index, ip, manual)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, false))
+       (event_id, user_id, username, weapon, presence, party_index, slot_index, ip, manual, second_caller)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, COALESCE($9, false), COALESCE($10, false))
      ON CONFLICT (event_id, user_id) DO UPDATE SET
        weapon=EXCLUDED.weapon, presence=EXCLUDED.presence,
        party_index=EXCLUDED.party_index, slot_index=EXCLUDED.slot_index,
        ip=COALESCE(EXCLUDED.ip, cta_signups.ip),
        manual=COALESCE($9, cta_signups.manual, false),
+       second_caller=COALESCE($10, cta_signups.second_caller, false),
        created_at=now()
      RETURNING *`,
-    [row.eventId, row.userId, row.username, row.weapon, row.presence, row.partyIndex, row.slotIndex, row.ip ?? null, row.manual ?? null]
+    [
+      row.eventId, row.userId, row.username, row.weapon, row.presence,
+      row.partyIndex, row.slotIndex, row.ip ?? null, row.manual ?? null,
+      row.secondCaller ?? null
+    ]
   );
   return rows[0];
+}
+
+async function getSecondCaller(eventId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM cta_signups WHERE event_id=$1 AND second_caller=true LIMIT 1`,
+    [eventId]
+  );
+  return rows[0] || null;
 }
 
 async function deleteSignup(eventId, userId) {
@@ -1125,7 +1145,7 @@ module.exports = {
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange, setEventIgnored,
   getCurrentSeason, startSeason, finishSeason,
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
-  getSignups, getSignup, upsertSignup, deleteSignup, setStatus, setTimeLabel,
+  getSignups, getSignup, getSecondCaller, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,
   addNavigationObjective, setNavigationObjective, getNavigationObjective, getNavigationObjectives,
   removeNavigationObjective, startNavigationCarry, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
