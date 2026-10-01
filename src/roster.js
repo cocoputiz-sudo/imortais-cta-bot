@@ -162,6 +162,27 @@ function solve(signups, numParties = 4, partyList = null, opts = {}) {
   const usedUsers = new Set();
   const weaponCount = {};
 
+  // 2 Caller fica sempre na vaga 1 da SEGUNDA PT VISUAL.
+  // party_list pode ser [0,1], [0,4], [0,5] etc.; portanto PT2 = parties[1].
+  // Se a segunda PT ainda não existe, ele permanece aguardando e não é tratado
+  // como Tank comum pela montagem automática.
+  const secondCaller = signups.find((su) => !!su.second_caller);
+  if (secondCaller) {
+    const targetParty = parties.length > 1 ? parties[1] : null;
+    if (targetParty != null && PARTIES[targetParty]?.slots?.[0]) {
+      assignment.set(secondCaller.user_id, {
+        partyIndex: targetParty,
+        slotIndex: 0,
+        kind: "second-caller",
+        _weapon: secondCaller.weapon,
+        _ip: secondCaller.ip,
+      });
+      usedCells.add(`${targetParty}:0`);
+      weaponCount[U(secondCaller.weapon)] = (weaponCount[U(secondCaller.weapon)] || 0) + 1;
+    }
+    usedUsers.add(secondCaller.user_id);
+  }
+
   for (const su of signups) {
     if (su.party_index != null && PARTIES[su.party_index]?.slots[su.slot_index]?.locked) {
       assignment.set(su.user_id, {
@@ -185,6 +206,7 @@ function solve(signups, numParties = 4, partyList = null, opts = {}) {
     if (usedUsers.has(su.user_id)) continue;
     if (su.party_index == null || su.slot_index == null) continue;
     if (!lockedParties.has(Number(su.party_index))) continue;
+    if (usedCells.has(`${su.party_index}:${su.slot_index}`)) continue;
     if (!parties.includes(Number(su.party_index))) continue;
     if (!PARTIES[su.party_index]?.slots?.[su.slot_index]) continue;
 
@@ -205,7 +227,7 @@ function solve(signups, numParties = 4, partyList = null, opts = {}) {
   for (const su of signups) {
     if (usedUsers.has(su.user_id)) continue;
     if (su.manual && su.party_index != null && su.slot_index != null) {
-      if (parties.includes(su.party_index)) {
+      if (parties.includes(su.party_index) && !usedCells.has(`${su.party_index}:${su.slot_index}`)) {
         assignment.set(su.user_id, {
           partyIndex: su.party_index,
           slotIndex: su.slot_index,
@@ -421,11 +443,12 @@ function renderRoster(signups, numParties = 4, partyList = null) {
       if (su) {
         filled++;
         const flag = su.presence === "online" ? "🟢" : "🕐";
+        const caller2Tag = su.second_caller ? " 👑2" : "";
         const ipTag =
           su.ip && ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"].includes((su.weapon || "").toUpperCase())
             ? ` \`IP ${su.ip}\``
             : "";
-        lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${ipTag} ${flag}${su.manual ? " 🔒" : ""}`);
+        lines.push(`\`${n}\` ${su.weapon} — **${su.username}**${caller2Tag}${ipTag} ${flag}${su.manual ? " 🔒" : ""}`);
       } else {
         // vaga vazia: mostra as armas possíveis (preferíveis primeiro), Opção A
         const armas = [...slot.accepts].sort((a,b)=>a.weight-b.weight).map(a=>a.weapon);
@@ -438,7 +461,9 @@ function renderRoster(signups, numParties = 4, partyList = null) {
   if (reserves.length) {
     blocks.push(
       `__**⏳ Aguardando PT** (sem vaga nas PTs abertas)__\n` +
-        reserves.map((r) => `• **${r.username}** — ${r.weapon}`).join("\n")
+        reserves.map((r) => r.second_caller
+          ? `• 👑 **2 CALLER · ${r.username}** — ${r.weapon}`
+          : `• **${r.username}** — ${r.weapon}`).join("\n")
     );
   }
   return blocks;
