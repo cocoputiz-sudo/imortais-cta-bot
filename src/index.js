@@ -21,6 +21,8 @@ const roaming = require("./roaming");
 const castelo = require("./castelo");
 const locale = require("./locale");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
+const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
+const CALLER_WEAPONS = Object.freeze(["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA", "HAND OF JUSTICE"]);
 const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
 const CFG = {
@@ -512,6 +514,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (bk === "cleave") return onCasteloLeave(interaction);
       if (bk === "cleanyes") return onCleanConfirm(interaction);
       if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
+      if (bk === "caller2") return onSecondCaller(interaction);
     }
     if (interaction.isButton()) {
       const [k] = interaction.customId.split("|");
@@ -535,6 +538,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("weapon|"))
       return onWeaponPick(interaction);
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("caller2weapon|"))
+      return onSecondCallerWeaponPick(interaction);
     if (interaction.isModalSubmit() && interaction.customId.startsWith("ipmodal|"))
       return onIpModal(interaction);
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("bombweapon|"))
@@ -675,12 +680,13 @@ function buildRolePicker(eventId) {
     .setCustomId(`role|${eventId}|${name}`).setLabel(name).setEmoji(meta.emoji).setStyle(ButtonStyle.Secondary));
   const leave = new ButtonBuilder().setCustomId(`leave|${eventId}`).setLabel("Sair da função").setEmoji("🚪").setStyle(ButtonStyle.Danger);
   const looter = new ButtonBuilder().setCustomId(`looter|${eventId}`).setLabel("Sou Looter").setEmoji("💰").setStyle(ButtonStyle.Secondary);
+  const caller2 = new ButtonBuilder().setCustomId(`caller2|${eventId}`).setLabel("Sou 2 Caller").setEmoji("👑").setStyle(ButtonStyle.Primary);
   const montar = new ButtonBuilder().setCustomId(`montar|${eventId}`).setLabel("Montar PT (caller)").setStyle(ButtonStyle.Success);
   const cancel = new ButtonBuilder().setCustomId(`cancel|${eventId}`).setLabel("Cancelar (caller)").setStyle(ButtonStyle.Danger);
   const fechar = new ButtonBuilder().setCustomId(`fechar|${eventId}`).setLabel("Fechar CTA (caller)").setStyle(ButtonStyle.Secondary);
   const rows = [];
   for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
-  rows.push(new ActionRowBuilder().addComponents(looter, leave, montar));
+  rows.push(new ActionRowBuilder().addComponents(looter, caller2, leave, montar));
   rows.push(new ActionRowBuilder().addComponents(fechar, cancel));
   return rows;
 }
@@ -821,7 +827,6 @@ async function onPresence(interaction) {
   });
   const myLoc = await applyReallocation(ev, interaction.guild, interaction.user.id);
 
-  const CALLER_WEAPONS = ["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA"];
   if (CALLER_WEAPONS.includes(weapon.toUpperCase()) && interaction.user.id === ev.caller_id) {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`calleryes|${eventId}|${encodeURIComponent(weapon)}`)
