@@ -61,6 +61,9 @@ function localizedWeaponOptions(weapons, target) {
   const es = isSpanish(target);
   return weapons.map((w) => locale.weaponOption(w, es));
 }
+function isMasterOfWar(interaction) {
+  return !!interaction.member?.roles?.cache?.has(MASTER_OF_WAR_ROLE_ID);
+}
 
 function timeToTodayUTC(label) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(label.trim());
@@ -713,6 +716,166 @@ async function onRolePick(interaction) {
     content: es ? `Elige tu arma (${shownRole}):` : `Escolhe tua arma (${shownRole}):`,
     components: [new ActionRowBuilder().addComponents(menu)],
     flags: MessageFlags.Ephemeral
+  });
+}
+
+async function onSecondCaller(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
+
+  if (!isMasterOfWar(interaction)) {
+    return interaction.reply({
+      content: es
+        ? "⛔ Solo los jugadores con el rol **Mestre de Guerra** pueden entrar como 2 Caller."
+        : "⛔ Somente jogadores com o cargo **Mestre de Guerra** podem entrar como 2 Caller.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open") {
+    return interaction.reply({
+      content: es ? "El CTA no está abierto." : "CTA não está aberto.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  if (interaction.user.id === ev.caller_id) {
+    return interaction.reply({
+      content: es
+        ? "👑 Tú ya eres el caller principal de este CTA."
+        : "👑 Você já é o caller principal deste CTA.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const existing = await db.getSecondCaller(eventId);
+  if (existing && String(existing.user_id) !== String(interaction.user.id)) {
+    return interaction.reply({
+      content: es
+        ? `⚠️ El 2 Caller ya está reservado por **${existing.username || "otro jugador"}**.`
+        : `⚠️ O 2 Caller já está reservado por **${existing.username || "outro jogador"}**.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const options = CALLER_WEAPONS
+    .filter((w) => WEAPONS[w])
+    .map((w) => locale.weaponOption(w, es));
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(`caller2weapon|${eventId}|${interaction.user.id}`)
+    .setPlaceholder(es ? "Elige tu arma de 2 Caller" : "Escolha sua arma de 2 Caller")
+    .addOptions(options.slice(0, 25));
+
+  return interaction.reply({
+    content: es
+      ? "👑 **2 Caller** · elige tu arma. Serás fijado en el **puesto 1 de la PT2**."
+      : "👑 **2 Caller** · escolha sua arma. Você será fixado na **vaga 1 da PT2**.",
+    components: [new ActionRowBuilder().addComponents(menu)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function onSecondCallerWeaponPick(interaction) {
+  const [, eventId, ownerId] = interaction.customId.split("|");
+  const es = isSpanish(interaction);
+
+  if (ownerId && String(ownerId) !== String(interaction.user.id)) {
+    return interaction.reply({
+      content: es ? "Este menú es de otra persona." : "Esse menu é de outra pessoa.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  if (!isMasterOfWar(interaction)) {
+    return interaction.update({
+      content: es
+        ? "⛔ Ya no tienes el rol **Mestre de Guerra**."
+        : "⛔ Você não possui mais o cargo **Mestre de Guerra**.",
+      components: [],
+    });
+  }
+
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open") {
+    return interaction.update({
+      content: es ? "El CTA no está abierto." : "CTA não está aberto.",
+      components: [],
+    });
+  }
+  if (interaction.user.id === ev.caller_id) {
+    return interaction.update({
+      content: es ? "👑 Tú ya eres el caller principal." : "👑 Você já é o caller principal.",
+      components: [],
+    });
+  }
+
+  const weapon = String(interaction.values?.[0] || "").toUpperCase();
+  if (!CALLER_WEAPONS.includes(weapon) || !WEAPONS[weapon]) {
+    return interaction.update({
+      content: es ? "Arma de caller inválida." : "Arma de caller inválida.",
+      components: [],
+    });
+  }
+
+  const existing = await db.getSecondCaller(eventId);
+  if (existing && String(existing.user_id) !== String(interaction.user.id)) {
+    return interaction.update({
+      content: es
+        ? `⚠️ El 2 Caller ya está reservado por **${existing.username || "otro jugador"}**.`
+        : `⚠️ O 2 Caller já está reservado por **${existing.username || "outro jogador"}**.`,
+      components: [],
+    });
+  }
+
+  const username = interaction.member?.displayName || interaction.user.username;
+  try {
+    await db.upsertSignup({
+      eventId,
+      userId: interaction.user.id,
+      username,
+      weapon,
+      presence: "online",
+      partyIndex: null,
+      slotIndex: null,
+      ip: null,
+      manual: true,
+      secondCaller: true,
+    });
+  } catch (e) {
+    if (String(e?.code || "") === "23505") {
+      return interaction.update({
+        content: es
+          ? "⚠️ Otro Mestre de Guerra tomó el puesto de 2 Caller al mismo tiempo."
+          : "⚠️ Outro Mestre de Guerra assumiu o 2 Caller ao mesmo tempo.",
+        components: [],
+      });
+    }
+    throw e;
+  }
+
+  await applyReallocation(ev, interaction.guild, interaction.user.id);
+  const signup = await db.getSignup(eventId, interaction.user.id);
+  const fresh = (await db.getEvent(eventId)) || ev;
+  const pl = db.parsePartyList(fresh);
+  const shownWeapon = locale.weaponLabel(weapon, es);
+  const inPt2 = pl.length > 1 &&
+    Number(signup?.party_index) === Number(pl[1]) &&
+    Number(signup?.slot_index) === 0;
+
+  await logStaff(
+    interaction.guild,
+    `👑2 **${username}** assumiu 2 Caller (${weapon}) · ${inPt2 ? "PT2 vaga 1" : "aguardando abertura da PT2"} · CTA ${ev.time_label}`
+  );
+
+  return interaction.update({
+    content: inPt2
+      ? (es
+        ? `👑 **2 Caller confirmado!** **${shownWeapon}** · **PT2, puesto 1**. Esta posición queda fijada.`
+        : `👑 **2 Caller confirmado!** **${shownWeapon}** · **PT2, vaga 1**. Essa posição fica travada.`)
+      : (es
+        ? `👑 **2 Caller reservado!** **${shownWeapon}**. La PT2 todavía no está abierta; entrarás automáticamente en el **puesto 1** cuando se abra, sea cual sea la composición.`
+        : `👑 **2 Caller reservado!** **${shownWeapon}**. A PT2 ainda não está aberta; você entrará automaticamente na **vaga 1** quando ela abrir, seja qual for a composição.`),
+    components: [],
   });
 }
 
