@@ -3479,11 +3479,40 @@ const webActions = {
   },
   scoutOverview: async (guildId) => scout.overview(db, guildId),
   scoutPlayer: async (guildId, playerName, eventId) => {
-    const detail = await scout.playerDetail(db, guildId, playerName);
-    if (!detail) return null;
-    if (!eventId) return detail;
+    let detail = await scout.playerDetail(db, guildId, playerName);
+    if (!detail && !eventId) return null;
 
     const key = scout.normName(playerName);
+    if (!detail) {
+      detail = {
+        season: null,
+        ctaCount: 0,
+        capturedCtas: 0,
+        summary: {
+          playerKey: key,
+          playerName: String(playerName || "?"),
+          role: "Sem função",
+          coreVerified: false,
+          attendedCtas: 0,
+          presencePct: 0,
+          coveragePct: 0,
+          damagePerMinute: 0,
+          healingPerMinute: 0,
+          kills: 0,
+          deaths: 0,
+          fights: 0,
+          combatCtas: 0,
+          partyCorrectPct: null,
+          integralShare: 0,
+          confidence: "baixa",
+          radar: { presence: null, impact: null, survival: null, discipline: null, consistency: null, peerCount: 0, impactBasis: "sem histórico suficiente" }
+        },
+        profile: null,
+        latestEquipment: null,
+        history: []
+      };
+    }
+    if (!eventId) return detail;
     const [combat, confirm] = await Promise.all([
       telemetry.getCombat(db, eventId).catch(() => null),
       telemetry.getConfirm(db, eventId).catch(() => null)
