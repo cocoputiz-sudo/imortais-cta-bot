@@ -170,7 +170,7 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
       deaths: n(c?.deaths),
       fights: fightsByName.get(e.key) || 0,
       combatObserved: !!c,
-      itemPower: conf?.itemPower == null ? null : Math.max(0, n(conf.itemPower)),
+      itemPower: conf?.itemPower == null ? null : Math.max(0, Math.round(n(conf.itemPower))),
       equipment: conf?.equipment || null,
       equipmentObservedAt: conf?.equipmentObservedAt || null,
       observerCount: globalObservers,
@@ -215,8 +215,19 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
 }
 
 async function backfillRecent(db, attendance, telemetry) {
+  // Attendance da temporada inteira ainda pode ser reconstruído da voice_presence.
+  // Combate/equipamento só estarão presentes enquanto a telemetria bruta existir.
+  const guildId = process.env.GUILD_ID || "683411304408416285";
+  const season = await db.getCurrentSeason(guildId) || await db.getLastEndedSeason(guildId);
+  if (!season) return { total: 0, ok: 0, failed: 0 };
+
   const { rows } = await pool.query(
-    "SELECT id FROM cta_events WHERE status='closed' AND COALESCE(closed_at, created_at) >= now() - interval '3 days' ORDER BY id ASC LIMIT 100"
+    "SELECT e.id FROM cta_events e " +
+    "WHERE e.guild_id=$1 AND e.status='closed' AND NOT e.ignored AND e.created_at >= $2 " +
+    "AND (COALESCE(e.closed_at,e.created_at) >= now() - interval '3 days' " +
+    "OR NOT EXISTS (SELECT 1 FROM player_cta_stats s WHERE s.cta_event_id=e.id AND s.stats_version >= $3)) " +
+    "ORDER BY e.id ASC LIMIT 500",
+    [guildId, season.started_at, STATS_VERSION]
   );
   let ok = 0, failed = 0;
   for (const row of rows) {
