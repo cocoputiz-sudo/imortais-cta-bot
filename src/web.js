@@ -464,6 +464,20 @@ function startWebServer(client, opts) {
       res.status(500).json({ error: "server" });
     }
   });
+  app.get("/api/scout/player", async (req, res) => {
+    const sess = requireMember(req, res); if (!sess) return;
+    try {
+      const player = String(req.query.player || "").trim().slice(0, 120);
+      const event = String(req.query.event || "").trim().slice(0, 40) || null;
+      if (!player) return res.status(400).json({ error: "player" });
+      const r = _act.scoutPlayer ? await _act.scoutPlayer(GUILD_ID, player, event) : null;
+      if (!r) return res.status(404).json({ error: "not_found" });
+      res.json(r);
+    } catch (e) {
+      console.error("/api/scout/player:", e?.message || e);
+      res.status(500).json({ error: "server" });
+    }
+  });
   app.use("/assets", express.static(path.join(__dirname, "..", "assets"), {
     maxAge: "1d",
     immutable: false
@@ -808,6 +822,33 @@ const PAGE = `<!doctype html>
   .cv2-equip-slot{display:block;color:#718198;font-size:7px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .cv2-equip-tier{display:block;margin-top:1px;color:#dbe5f0;font-size:8px;font-weight:800}
   .cv2-equip-foot{margin-top:8px;color:#66778e;font-size:8px}
+  .scout-player-link{appearance:none;border:0;background:none;color:inherit;padding:0;font:inherit;font-weight:800;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-decoration-color:#58769d;text-underline-offset:3px}
+  .scout-player-link:hover{color:#9fc8ff}
+  .scout-overlay{position:fixed;inset:0;z-index:1350;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(3,7,12,.78);backdrop-filter:blur(4px)}
+  .scout-overlay.open{display:flex}
+  .scout-modal{width:min(1040px,96vw);max-height:92vh;overflow:auto;border:1px solid #40536f;border-radius:14px;background:linear-gradient(180deg,#121b29,#091018);box-shadow:0 24px 80px rgba(0,0,0,.65)}
+  .scout-modal-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 15px;border-bottom:1px solid #2a3a50;background:#101925}
+  .scout-modal-close{appearance:none;border:1px solid #384b65;border-radius:8px;background:#121c29;color:#dce7f4;padding:6px 10px;cursor:pointer;font-weight:900}
+  .scout-profile{padding:15px}
+  .scout-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
+  .scout-head h2{margin:0;font-family:var(--disp);font-size:23px}.scout-head .sub{margin-top:4px;color:var(--muted);font-size:10px}
+  .scout-badges{display:flex;gap:6px;flex-wrap:wrap}.scout-badge{padding:4px 7px;border:1px solid #344760;border-radius:999px;background:#0d1722;color:#b8c9dc;font-size:8px;font-weight:900}
+  .scout-layout{display:grid;grid-template-columns:minmax(300px,.8fr) minmax(360px,1.2fr);gap:12px}
+  .scout-card{border:1px solid var(--line);border-radius:12px;background:#0d151f;padding:12px}
+  .scout-card h3{margin:0 0 9px;font-size:11px;color:#c6d4e4}
+  .scout-radar-wrap{display:grid;place-items:center;min-height:245px;color:#637995}
+  .scout-radar{width:min(260px,100%);height:auto;overflow:visible}
+  .scout-radar text{font:700 8px var(--sans);fill:#9fb0c4}
+  .scout-radar .grid{fill:none;stroke:#26384d;stroke-width:1}.scout-radar .axis{stroke:#25364a;stroke-width:1}.scout-radar .value{fill:rgba(93,160,232,.20);stroke:#7ab8ff;stroke-width:2}
+  .scout-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+  .scout-metric{padding:9px;border:1px solid #253549;border-radius:9px;background:#0b121b}.scout-metric small{display:block;color:var(--muted);font-size:7px;text-transform:uppercase;letter-spacing:.05em}.scout-metric b{display:block;margin-top:3px;font-size:15px}
+  .scout-current{margin-bottom:12px;border-color:#315d83;background:#0d1b28}
+  .scout-eq-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}.scout-eq{min-width:0;text-align:center;padding:6px 3px;border:1px solid #24344a;border-radius:8px;background:#0b131d}.scout-eq img{display:block;width:46px;height:46px;margin:0 auto 3px;object-fit:contain}.scout-eq small{display:block;color:#798aa0;font-size:7px}.scout-eq b{font-size:8px}
+  .scout-history{margin-top:12px;overflow:auto}.scout-history table{min-width:940px}
+  .scout-hover{position:fixed;z-index:1320;display:none;width:510px;max-width:calc(100vw - 20px);max-height:min(640px,calc(100vh - 20px));overflow:auto;padding:0;border:1px solid #40536f;border-radius:13px;background:linear-gradient(180deg,#121b29,#091018);box-shadow:0 20px 65px rgba(0,0,0,.65);pointer-events:none}
+  .scout-hover.open{display:block}.scout-hover .scout-profile{padding:12px}.scout-hover .scout-layout{grid-template-columns:190px 1fr}.scout-hover .scout-radar-wrap{min-height:190px}.scout-hover .scout-radar{width:190px}.scout-hover .scout-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  @media(max-width:760px){.scout-layout{grid-template-columns:1fr}.scout-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.scout-eq-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.scout-hover{display:none!important}.scout-overlay{padding:8px}.scout-modal{width:100%;max-height:96vh}}
+
   @media(max-width:1300px){.cv2-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.cv2-layout{grid-template-columns:1fr}.cv2-side{position:static;grid-template-columns:1fr 1fr}}
   @media(max-width:760px){.cv2-head{align-items:flex-start;flex-direction:column}.cv2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cv2-party-grid{grid-template-columns:1fr 1fr}.cv2-side{display:block}.cv2-panel{margin-bottom:10px}.cv2-distlegend,.cv2-extra-grid{grid-template-columns:1fr 1fr}}
 
@@ -1623,6 +1664,138 @@ const PAGE = `<!doctype html>
 
   // ===================== SCOUT / DESEMPENHO =====================
   var scoutCache=null;
+  var scoutPlayerCache={};
+  var scoutHoverSeq=0;
+
+  function scoutPct(v){ return v==null?'—':(Math.round(Number(v))+''); }
+  function scoutItemIconUrl(uniqueName){ return 'https://render.albiononline.com/v1/item/'+encodeURIComponent(String(uniqueName||'')); }
+  function scoutItemTier(uniqueName){
+    var id=String(uniqueName||'');
+    var t=/^T(\d+)_/i.exec(id), e=/@(\d+)/.exec(id);
+    return t?('T'+t[1]+'.'+(e?e[1]:'0')):'item';
+  }
+  function scoutRadarSvg(r){
+    r=r||{};
+    var vals=[r.presence,r.impact,r.survival,r.discipline,r.consistency];
+    var labels=['Presença','Impacto','Sobreviv.','Disciplina','Consist.'];
+    function point(i,value,rad){
+      var a=(-90+i*72)*Math.PI/180;
+      var rr=rad*(Number(value)||0)/100;
+      return (100+Math.cos(a)*rr).toFixed(1)+','+(100+Math.sin(a)*rr).toFixed(1);
+    }
+    function poly(scale){ return labels.map(function(_x,i){return point(i,scale,72);}).join(' '); }
+    var grids=[25,50,75,100].map(function(x){return '<polygon class="grid" points="'+poly(x)+'"></polygon>';}).join('');
+    var axes=labels.map(function(_x,i){return '<line class="axis" x1="100" y1="100" x2="'+point(i,100,72).split(',')[0]+'" y2="'+point(i,100,72).split(',')[1]+'"></line>';}).join('');
+    var valuePts=labels.map(function(_x,i){return point(i,vals[i]==null?0:vals[i],72);}).join(' ');
+    var txt=labels.map(function(label,i){
+      var a=(-90+i*72)*Math.PI/180, x=100+Math.cos(a)*91, y=100+Math.sin(a)*91;
+      var anchor=Math.cos(a)>.25?'start':(Math.cos(a)<-.25?'end':'middle');
+      return '<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" text-anchor="'+anchor+'" dominant-baseline="middle">'+esc(label)+' '+scoutPct(vals[i])+'</text>';
+    }).join('');
+    return '<svg class="scout-radar" viewBox="0 0 200 200" aria-label="Radar comparativo por função">'+grids+axes+'<polygon class="value" points="'+valuePts+'"></polygon>'+txt+'</svg>';
+  }
+  function scoutEquipmentHtml(equipment,itemPower,observedAt){
+    if(!equipment) return '<div class="empty-note">Nenhum equipamento observado para este jogador.</div>';
+    var slots=[['Arma','mainHand'],['Off-hand','offHand'],['Capacete','head'],['Peito','chest'],['Bota','shoes'],['Capa','cape'],['Bolsa','bag'],['Poção','potion'],['Food','food'],['Montaria','mount']];
+    var items=slots.map(function(s){
+      var id=equipment[s[1]]||'';
+      if(!id) return '<div class="scout-eq" style="opacity:.35"><div style="height:49px"></div><small>'+esc(s[0])+'</small><b>—</b></div>';
+      return '<div class="scout-eq" title="'+attr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+attr(scoutItemIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
+    }).join('');
+    return '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="note">equipamento observado</span>'+(itemPower?'<span class="scout-badge">IP '+Math.round(itemPower)+'</span>':'')+'</div><div class="scout-eq-grid">'+items+'</div>'+(observedAt?'<div class="note" style="margin-top:7px">Snapshot '+esc(age(observedAt))+' atrás.</div>':'');
+  }
+  function scoutProfileHtml(d,compact){
+    var s=d.summary||{}, r=s.radar||{}, cur=d.current||null, latest=d.latestEquipment||null, prof=d.profile||null;
+    var eq=cur&&cur.equipment?cur.equipment:(latest&&latest.equipment?latest.equipment:null);
+    var eqIp=cur&&cur.itemPower?cur.itemPower:(latest&&latest.itemPower?latest.itemPower:null);
+    var eqAt=cur&&cur.equipmentObservedAt?cur.equipmentObservedAt:(latest&&latest.equipmentObservedAt?latest.equipmentObservedAt:null);
+    var currentHtml=cur?'<div class="scout-card scout-current"><h3>CTA selecionado</h3><div class="scout-metrics">'
+      +'<div class="scout-metric"><small>Dano</small><b>'+fmtS(cur.damage||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Cura</small><b>'+fmtS(cur.healing||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Kills</small><b>'+fmtS(cur.kills||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Mortes</small><b>'+fmtS(cur.deaths||0)+'</b></div>'
+      +'<div class="scout-metric"><small>PT real</small><b>'+esc(cur.pt||'—')+'</b></div>'
+      +'<div class="scout-metric"><small>IP</small><b>'+(cur.itemPower?fmtS(Math.round(cur.itemPower)):'—')+'</b></div>'
+      +'</div></div>':'';
+    var radar='<div class="scout-card"><h3>Comparação com '+fmtS(r.peerCount||0)+' '+esc(s.role||'jogadores')+'</h3><div class="scout-radar-wrap">'+scoutRadarSvg(r)+'</div><div class="note">Impacto: '+esc(r.impactBasis||'—')+'. Percentis são calculados somente dentro da mesma função; “—” indica amostra insuficiente.</div></div>';
+    var metrics='<div class="scout-card"><h3>Temporada '+esc(d.season&&d.season.number||'—')+'</h3><div class="scout-metrics">'
+      +'<div class="scout-metric"><small>Presença</small><b>'+esc(s.presencePct||0)+'%</b></div>'
+      +'<div class="scout-metric"><small>CTAs</small><b>'+fmtS(s.attendedCtas||0)+'/'+fmtS(d.ctaCount||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Cobertura</small><b>'+esc(s.coveragePct||0)+'%</b></div>'
+      +'<div class="scout-metric"><small>Dano/min</small><b>'+fmtS(s.damagePerMinute||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Cura/min</small><b>'+fmtS(s.healingPerMinute||0)+'</b></div>'
+      +'<div class="scout-metric"><small>K/D</small><b>'+fmtS(s.kills||0)+'/'+fmtS(s.deaths||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Fights</small><b>'+fmtS(s.fights||0)+'</b></div>'
+      +'<div class="scout-metric"><small>PT correta</small><b>'+(s.partyCorrectPct==null?'—':esc(s.partyCorrectPct)+'%')+'</b></div>'
+      +'<div class="scout-metric"><small>Integral</small><b>'+esc(s.integralShare||0)+'%</b></div>'
+      +'</div><div class="note" style="margin-top:8px">Confiança '+esc(s.confidence||'baixa')+' · '+fmtS(s.combatCtas||0)+' CTA(s) com combate observado.</div></div>';
+    var eqHtml='<div class="scout-card"><h3>Build observada</h3>'+scoutEquipmentHtml(eq,eqIp,eqAt)+'</div>';
+    var history='';
+    if(!compact){
+      var rows=(d.history||[]).slice(0,30);
+      history='<div class="scout-card scout-history"><h3>Histórico por CTA</h3><table class="dtable"><thead><tr><th>Data</th><th>CTA</th><th>Função</th><th>Arma</th><th>Attendance</th><th>Min</th><th>Dano</th><th>Cura</th><th>K</th><th>D</th><th>Fights</th><th>PT</th><th>IP</th><th>Obs.</th></tr></thead><tbody>'
+        +(rows.length?rows.map(function(x){
+          var pt=(x.plannedParty==null&&x.actualParty==null)?'—':((x.plannedParty==null?'?':x.plannedParty)+'→'+(x.actualParty==null?'?':x.actualParty));
+          return '<tr><td>'+esc(fmtUtcDate(x.createdAt))+'</td><td>'+esc(x.time||'—')+'</td><td>'+esc(x.role||'—')+'</td><td>'+esc(x.weapon||'—')+'</td><td>'+esc(x.attendanceLevel||'—')+'</td><td>'+fmtS(x.voiceMinutes||0)+'</td><td>'+fmtS(x.damage||0)+'</td><td>'+fmtS(x.healing||0)+'</td><td>'+fmtS(x.kills||0)+'</td><td>'+fmtS(x.deaths||0)+'</td><td>'+fmtS(x.fights||0)+'</td><td>'+esc(pt)+'</td><td>'+(x.itemPower?fmtS(Math.round(x.itemPower)):'—')+'</td><td>'+fmtS(x.observers||0)+'</td></tr>';
+        }).join(''):'<tr><td colspan="14" class="empty-note">Sem histórico.</td></tr>')
+        +'</tbody></table></div>';
+    }
+    return '<div class="scout-profile">'
+      +'<div class="scout-head"><div><h2>'+esc(s.playerName||'?')+(s.coreVerified?' ⭐':'')+'</h2><div class="sub">'+esc(s.role||'Sem função')+(prof&&prof.w1?' · '+esc(prof.w1):'')+'</div></div>'
+      +'<div class="scout-badges"><span class="scout-badge">confiança '+esc(s.confidence||'baixa')+'</span><span class="scout-badge">cobertura '+esc(s.coveragePct||0)+'%</span>'+(s.coreVerified?'<span class="scout-badge">CORE confirmado</span>':'')+'</div></div>'
+      +currentHtml+'<div class="scout-layout">'+radar+'<div>'+metrics+eqHtml+'</div></div>'+history+'</div>';
+  }
+  function fetchScoutPlayer(name,eventId){
+    var key=String(name||'').trim().toLowerCase()+'|'+String(eventId||'');
+    if(scoutPlayerCache[key]) return Promise.resolve(scoutPlayerCache[key]);
+    var url='/api/scout/player?player='+encodeURIComponent(name)+(eventId?'&event='+encodeURIComponent(eventId):'');
+    return fetch(url).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json();}).then(function(d){scoutPlayerCache[key]=d;return d;});
+  }
+  function ensureScoutModal(){
+    var ov=document.getElementById('scout-profile-overlay');
+    if(ov) return ov;
+    ov=document.createElement('div'); ov.id='scout-profile-overlay'; ov.className='scout-overlay';
+    ov.innerHTML='<div class="scout-modal"><div class="scout-modal-head"><b>📊 Perfil do jogador</b><button type="button" class="scout-modal-close">Fechar</button></div><div id="scout-profile-body"></div></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('.scout-modal-close').onclick=function(){ov.classList.remove('open');};
+    ov.onclick=function(e){if(e.target===ov)ov.classList.remove('open');};
+    return ov;
+  }
+  function openScoutModal(name,eventId){
+    var ov=ensureScoutModal(), body=document.getElementById('scout-profile-body');
+    body.innerHTML='<div class="empty-note" style="padding:30px">Carregando perfil…</div>'; ov.classList.add('open');
+    fetchScoutPlayer(name,eventId).then(function(d){body.innerHTML=scoutProfileHtml(d,false);}).catch(function(){body.innerHTML='<div class="empty-note" style="padding:30px">Não foi possível carregar este perfil.</div>';});
+  }
+  function ensureScoutHover(){
+    var el=document.getElementById('scout-hover-card');
+    if(el) return el;
+    el=document.createElement('div'); el.id='scout-hover-card'; el.className='scout-hover'; document.body.appendChild(el); return el;
+  }
+  function positionScoutHover(el,anchor){
+    var rect=anchor.getBoundingClientRect(), w=Math.min(510,window.innerWidth-20), left=rect.right+10;
+    if(left+w>window.innerWidth-10) left=Math.max(10,rect.left-w-10);
+    var top=Math.max(10,rect.top-40), h=Math.min(620,window.innerHeight-20);
+    if(top+h>window.innerHeight-10) top=Math.max(10,window.innerHeight-h-10);
+    el.style.left=left+'px'; el.style.top=top+'px';
+  }
+  function showScoutHover(anchor,name,eventId){
+    if(window.matchMedia&&window.matchMedia('(pointer: coarse)').matches) return;
+    var el=ensureScoutHover(), seq=++scoutHoverSeq; el.innerHTML='<div class="empty-note" style="padding:16px">Carregando…</div>'; positionScoutHover(el,anchor); el.classList.add('open');
+    fetchScoutPlayer(name,eventId).then(function(d){if(seq!==scoutHoverSeq)return;el.innerHTML=scoutProfileHtml(d,true);positionScoutHover(el,anchor);}).catch(function(){if(seq===scoutHoverSeq)el.classList.remove('open');});
+  }
+  function hideScoutHover(){scoutHoverSeq++;var el=document.getElementById('scout-hover-card');if(el)el.classList.remove('open');}
+  function bindScoutLinks(root,eventId,hover){
+    if(!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll('[data-scout-player]'),function(el){
+      var name=el.getAttribute('data-scout-player')||'';
+      el.onclick=function(e){e.preventDefault();hideScoutHover();openScoutModal(name,eventId||null);};
+      if(hover){
+        el.onmouseenter=function(){showScoutHover(el,name,eventId||null);};
+        el.onmouseleave=hideScoutHover;
+      }
+    });
+  }
+
   function renderScout(silent){
     if(!silent) loading('view-scout','📊 Scout');
     fetch('/api/scout').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
@@ -1633,7 +1806,8 @@ const PAGE = `<!doctype html>
         setView('view-scout','<div class="modhead">📊 Scout</div><div class="empty-note">Nenhuma temporada encontrada.</div>');
         return;
       }
-      var roleOptions=['Todos','Tank','Support','Healer','Melee','Ranged','Looter','Sem função'];
+      var roleSet={}; rows.forEach(function(x){roleSet[String(x.role||'Sem função')]=1;});
+      var roleOptions=['Todos'].concat(Object.keys(roleSet).sort());
       var head='<div class="modhead">📊 Scout · Temporada '+esc(season.number)+(season.active?' · em andamento':' · encerrada')+'</div>'
         +'<div class="statgrid">'
         +'<div class="stat b"><div class="k">CTAs encerrados</div><div class="v">'+fmtS(d.ctaCount||0)+'</div></div>'
@@ -1642,8 +1816,8 @@ const PAGE = `<!doctype html>
         +'</div>'
         +'<div class="panel"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">'
         +'<div><div class="note">Buscar jogador</div><input id="scout-q" class="brief-input" placeholder="Nome..." style="min-width:220px"></div>'
-        +'<div><div class="note">Função</div><select id="scout-role" class="brief-select">'+roleOptions.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('')+'</select></div>'
-        +'</div><div class="note" style="margin-top:10px">Os números de combate são os mesmos valores deduplicados da tela Combate. Cobertura indica em quantos CTAs com presença existe dado de combate do jogador. Ainda não há nota automática de Core.</div></div>'
+        +'<div><div class="note">Função</div><select id="scout-role" class="brief-select">'+roleOptions.map(function(x){return '<option value="'+attr(x)+'">'+esc(x)+'</option>';}).join('')+'</select></div>'
+        +'</div><div class="note" style="margin-top:10px">Clique em um jogador para abrir o perfil completo. Radar e percentis comparam somente pessoas da mesma função. Não existe nota automática de Core.</div></div>'
         +'<div id="scout-table"></div>';
       setView('view-scout',head);
       function draw(){
@@ -1655,31 +1829,24 @@ const PAGE = `<!doctype html>
           return true;
         });
         var body='<div class="panel"><div style="overflow-x:auto"><table class="dtable"><thead><tr>'
-          +'<th>Jogador</th><th>Função</th><th>Core</th><th>Presença</th><th>Min</th><th>Dano/min</th><th>Cura/min</th><th>Kills</th><th>Mortes</th><th>Fights</th><th>PT correta</th><th>IP médio</th><th>Cobertura</th><th>Confiança</th>'
+          +'<th>Jogador</th><th>Função</th><th>Core</th><th>Presença</th><th>Impacto</th><th>Sobreviv.</th><th>Disciplina</th><th>Consist.</th><th>Dano/min</th><th>Cura/min</th><th>K/D</th><th>Cobertura</th><th>Confiança</th>'
           +'</tr></thead><tbody>';
         body += list.length ? list.map(function(x){
-          var pc=x.partyCorrectPct==null?'—':(x.partyCorrectPct+'%');
-          var ip=x.avgItemPower==null?'—':fmtS(x.avgItemPower);
-          var cov=(x.coveragePct||0)+'%';
+          var rr=x.radar||{};
           return '<tr>'
-            +'<td><b>'+esc(x.playerName||'?')+'</b></td>'
+            +'<td><button type="button" class="scout-player-link" data-scout-player="'+attr(x.playerName||'')+'">'+esc(x.playerName||'?')+'</button></td>'
             +'<td>'+esc(x.role||'Sem função')+'</td>'
             +'<td>'+(x.coreVerified?'⭐':'—')+'</td>'
-            +'<td><b>'+esc(x.presencePct||0)+'%</b> <span style="color:var(--faint)">('+fmtS(x.attendedCtas||0)+'/'+fmtS(d.ctaCount||0)+')</span></td>'
-            +'<td>'+fmtS(x.voiceMinutes||0)+'</td>'
-            +'<td>'+fmtS(x.damagePerMinute||0)+'</td>'
-            +'<td>'+fmtS(x.healingPerMinute||0)+'</td>'
-            +'<td>'+fmtS(x.kills||0)+'</td>'
-            +'<td>'+fmtS(x.deaths||0)+'</td>'
-            +'<td>'+fmtS(x.fights||0)+'</td>'
-            +'<td>'+esc(pc)+'</td>'
-            +'<td>'+esc(ip)+'</td>'
-            +'<td>'+esc(cov)+' <span style="color:var(--faint)">('+fmtS(x.combatCtas||0)+' CTAs)</span></td>'
-            +'<td>'+esc(x.confidence||'baixa')+'</td>'
+            +'<td><b>'+esc(x.presencePct||0)+'%</b> <span style="color:var(--faint)">P'+scoutPct(rr.presence)+'</span></td>'
+            +'<td>P'+scoutPct(rr.impact)+'</td><td>P'+scoutPct(rr.survival)+'</td><td>P'+scoutPct(rr.discipline)+'</td><td>P'+scoutPct(rr.consistency)+'</td>'
+            +'<td>'+fmtS(x.damagePerMinute||0)+'</td><td>'+fmtS(x.healingPerMinute||0)+'</td>'
+            +'<td>'+fmtS(x.kills||0)+'/'+fmtS(x.deaths||0)+'</td>'
+            +'<td>'+esc(x.coveragePct||0)+'%</td><td>'+esc(x.confidence||'baixa')+'</td>'
             +'</tr>';
-        }).join('') : '<tr><td colspan="14" style="color:var(--faint)">Nenhum jogador com esse filtro.</td></tr>';
+        }).join('') : '<tr><td colspan="13" style="color:var(--faint)">Nenhum jogador com esse filtro.</td></tr>';
         body+='</tbody></table></div></div>';
         document.getElementById('scout-table').innerHTML=body;
+        bindScoutLinks(document.getElementById('scout-table'),null,false);
       }
       document.getElementById('scout-q').addEventListener('input',draw);
       document.getElementById('scout-role').addEventListener('change',draw);
@@ -2182,7 +2349,7 @@ const PAGE = `<!doctype html>
               +'<th>#</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Dano bruto</th><th>Cura bruta</th>'
               +'</tr></thead><tbody>'
               +(players.length?players.map(function(p,i){
-                return '<tr><td>'+(i+1)+'</td><td><b>'+esc(p.n||'?')+'</b></td><td>'+esc(p.pt||'Sem PT')+'</td>'
+                return '<tr><td>'+(i+1)+'</td><td><button type="button" class="scout-player-link" data-scout-player="'+attr(p.n||'')+'">'+esc(p.n||'?')+'</button></td><td>'+esc(p.pt||'Sem PT')+'</td>'
                   +'<td><b>'+fmtS(p.damage||0)+'</b></td><td>'+fmtS(p.healing||0)+'</td>'
                   +'<td>'+fmtS(p.kills||0)+'</td><td>'+fmtS(p.deaths||0)+'</td>'
                   +'<td style="color:var(--muted)">'+fmtS(p.rawDamage||0)+'</td><td style="color:var(--muted)">'+fmtS(p.rawHealing||0)+'</td></tr>';
@@ -2267,6 +2434,7 @@ const PAGE = `<!doctype html>
             +'<div class="note">Fingerprint de deltas iguais entre devices: '+fmtS(a.overlappingDeltaFingerprints||0)+' de '+fmtS(a.combatDeltaFingerprints||0)+'. É um indicador de sobreposição, não uma correção automática.</div></div>';
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
           setView('view-combat',html);
+          bindScoutLinks(document.getElementById('view-combat'),combatSelectedEvent,true);
 
           Array.prototype.forEach.call(document.querySelectorAll('.combat-cta'),function(b){
             b.onclick=function(){
