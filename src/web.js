@@ -11,6 +11,7 @@ const db = require("./db");
 const { PARTIES, WEAPONS } = require("./comps");
 const crypto = require("crypto");
 const telemetry = require("./telemetry");
+const scout = require("./scout");
 const path = require("path");
 
 // ---- config do login (OAuth2 Discord) ----
@@ -44,7 +45,13 @@ function verifySession(token) {
   return data;
 }
 const states = new Map();   // state -> timestamp (CSRF)
-setInterval(() => { const now = Date.now(); for (const [st, t] of states) { if (now - t > 10 * 60 * 1000) states.delete(st); } }, 5 * 60 * 1000);
+const stateCleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [st, t] of states) {
+    if (now - t > 10 * 60 * 1000) states.delete(st);
+  }
+}, 5 * 60 * 1000);
+stateCleanupTimer.unref?.();
 
 function parseCookies(req) {
   const h = req.headers.cookie || ""; const o = {};
@@ -455,7 +462,7 @@ function startWebServer(client, opts) {
     res.json(r || { error: "indisponível" });
   });
   app.get("/api/scout", async (req, res) => {
-    const sess = requireMember(req, res); if (!sess) return;
+    const sess = requireEditor(req, res); if (!sess) return;
     try {
       const r = _act.scoutOverview ? await _act.scoutOverview(GUILD_ID) : null;
       res.json(r || { season: null, ctaCount: 0, rows: [] });
@@ -464,20 +471,63 @@ function startWebServer(client, opts) {
       res.status(500).json({ error: "server" });
     }
   });
+
+  async function scoutOwnedBySession(sess, playerName) {
+    const key = scout.normName(playerName);
+    if (!key || !sess?.id) return false;
+    const { rows } = await db.pool.query(
+      "SELECT 1 FROM player_cta_stats WHERE guild_id=$1 AND player_key=$2 AND discord_user_id=$3 LIMIT 1",
+      [GUILD_ID, key, String(sess.id)]
+    );
+    return rows.length > 0;
+  }
+
+  app.get("/api/scout/me", async (req, res) => {
+    const sess = requireMember(req, res); if (!sess) return;
+    try {
+      const { rows } = await db.pool.query(
+        "SELECT player_key, player_name FROM player_cta_stats " +
+        "WHERE guild_id=$1 AND discord_user_id=$2 " +
+        "ORDER BY calculated_at DESC LIMIT 1",
+        [GUILD_ID, String(sess.id)]
+      );
+      const own = rows[0] || null;
+      if (!own) return res.status(404).json({ error: "not_linked" });
+      const r = _act.scoutPlayer ? await _act.scoutPlayer(GUILD_ID, own.player_name || own.player_key, null) : null;
+      if (!r) return res.status(404).json({ error: "not_found" });
+      res.json(r);
+    } catch (e) {
+      console.error("/api/scout/me:", e?.message || e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
   app.get("/api/scout/player", async (req, res) => {
     const sess = requireMember(req, res); if (!sess) return;
     try {
       const player = String(req.query.player || "").trim().slice(0, 120);
       const event = String(req.query.event || "").trim().slice(0, 40) || null;
       if (!player) return res.status(400).json({ error: "player" });
-      const r = _act.scoutPlayer ? await _act.scoutPlayer(GUILD_ID, player, event) : null;
-      if (!r) return res.status(404).json({ error: "not_found" });
-      res.json(r);
+
+      if (sess.canEdit || await scoutOwnedBySession(sess, player)) {
+        const r = _act.scoutPlayer ? await _act.scoutPlayer(GUILD_ID, player, event) : null;
+        if (!r) return res.status(404).json({ error: "not_found" });
+        return res.json(r);
+      }
+
+      // Membro comum olhando OUTRO jogador: o servidor entrega somente o bloco
+      // current (equipamento/IP do CTA selecionado). Radar, Core, histórico e
+      // agregados nunca entram no payload.
+      const current = _act.scoutPlayerCurrent
+        ? await _act.scoutPlayerCurrent(GUILD_ID, player, event)
+        : null;
+      return res.json({ limited: true, current: current || null });
     } catch (e) {
       console.error("/api/scout/player:", e?.message || e);
       res.status(500).json({ error: "server" });
     }
   });
+
   app.use("/assets", express.static(path.join(__dirname, "..", "assets"), {
     maxAge: "1d",
     immutable: false
@@ -486,7 +536,12 @@ function startWebServer(client, opts) {
   app.get("/", (_req, res) => res.type("html").send(PAGE));
 
   const port = process.env.PORT || 3000;
-  app.listen(port, () => console.log(`🌐 Telão/site no ar na porta ${port}`));
+  const server = app.listen(port, () => {
+    const actual = server.address && server.address();
+    const shown = actual && typeof actual === "object" ? actual.port : port;
+    console.log(`🌐 Telão/site no ar na porta ${shown}`);
+  });
+  return server;
 }
 
 // ----------------------------------------------------------------------------
@@ -1748,7 +1803,25 @@ const PAGE = `<!doctype html>
     return '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="note">equipamento observado</span>'+(itemPower?'<span class="scout-badge">IP '+Math.round(itemPower)+'</span>':'')+'</div><div class="scout-eq-grid">'+items+'</div>'+(observedAt?'<div class="note" style="margin-top:7px">Snapshot '+esc(scoutAge(observedAt))+' atrás.</div>':'');
   }
   function scoutProfileHtml(d,compact){
-    var s=d.summary||{}, r=s.radar||{}, cur=d.current||null, latest=d.latestEquipment||null, prof=d.profile||null;
+    d=d||{};
+    var cur=d.current||null;
+    if(d.limited){
+      var limitedCurrent=cur?'<div class="scout-card scout-current"><h3>'+esc(cur.label||'CTA selecionado')+'</h3><div class="scout-metrics">'
+        +'<div class="scout-metric"><small>Dano</small><b>'+fmtS(cur.damage||0)+'</b></div>'
+        +'<div class="scout-metric"><small>Cura</small><b>'+fmtS(cur.healing||0)+'</b></div>'
+        +'<div class="scout-metric"><small>Kills</small><b>'+fmtS(cur.kills||0)+'</b></div>'
+        +'<div class="scout-metric"><small>Mortes</small><b>'+fmtS(cur.deaths||0)+'</b></div>'
+        +'<div class="scout-metric"><small>PT real</small><b>'+esc(cur.pt||'—')+'</b></div>'
+        +'<div class="scout-metric"><small>IP</small><b>'+(cur.itemPower?fmtS(Math.round(cur.itemPower)):'—')+'</b></div>'
+        +'</div></div>':'<div class="empty-note">Sem dados do CTA selecionado.</div>';
+      return '<div class="scout-profile">'
+        +'<div class="scout-head"><div><h2>Jogador do CTA</h2><div class="sub">Perfil histórico restrito</div></div>'
+        +'<div class="scout-badges"><span class="scout-badge">somente CTA atual</span></div></div>'
+        +limitedCurrent
+        +'<div class="scout-card"><h3>Build observada</h3>'+scoutEquipmentHtml(cur&&cur.equipment,cur&&cur.itemPower,cur&&cur.equipmentObservedAt)+'</div>'
+        +'</div>';
+    }
+    var s=d.summary||{}, r=s.radar||{}, latest=d.latestEquipment||null, prof=d.profile||null;
     var eq=cur&&cur.equipment?cur.equipment:(latest&&latest.equipment?latest.equipment:null);
     var eqIp=cur&&cur.itemPower?cur.itemPower:(latest&&latest.itemPower?latest.itemPower:null);
     var eqAt=cur&&cur.equipmentObservedAt?cur.equipmentObservedAt:(latest&&latest.equipmentObservedAt?latest.equipmentObservedAt:null);
@@ -1888,6 +1961,22 @@ const PAGE = `<!doctype html>
 
   function renderScout(silent){
     if(!silent) loading('view-scout','📊 Scout');
+    if(!authState.canEdit){
+      fetch('/api/scout/me').then(function(r){
+        if(r.status===404) return null;
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      }).then(function(d){
+        if(!d){
+          setView('view-scout','<div class="modhead">📊 Meu Scout</div><div class="empty-note">Ainda não encontrei um personagem do Albion vinculado ao seu Discord nos CTAs consolidados.</div>');
+          return;
+        }
+        setView('view-scout','<div class="modhead">📊 Meu Scout</div>'+scoutProfileHtml(d,false));
+      }).catch(function(){
+        setView('view-scout','<div class="modhead">📊 Meu Scout</div><div class="empty-note">Não foi possível carregar seu perfil.</div>');
+      });
+      return;
+    }
     fetch('/api/scout').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
       scoutCache=d;
       var rows=d.rows||[];
@@ -2726,4 +2815,9 @@ const PAGE = `<!doctype html>
 </body>
 </html>`;
 
-module.exports = { startWebServer, notifyRosterChange, buildRosterData };
+module.exports = {
+  startWebServer,
+  notifyRosterChange,
+  buildRosterData,
+  __test: { signSession, verifySession }
+};

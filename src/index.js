@@ -3496,6 +3496,17 @@ const webActions = {
     };
   },
   scoutOverview: async (guildId) => scout.overview(db, guildId),
+  scoutPlayerCurrent: async (_guildId, playerName, eventId) => {
+    if (!eventId) return null;
+    const equipment = await telemetry.getPlayerEquipment(eventId, playerName).catch(() => null);
+    return {
+      eventId: String(eventId),
+      itemPower: equipment?.itemPower == null ? null : Number(equipment.itemPower || 0),
+      equipment: equipment?.equipment || null,
+      equipmentObservedAt: equipment?.occurredAt || null,
+      equipmentInspected: !!equipment?.inspected
+    };
+  },
   scoutPlayer: async (guildId, playerName, eventId) => {
     let detail = await scout.playerDetail(db, guildId, playerName);
     if (!detail && !eventId) return null;
@@ -3530,16 +3541,9 @@ const webActions = {
         history: []
       };
     }
-    if (!eventId) return detail;
-
-    const equipment = await telemetry.getPlayerEquipment(eventId, playerName).catch(() => null);
-    detail.current = {
-      eventId: String(eventId),
-      itemPower: equipment?.itemPower == null ? null : Number(equipment.itemPower || 0),
-      equipment: equipment?.equipment || null,
-      equipmentObservedAt: equipment?.occurredAt || null,
-      equipmentInspected: !!equipment?.inspected
-    };
+    if (eventId) {
+      detail.current = await webActions.scoutPlayerCurrent(guildId, playerName, eventId);
+    }
     return detail;
   },
   applyEdit: async (eventId) => {
