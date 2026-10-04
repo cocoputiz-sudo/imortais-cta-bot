@@ -1711,7 +1711,7 @@ const PAGE = `<!doctype html>
     var items=slots.map(function(s){
       var id=equipment[s[1]]||'';
       if(!id) return '<div class="scout-eq" style="opacity:.35"><div style="height:49px"></div><small>'+esc(s[0])+'</small><b>—</b></div>';
-      return '<div class="scout-eq" title="'+scoutAttr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+scoutAttr(scoutItemIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
+      return '<div class="scout-eq" title="'+scoutAttr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+scoutAttr(scoutItemIconUrl(id))+'" alt="'+scoutAttr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
     }).join('');
     return '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="note">equipamento observado</span>'+(itemPower?'<span class="scout-badge">IP '+Math.round(itemPower)+'</span>':'')+'</div><div class="scout-eq-grid">'+items+'</div>'+(observedAt?'<div class="note" style="margin-top:7px">Snapshot '+esc(scoutAge(observedAt))+' atrás.</div>':'');
   }
@@ -1720,7 +1720,7 @@ const PAGE = `<!doctype html>
     var eq=cur&&cur.equipment?cur.equipment:(latest&&latest.equipment?latest.equipment:null);
     var eqIp=cur&&cur.itemPower?cur.itemPower:(latest&&latest.itemPower?latest.itemPower:null);
     var eqAt=cur&&cur.equipmentObservedAt?cur.equipmentObservedAt:(latest&&latest.equipmentObservedAt?latest.equipmentObservedAt:null);
-    var currentHtml=cur?'<div class="scout-card scout-current"><h3>CTA selecionado</h3><div class="scout-metrics">'
+    var currentHtml=cur?'<div class="scout-card scout-current"><h3>'+esc(cur.label||'CTA selecionado')+'</h3><div class="scout-metrics">'
       +'<div class="scout-metric"><small>Dano</small><b>'+fmtS(cur.damage||0)+'</b></div>'
       +'<div class="scout-metric"><small>Cura</small><b>'+fmtS(cur.healing||0)+'</b></div>'
       +'<div class="scout-metric"><small>Kills</small><b>'+fmtS(cur.kills||0)+'</b></div>'
@@ -1762,6 +1762,12 @@ const PAGE = `<!doctype html>
     var url='/api/scout/player?player='+encodeURIComponent(name)+(eventId?'&event='+encodeURIComponent(eventId):'');
     return fetch(url).then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json();}).then(function(d){scoutPlayerCache[key]=d;return d;});
   }
+  function scoutMergeCurrent(d,currentData){
+    if(!currentData) return d;
+    var out=Object.assign({},d);
+    out.current=Object.assign({},d.current||{},currentData);
+    return out;
+  }
   function ensureScoutModal(){
     var ov=document.getElementById('scout-profile-overlay');
     if(ov) return ov;
@@ -1772,10 +1778,10 @@ const PAGE = `<!doctype html>
     ov.onclick=function(e){if(e.target===ov)ov.classList.remove('open');};
     return ov;
   }
-  function openScoutModal(name,eventId){
+  function openScoutModal(name,eventId,currentData){
     var ov=ensureScoutModal(), body=document.getElementById('scout-profile-body');
     body.innerHTML='<div class="empty-note" style="padding:30px">Carregando perfil…</div>'; ov.classList.add('open');
-    fetchScoutPlayer(name,eventId).then(function(d){body.innerHTML=scoutProfileHtml(d,false);}).catch(function(){body.innerHTML='<div class="empty-note" style="padding:30px">Não foi possível carregar este perfil.</div>';});
+    fetchScoutPlayer(name,eventId).then(function(d){body.innerHTML=scoutProfileHtml(scoutMergeCurrent(d,currentData),false);}).catch(function(){body.innerHTML='<div class="empty-note" style="padding:30px">Não foi possível carregar este perfil.</div>';});
   }
   function ensureScoutHover(){
     var el=document.getElementById('scout-hover-card');
@@ -1789,19 +1795,28 @@ const PAGE = `<!doctype html>
     if(top+h>window.innerHeight-10) top=Math.max(10,window.innerHeight-h-10);
     el.style.left=left+'px'; el.style.top=top+'px';
   }
-  function showScoutHover(anchor,name,eventId){
+  function showScoutHover(anchor,name,eventId,currentData){
     if(window.matchMedia&&window.matchMedia('(pointer: coarse)').matches) return;
     var el=ensureScoutHover(), seq=++scoutHoverSeq; el.innerHTML='<div class="empty-note" style="padding:16px">Carregando…</div>'; positionScoutHover(el,anchor); el.classList.add('open');
-    fetchScoutPlayer(name,eventId).then(function(d){if(seq!==scoutHoverSeq)return;el.innerHTML=scoutProfileHtml(d,true);positionScoutHover(el,anchor);}).catch(function(){if(seq===scoutHoverSeq)el.classList.remove('open');});
+    fetchScoutPlayer(name,eventId).then(function(d){if(seq!==scoutHoverSeq)return;el.innerHTML=scoutProfileHtml(scoutMergeCurrent(d,currentData),true);positionScoutHover(el,anchor);}).catch(function(){if(seq===scoutHoverSeq)el.classList.remove('open');});
   }
   function hideScoutHover(){scoutHoverSeq++;var el=document.getElementById('scout-hover-card');if(el)el.classList.remove('open');}
   function bindScoutLinks(root,eventId,hover){
     if(!root) return;
     Array.prototype.forEach.call(root.querySelectorAll('[data-scout-player]'),function(el){
       var name=el.getAttribute('data-scout-player')||'';
-      el.onclick=function(e){e.preventDefault();hideScoutHover();openScoutModal(name,eventId||null);};
+      var hasCurrent=el.hasAttribute('data-scout-damage')||el.hasAttribute('data-scout-healing')||el.hasAttribute('data-scout-kills')||el.hasAttribute('data-scout-deaths');
+      var currentData=hasCurrent?{
+        label:el.getAttribute('data-scout-label')||'Batalha selecionada',
+        damage:Number(el.getAttribute('data-scout-damage')||0),
+        healing:Number(el.getAttribute('data-scout-healing')||0),
+        kills:Number(el.getAttribute('data-scout-kills')||0),
+        deaths:Number(el.getAttribute('data-scout-deaths')||0),
+        pt:el.getAttribute('data-scout-pt')||null
+      }:null;
+      el.onclick=function(e){e.preventDefault();hideScoutHover();openScoutModal(name,eventId||null,currentData);};
       if(hover){
-        el.onmouseenter=function(){showScoutHover(el,name,eventId||null);};
+        el.onmouseenter=function(){showScoutHover(el,name,eventId||null,currentData);};
         el.onmouseleave=hideScoutHover;
       }
     });
@@ -2209,7 +2224,7 @@ const PAGE = `<!doctype html>
         var items=slots.map(function(s){
           var id=state.equipment[s[1]]||'';
           if(!id) return '<div class="cv2-equip-item empty"><img class="cv2-equip-icon" alt=""><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">—</span></div>';
-          return '<div class="cv2-equip-item" title="'+scoutAttr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\\'hidden\\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
+          return '<div class="cv2-equip-item" title="'+attr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\\'hidden\\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
         }).join('');
         var ip=Number(state.itemPower)||0;
         var observed=state.observedAt?age(state.observedAt):'snapshot atual';
@@ -2360,7 +2375,7 @@ const PAGE = `<!doctype html>
               +'<th>#</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Dano bruto</th><th>Cura bruta</th>'
               +'</tr></thead><tbody>'
               +(players.length?players.map(function(p,i){
-                return '<tr><td>'+(i+1)+'</td><td><button type="button" class="scout-player-link" data-scout-player="'+scoutAttr(p.n||'')+'">'+esc(p.n||'?')+'</button></td><td>'+esc(p.pt||'Sem PT')+'</td>'
+                return '<tr><td>'+(i+1)+'</td><td><button type="button" class="scout-player-link" data-scout-player="'+scoutAttr(p.n||'')+'" data-scout-label="'+scoutAttr('Batalha '+(f.n||'?'))+'" data-scout-damage="'+Number(p.damage||0)+'" data-scout-healing="'+Number(p.healing||0)+'" data-scout-kills="'+Number(p.kills||0)+'" data-scout-deaths="'+Number(p.deaths||0)+'" data-scout-pt="'+scoutAttr(p.pt||'Sem PT')+'">'+esc(p.n||'?')+'</button></td><td>'+esc(p.pt||'Sem PT')+'</td>'
                   +'<td><b>'+fmtS(p.damage||0)+'</b></td><td>'+fmtS(p.healing||0)+'</td>'
                   +'<td>'+fmtS(p.kills||0)+'</td><td>'+fmtS(p.deaths||0)+'</td>'
                   +'<td style="color:var(--muted)">'+fmtS(p.rawDamage||0)+'</td><td style="color:var(--muted)">'+fmtS(p.rawHealing||0)+'</td></tr>';
