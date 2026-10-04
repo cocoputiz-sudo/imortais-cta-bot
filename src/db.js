@@ -265,6 +265,22 @@ async function init() {
   await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS delivery_zone_name TEXT;`);
   await pool.query(`ALTER TABLE cta_navigation_waypoints ADD COLUMN IF NOT EXISTS picked_at TIMESTAMPTZ;`);
 
+  // Foto permanente do placar final de cada temporada (independe da retenção dos dados brutos).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS season_results (
+      id         BIGSERIAL PRIMARY KEY,
+      guild_id   TEXT NOT NULL,
+      season_id  BIGINT NOT NULL,
+      number     INT NOT NULL,
+      started_at TIMESTAMPTZ NOT NULL,
+      ended_at   TIMESTAMPTZ NOT NULL,
+      cta_count  INT NOT NULL DEFAULT 0,
+      standings  JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (guild_id, season_id)
+    )
+  `);
+
   // Correção de nome canônico: o item foi cadastrado originalmente como
   // "CAJADO PRIMORDIAL", mas o nome correto usado pela comp é "CAJADO PRIMITIVO".
   // Migra inscrições antigas para não quebrar encaixe/reallocation após o rename.
@@ -660,6 +676,34 @@ async function startSeason(guildId, number) {
 async function finishSeason(guildId) {
   const { rows } = await pool.query(
     `UPDATE seasons SET ended_at=now() WHERE guild_id=$1 AND ended_at IS NULL RETURNING *`, [guildId]
+  );
+  return rows[0];
+}
+
+// Foto do placar final. A primeira foto vale: se já existir, devolve a existente (imutável).
+async function saveSeasonResults({ guildId, seasonId, number, startedAt, endedAt, ctaCount, standings }) {
+  const ins = await pool.query(
+    `INSERT INTO season_results (guild_id, season_id, number, started_at, ended_at, cta_count, standings)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+     ON CONFLICT (guild_id, season_id) DO NOTHING
+     RETURNING *`,
+    [guildId, seasonId, number, startedAt, endedAt, ctaCount || 0, JSON.stringify(standings || [])]
+  );
+  if (ins.rows[0]) return ins.rows[0];
+  const { rows } = await pool.query(
+    `SELECT * FROM season_results WHERE guild_id=$1 AND season_id=$2`, [guildId, seasonId]
+  );
+  return rows[0];
+}
+async function getLastSeasonResults(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM season_results WHERE guild_id=$1 ORDER BY ended_at DESC, id DESC LIMIT 1`, [guildId]
+  );
+  return rows[0];
+}
+async function getLastEndedSeason(guildId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM seasons WHERE guild_id=$1 AND ended_at IS NOT NULL ORDER BY ended_at DESC, id DESC LIMIT 1`, [guildId]
   );
   return rows[0];
 }
@@ -1144,6 +1188,7 @@ module.exports = {
   upsertBombSignup, getBombSignups, deleteBombSignup,
   voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getEventsInRange, setEventIgnored,
   getCurrentSeason, startSeason, finishSeason,
+  saveSeasonResults, getLastSeasonResults, getLastEndedSeason,
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignup, getSecondCaller, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   getDueReminders, markReminderSent,

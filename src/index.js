@@ -13,6 +13,7 @@ const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = requir
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
+const seasonSnap = require("./season");
 const perfil = require("./perfil");
 const web = require("./web");
 const telemetry = require("./telemetry");
@@ -2505,18 +2506,42 @@ async function slashAttendance(interaction, dias, rotulo) {
 
 async function slashStartSeason(interaction) {
   const numero = interaction.options.getInteger("numero");
+  await interaction.deferReply();
+  // Se ainda há temporada aberta, só avança depois de preservar a foto final dela.
+  const prev = await db.getCurrentSeason(interaction.guildId);
+  if (prev) {
+    try {
+      await seasonSnap.snapshotSeason(db, attendance, interaction.guildId, prev, new Date());
+    } catch (e) {
+      console.error("snapshotSeason(start):", e?.message || e);
+      return interaction.editReply({ content:
+        `⚠️ **A Temporada ${numero} NÃO foi iniciada.** Não consegui salvar a foto final da Temporada ${prev.number}. Tente novamente antes de abrir a nova temporada.`
+      });
+    }
+  }
   await db.startSeason(interaction.guildId, numero);
-  await interaction.reply({ content: `🏁 **Temporada ${numero} iniciada!** A contagem de presença começa agora. Boa sorte, IMORTAIS! ⚔️` });
+  await interaction.editReply({ content: `🏁 **Temporada ${numero} iniciada!** A contagem de presença começa agora. Boa sorte, IMORTAIS! ⚔️` +
+    (prev ? `\n_A Temporada ${prev.number} foi encerrada automaticamente e a foto do placar final foi salva._` : "") });
   await logStaff(interaction.guild, `🏁 ${interaction.user} iniciou a **Temporada ${numero}**`);
   refreshRankingBoard(interaction.guildId).catch(() => {});
 }
 
 async function slashFinishSeason(interaction) {
+  await interaction.deferReply();
   const s = await db.finishSeason(interaction.guildId);
-  if (!s) return interaction.reply({ content: "Não há temporada aberta pra encerrar.", flags: MessageFlags.Ephemeral });
-  await interaction.reply({ content: `🔒 **Temporada ${s.number} encerrada.** O placar final está congelado — rode /cta_rank pra ver o resultado.` });
-  await logStaff(interaction.guild, `🔒 ${interaction.user} encerrou a **Temporada ${s.number}**`);
-  refreshRankingBoard(interaction.guildId, s).catch(() => {});
+  if (!s) return interaction.editReply({ content: "Não há temporada aberta pra encerrar." });
+  // A foto calcula o placar inteiro; a interação já foi reconhecida acima.
+  let snap = null;
+  for (let tentativa = 1; tentativa <= 2 && !snap; tentativa++) {
+    try { snap = await seasonSnap.snapshotSeason(db, attendance, interaction.guildId, s); }
+    catch (e) { console.error(`snapshotSeason(finish) tentativa ${tentativa}:`, e?.message || e); }
+  }
+  const n = snap ? (Array.isArray(snap.standings) ? snap.standings.length : 0) : 0;
+  await interaction.editReply({ content: snap
+    ? `🔒 **Temporada ${s.number} encerrada.**\n📸 Foto do placar final salva: **${snap.cta_count} CTAs · ${n} jogadores** (permanente, não muda mais).\n🏖️ O sistema entrou em **OFF-SEASON**: a contagem de presença fica pausada até uma nova temporada começar com **/cta_start_temporada**.`
+    : `🔒 **Temporada ${s.number} encerrada**, mas ⚠️ **não consegui salvar a foto do placar final**. Os dados de presença continuam guardados; rode **/cta_rank** em alguns minutos que o sistema tenta tirar a foto de novo.` });
+  await logStaff(interaction.guild, `🔒 ${interaction.user} encerrou a **Temporada ${s.number}**${snap ? " (foto do placar salva)" : " (⚠️ foto NÃO salva)"}`);
+  refreshRankingBoard(interaction.guildId).catch(() => {});
 }
 
 // ---- Placar fixo no canal ┇📊ranking ----
@@ -2572,7 +2597,10 @@ async function refreshRankingBoard(guildId, seasonOverride) {
 
     let blocks;
     if (!season) {
-      blocks = ["🏆 **PLACAR**\n\n_Nenhuma temporada ativa. Um Mestre de Guerra inicia com **/cta_start_temporada**._"];
+      const snap = await seasonSnap.lastSnapshotOrHeal(db, attendance, guildId);
+      blocks = snap
+        ? seasonSnap.offSeasonBlocks(snap)
+        : ["🏆 **PLACAR**\n\n_Nenhuma temporada ativa. Um Mestre de Guerra inicia com **/cta_start_temporada**._"];
     } else {
       const end = season.ended_at ? new Date(season.ended_at) : new Date();
       const report = await attendance.buildReport(guildId, new Date(season.started_at), end);
@@ -2662,8 +2690,15 @@ async function slashRank(interaction, meu) {
   // não anúncio — assim, por mais gente que rode, nada é postado no canal (zero spam).
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const season = await db.getCurrentSeason(interaction.guildId);
-  if (!season)
-    return interaction.editReply({ content: "Nenhuma temporada ativa ainda. Peça a um Mestre de Guerra pra iniciar com **/cta_start_temporada**." });
+  if (!season) {
+    const snap = await seasonSnap.lastSnapshotOrHeal(db, attendance, interaction.guildId);
+    if (!snap)
+      return interaction.editReply({ content: "Nenhuma temporada ativa ainda. Peça a um Mestre de Guerra pra iniciar com **/cta_start_temporada**." });
+    if (meu) return interaction.editReply({ content: seasonSnap.offSeasonMyRank(snap, interaction.user.id) });
+    await refreshRankingBoard(interaction.guildId);
+    const linkOff = CFG.rankingChannelId ? `<#${CFG.rankingChannelId}>` : "o canal de ranking";
+    return interaction.editReply({ content: `🏖️ **OFF-SEASON.** O resultado final da **Temporada ${snap.number}** está em ${linkOff}.` });
+  }
 
   const start = new Date(season.started_at);
   const end = new Date();
@@ -3368,7 +3403,9 @@ process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 setInterval(async () => {
   try {
     await db.pool.query("DELETE FROM albion_telemetry_events WHERE received_at < now() - interval '3 days'");
-    await db.pool.query("DELETE FROM voice_presence WHERE left_at IS NOT NULL AND left_at < now() - interval '30 days'");
+    // Presença na call é a base do attendance/rank: guarda por padrão 365 dias (mín. 60 para cobrir uma temporada).
+    const voiceDays = Math.max(60, parseInt(process.env.VOICE_RETENTION_DAYS || "365", 10) || 365);
+    await db.pool.query("DELETE FROM voice_presence WHERE left_at IS NOT NULL AND left_at < now() - ($1::int * interval '1 day')", [voiceDays]);
   } catch (e) { console.error("retention:", e); }
 }, 6 * 60 * 60 * 1000);
 
