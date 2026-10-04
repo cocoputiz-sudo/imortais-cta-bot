@@ -418,11 +418,11 @@ function buildHighlights(rows, deathCapturedCtas) {
     {
       key: "immortal",
       icon: "🛡️",
-      title: "Imortais",
+      title: "Sobreviventes",
       subtitle: "muitas fights, poucas mortes",
       rows: topHighlight(
         rows,
-        r => r.fights >= 5 && r.combatCtas >= 2 && r.deathsPerFight != null,
+        r => r.fights >= 5 && r.combatCtas >= 2 && r.deathsPerFight != null && r.deathsPerFight <= 0.25,
         (a, b) => a.deathsPerFight - b.deathsPerFight || b.fights - a.fights,
         r => r.fights + " fights · " + r.deaths + " morte(s) · " + r.deathsPerFight + "/fight"
       )
@@ -486,7 +486,7 @@ function buildHighlights(rows, deathCapturedCtas) {
       subtitle: "maior taxa de mortes por fight",
       rows: topHighlight(
         rows,
-        r => r.fights >= 3 && r.combatCtas >= 1 && r.deaths >= 2 && r.deathsPerFight != null,
+        r => r.fights >= 3 && r.combatCtas >= 1 && r.deaths >= 2 && r.deathsPerFight != null && r.deathsPerFight >= 0.25,
         (a, b) => b.deathsPerFight - a.deathsPerFight || b.deaths - a.deaths,
         r => r.deathsPerFight + " mortes/fight · " + r.deaths + " morte(s)"
       )
