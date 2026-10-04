@@ -661,6 +661,15 @@ const PAGE = `<!doctype html>
   .auditcorrect summary{ color:var(--muted); cursor:pointer; font-size:12px; }
   .auditgrid{ display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:8px; }
   .lootctas{ display:flex; gap:8px; flex-wrap:wrap; }
+  .combat-picker{padding:12px 14px}
+  .combat-picker-row{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+  .combat-picker-row+.combat-picker-row{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+  .combat-picker-label{flex:0 0 74px;color:var(--muted);font-size:8px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+  .combat-picker .tab{padding:6px 10px;font-size:11px}
+  .combat-day.on{border-color:#8f4048;background:#2b171a}
+  .combat-cta.on{border-color:#8f4048;background:#2b171a}
+  @media(max-width:760px){.combat-picker-label{flex-basis:100%;margin-bottom:1px}.combat-picker .tab{font-size:10px;padding:6px 8px}}
+
   @media(max-width:900px){ .auditsplit,.auditgrid{ grid-template-columns:1fr; } .auditline{grid-template-columns:28px 1fr auto;} .auditdetail{grid-column:2 / -1;text-align:left;} }
   .sheet .go{ width:100%; padding:13px; font-size:15px; }
   .big{ font-family:var(--disp); font-size:42px; font-weight:900; line-height:1; margin:6px 0 4px; }
@@ -1002,6 +1011,7 @@ const PAGE = `<!doctype html>
   var _viewCache={};
   function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
   var combatSelectedEvent=null;
+  var combatSelectedDay=null;
   var confirmPartySelection={};
   var telemetryRefreshTimer=null, telemetryRefreshPending=false, confirmPollTimer=null;
   var ROLE={Tank:'tank',Support:'support',Melee:'dps',Ranged:'range',Healer:'heal'};
@@ -2337,13 +2347,43 @@ const PAGE = `<!doctype html>
 
         fetchTelemetry('/api/telemetry/combat?event='+encodeURIComponent(combatSelectedEvent)).then(function(d){
           var r=d.resumo||{};
-          var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
-            +ctas.map(function(x){
-              var on=String(x.id)===String(combatSelectedEvent);
-              var label=ctaHistoryLabel(x)+(x.status==='closed'?' · encerrado':' · ao vivo');
-              return '<button class="tab combat-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+esc(label)+' <span style="color:var(--muted)">('+x.combatEvents+')</span></button>';
+          function combatDayKey(x){
+            var stamp=x&& (x.ctaAt||x.createdAt||x.closedAt);
+            return fmtUtcDate(stamp);
+          }
+          var days=[], byDay={};
+          ctas.forEach(function(x){
+            var day=combatDayKey(x);
+            if(!byDay[day]){ byDay[day]=[]; days.push(day); }
+            byDay[day].push(x);
+          });
+          var selectedEventObj=ctas.find(function(x){return String(x.id)===String(combatSelectedEvent);}) || selected;
+          var selectedEventDay=selectedEventObj?combatDayKey(selectedEventObj):null;
+          if(!combatSelectedDay || !byDay[combatSelectedDay]) combatSelectedDay=selectedEventDay || days[0] || null;
+          var dayCtas=(combatSelectedDay&&byDay[combatSelectedDay])?byDay[combatSelectedDay]:[];
+          if(dayCtas.length && !dayCtas.some(function(x){return String(x.id)===String(combatSelectedEvent);})){
+            combatSelectedEvent=String(dayCtas[0].id);
+            selected=dayCtas[0];
+          }
+
+          var picker='<div class="panel combat-picker"><h3 style="margin-top:0">CTA PARA CONFERÊNCIA</h3>'
+            +'<div class="combat-picker-row"><div class="combat-picker-label">DIA</div>'
+            +days.map(function(day){
+              var on=day===combatSelectedDay;
+              var qtd=(byDay[day]||[]).length;
+              return '<button class="tab combat-day'+(on?' on':'')+'" data-day="'+esc(day)+'">'+esc(day)+' <span style="color:var(--muted)">('+qtd+')</span></button>';
             }).join('')
-            +'</div><div class="note" style="margin-top:10px">Os rankings detalhados de combate ficam disponíveis por 3 dias após o encerramento do CTA.</div></div>';
+            +'</div>'
+            +'<div class="combat-picker-row"><div class="combat-picker-label">CTA UTC</div>'
+            +dayCtas.map(function(x){
+              var on=String(x.id)===String(combatSelectedEvent);
+              var stamp=x.ctaAt||x.createdAt||x.closedAt;
+              var time=String(x.time||'').trim() || fmtUtcTime(stamp,false);
+              var status=x.status==='closed'?'encerrado':'ao vivo';
+              return '<button class="tab combat-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">CTA '+esc(time)+' UTC · '+esc(status)+' <span style="color:var(--muted)">('+fmtS(x.combatEvents||0)+')</span></button>';
+            }).join('')
+            +'</div>'
+            +'<div class="note" style="margin-top:9px">Selecione o dia e depois o CTA. Os rankings detalhados ficam disponíveis por 3 dias após o encerramento.</div></div>';
 
           var a=d.audit||{};
           var devices=a.devices||[];
@@ -2462,9 +2502,20 @@ const PAGE = `<!doctype html>
           setView('view-combat',html);
           bindScoutLinks(document.getElementById('view-combat'),combatSelectedEvent,true);
 
+          Array.prototype.forEach.call(document.querySelectorAll('.combat-day'),function(b){
+            b.onclick=function(){
+              var day=b.getAttribute('data-day');
+              combatSelectedDay=day;
+              var first=(byDay[day]||[])[0]||null;
+              if(first) combatSelectedEvent=String(first.id);
+              renderCombat();
+            };
+          });
           Array.prototype.forEach.call(document.querySelectorAll('.combat-cta'),function(b){
             b.onclick=function(){
               combatSelectedEvent=b.getAttribute('data-id');
+              var chosen=ctas.find(function(x){return String(x.id)===String(combatSelectedEvent);});
+              if(chosen) combatSelectedDay=combatDayKey(chosen);
               renderCombat();
             };
           });
