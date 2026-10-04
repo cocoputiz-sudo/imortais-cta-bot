@@ -854,6 +854,28 @@ const PAGE = `<!doctype html>
   .scout-current{margin-bottom:12px;border-color:#315d83;background:#0d1b28}
   .scout-eq-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}.scout-eq{min-width:0;text-align:center;padding:6px 3px;border:1px solid #24344a;border-radius:8px;background:#0b131d}.scout-eq img{display:block;width:46px;height:46px;margin:0 auto 3px;object-fit:contain}.scout-eq small{display:block;color:#798aa0;font-size:7px}.scout-eq b{font-size:8px}
   .scout-history{margin-top:12px;overflow:auto}.scout-history table{min-width:940px}
+  .scout-highlights{margin:12px 0}
+  .scout-highlights-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:9px}
+  .scout-highlights-head h3{margin:0;font-family:var(--disp);font-size:16px}
+  .scout-highlights-head .note{max-width:760px}
+  .scout-highlight-section+.scout-highlight-section{margin-top:10px}
+  .scout-highlight-section-title{margin:0 0 7px;color:#9fb1c7;font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+  .scout-highlight-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .scout-highlight-board{overflow:hidden;border:1px solid #2a3b50;border-radius:11px;background:linear-gradient(180deg,#101923,#0c131c)}
+  .scout-highlight-board.good{border-color:#2d5540}.scout-highlight-board.alert{border-color:#5b3035}
+  .scout-highlight-title{padding:10px 11px;border-bottom:1px solid #223044}
+  .scout-highlight-title b{display:block;font-size:11px}.scout-highlight-title small{display:block;margin-top:2px;color:var(--muted);font-size:8px;line-height:1.3}
+  .scout-highlight-board.alert .scout-highlight-title{background:linear-gradient(180deg,rgba(94,30,37,.28),rgba(50,18,22,.12))}
+  .scout-highlight-board.good .scout-highlight-title{background:linear-gradient(180deg,rgba(31,80,54,.22),rgba(16,43,29,.10))}
+  .scout-highlight-row{appearance:none;width:100%;display:grid;grid-template-columns:25px minmax(0,1fr);gap:7px;text-align:left;padding:8px 9px;border:0;border-bottom:1px solid #1e2a39;background:transparent;color:inherit;cursor:pointer}
+  .scout-highlight-row:last-child{border-bottom:0}.scout-highlight-row:hover{background:#132030}
+  .scout-highlight-rank{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#182536;color:#8fa7c4;font-size:8px;font-weight:900}
+  .scout-highlight-player{font-size:10px;font-weight:900}.scout-highlight-player .core{color:#e4bd59}
+  .scout-highlight-detail{display:block;margin-top:2px;color:#7f91a8;font-size:8px;line-height:1.35}
+  .scout-highlight-empty{padding:13px;color:#66788f;font-size:9px}
+  @media(max-width:1050px){.scout-highlight-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:680px){.scout-highlight-grid{grid-template-columns:1fr}}
+
   .scout-hover{position:fixed;z-index:1320;display:none;width:510px;max-width:calc(100vw - 20px);max-height:min(640px,calc(100vh - 20px));overflow:auto;padding:0;border:1px solid #40536f;border-radius:13px;background:linear-gradient(180deg,#121b29,#091018);box-shadow:0 20px 65px rgba(0,0,0,.65);pointer-events:none}
   .scout-hover.open{display:block}.scout-hover .scout-profile{padding:12px}.scout-hover .scout-layout{grid-template-columns:190px 1fr}.scout-hover .scout-radar-wrap{min-height:190px}.scout-hover .scout-radar{width:190px}.scout-hover .scout-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   @media(max-width:760px){.scout-layout{grid-template-columns:1fr}.scout-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.scout-eq-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.scout-hover{display:none!important}.scout-overlay{padding:8px}.scout-modal{width:100%;max-height:96vh}}
@@ -1749,6 +1771,9 @@ const PAGE = `<!doctype html>
       +'<div class="scout-metric"><small>Fights</small><b>'+fmtS(s.fights||0)+'</b></div>'
       +'<div class="scout-metric"><small>PT correta</small><b>'+(s.partyCorrectPct==null?'—':esc(s.partyCorrectPct)+'%')+'</b></div>'
       +'<div class="scout-metric"><small>Integral</small><b>'+esc(s.integralShare||0)+'%</b></div>'
+      +'<div class="scout-metric"><small>Reentradas fatais</small><b>'+fmtS(s.rapidReturns||0)+'</b></div>'
+      +'<div class="scout-metric"><small>Caiu no 1º min</small><b>'+fmtS(s.earlyFightDeaths||0)+'</b></div>'
+      +'<div class="scout-metric"><small>CTAs analisados</small><b>'+fmtS(s.deathAnalysisCtas||0)+'</b></div>'
       +'</div><div class="note" style="margin-top:8px">Confiança '+esc(s.confidence||'baixa')+' · '+fmtS(s.combatCtas||0)+' CTA(s) com combate observado.</div></div>';
     var eqHtml='<div class="scout-card"><h3>Build observada</h3>'+scoutEquipmentHtml(eq,eqIp,eqAt)+'</div>';
     var history='';
@@ -1832,6 +1857,35 @@ const PAGE = `<!doctype html>
     });
   }
 
+  function scoutHighlightBoard(board,tone){
+    board=board||{};
+    var rows=board.rows||[];
+    return '<div class="scout-highlight-board '+esc(tone||'')+'">'
+      +'<div class="scout-highlight-title"><b>'+esc((board.icon||'')+' '+(board.title||''))+'</b><small>'+esc(board.subtitle||'')+'</small></div>'
+      +(rows.length?rows.map(function(r){
+        return '<button type="button" class="scout-highlight-row" data-scout-player="'+scoutAttr(r.playerName||'')+'">'
+          +'<span class="scout-highlight-rank">#'+esc(r.rank||'')+'</span>'
+          +'<span><span class="scout-highlight-player">'+esc(r.playerName||'?')+(r.coreVerified?' <span class="core">⭐</span>':'')+'</span>'
+          +'<span class="scout-highlight-detail">'+esc(r.detail||'')+(r.role?' · '+esc(r.role):'')+'</span></span></button>';
+      }).join(''):'<div class="scout-highlight-empty">Sem amostra suficiente ainda.</div>')
+      +'</div>';
+  }
+  function scoutHighlightsHtml(h){
+    h=h||{};
+    var positive=h.positive||[], alerts=h.alerts||[], meta=h.meta||{};
+    return '<div id="scout-highlights" class="scout-highlights">'
+      +'<div class="scout-highlights-head"><div><h3>🔥 Destaques da temporada</h3><div class="note">Méritos e padrões que merecem atenção. Clique em qualquer jogador para abrir o perfil completo.</div></div>'
+      +'<div class="note">'+fmtS(meta.deathCapturedCtas||0)+' CTA(s) com linha do tempo de mortes analisável</div></div>'
+      +'<div class="scout-highlight-section"><div class="scout-highlight-section-title">⭐ Destaques</div><div class="scout-highlight-grid">'
+      +positive.map(function(x){return scoutHighlightBoard(x,'good');}).join('')
+      +'</div></div>'
+      +'<div class="scout-highlight-section"><div class="scout-highlight-section-title">⚠️ Alertas</div><div class="scout-highlight-grid">'
+      +alerts.map(function(x){return scoutHighlightBoard(x,'alert');}).join('')
+      +'</div></div>'
+      +(meta.note?'<div class="note" style="margin-top:8px">ℹ️ '+esc(meta.note)+'</div>':'')
+      +'</div>';
+  }
+
   function renderScout(silent){
     if(!silent) loading('view-scout','📊 Scout');
     fetch('/api/scout').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
@@ -1849,13 +1903,16 @@ const PAGE = `<!doctype html>
         +'<div class="stat b"><div class="k">CTAs encerrados</div><div class="v">'+fmtS(d.ctaCount||0)+'</div></div>'
         +'<div class="stat g"><div class="k">CTAs com histórico</div><div class="v">'+fmtS(d.capturedCtas||0)+'</div></div>'
         +'<div class="stat a"><div class="k">Jogadores</div><div class="v">'+fmtS(rows.length)+'</div></div>'
+        +'<div class="stat p"><div class="k">CTAs com mortes</div><div class="v">'+fmtS(d.deathCapturedCtas||0)+'</div></div>'
         +'</div>'
+        +scoutHighlightsHtml(d.highlights||{})
         +'<div class="panel"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">'
         +'<div><div class="note">Buscar jogador</div><input id="scout-q" class="brief-input" placeholder="Nome..." style="min-width:220px"></div>'
         +'<div><div class="note">Função</div><select id="scout-role" class="brief-select">'+roleOptions.map(function(x){return '<option value="'+scoutAttr(x)+'">'+esc(x)+'</option>';}).join('')+'</select></div>'
         +'</div><div class="note" style="margin-top:10px">Clique em um jogador para abrir o perfil completo. Radar e percentis comparam somente pessoas da mesma função. Não existe nota automática de Core.</div></div>'
         +'<div id="scout-table"></div>';
       setView('view-scout',head);
+      bindScoutLinks(document.getElementById('scout-highlights'),null,false);
       function draw(){
         var q=(document.getElementById('scout-q').value||'').trim().toLowerCase();
         var role=document.getElementById('scout-role').value;
