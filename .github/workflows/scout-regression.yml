@@ -6,7 +6,11 @@ on:
       - "src/scout.js"
       - "src/index.js"
       - "src/web.js"
+      - "src/season.js"
+      - "src/db.js"
+      - "src/commands.js"
       - "test/scout-regression.js"
+      - "test/season-regression.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -42,7 +46,9 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - name: node --check em todos os src/*.js
-        run: find src -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: node --check em todos os src/*.js e test/*.js
+        run: find src test -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Scout regression em PostgreSQL temporário
         run: node test/scout-regression.js
+      - name: Season regression em PostgreSQL temporário
+        run: node test/season-regression.js
