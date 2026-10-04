@@ -14,6 +14,7 @@ const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = 
 const cmds = require("./commands");
 const attendance = require("./attendance");
 const seasonSnap = require("./season");
+const scout = require("./scout");
 const perfil = require("./perfil");
 const web = require("./web");
 const telemetry = require("./telemetry");
@@ -2472,6 +2473,13 @@ async function finishCTACore(ev, actor, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   if (fresh.status !== "open") return { ok: false, error: `CTA ${fresh.time_label} já está encerrado.` };
   await db.setStatus(fresh.id, "closed");
+  scout.snapshotCta(db, attendance, telemetry, fresh.id)
+    .catch((e) => console.error("scout snapshot CTA " + fresh.id + ":", e?.message || e));
+  const lateScout = setTimeout(() => {
+    scout.snapshotCta(db, attendance, telemetry, fresh.id)
+      .catch((e) => console.error("scout late snapshot CTA " + fresh.id + ":", e?.message || e));
+  }, 45_000);
+  lateScout.unref?.();
   await logStaff(guild, `🏁 ${actor} encerrou o CTA **${fresh.time_label} UTC**`);
   refreshRankingBoard(fresh.guild_id).catch(() => {});
   web.notifyRosterChange(fresh.id).catch(() => {});
@@ -3469,6 +3477,7 @@ const webActions = {
       pinged: r.pingou, fantasma: r.fantasma,
     };
   },
+  scoutOverview: async (guildId) => scout.overview(db, guildId),
   applyEdit: async (eventId) => {
     const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return;
     const guild = client.guilds.cache.get(ev.guild_id) || null;
@@ -3588,8 +3597,12 @@ const webActions = {
     await db.init();
     await perfil.initSchema(db.pool);
     await telemetry.initSchema(db.pool);
+    await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
     await client.login(CFG.token);
+    scout.backfillRecent(db, attendance, telemetry)
+      .then((r) => console.log(`📊 Scout backfill: ${r.ok}/${r.total} CTAs (${r.failed} falhas)`))
+      .catch((e) => console.error("scout backfill:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);
     process.exit(1);

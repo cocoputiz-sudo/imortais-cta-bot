@@ -454,6 +454,16 @@ function startWebServer(client, opts) {
     const r = _act.myStats ? await _act.myStats(sess.id, GUILD_ID) : null;
     res.json(r || { error: "indisponível" });
   });
+  app.get("/api/scout", async (req, res) => {
+    const sess = requireMember(req, res); if (!sess) return;
+    try {
+      const r = _act.scoutOverview ? await _act.scoutOverview(GUILD_ID) : null;
+      res.json(r || { season: null, ctaCount: 0, rows: [] });
+    } catch (e) {
+      console.error("/api/scout:", e?.message || e);
+      res.status(500).json({ error: "server" });
+    }
+  });
   app.use("/assets", express.static(path.join(__dirname, "..", "assets"), {
     maxAge: "1d",
     immutable: false
@@ -854,6 +864,7 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="mural">📣 Mural da guilda</div>
     <div class="nav" id="nav-stats">📊 Meu desempenho</div>
     <div class="navtitle">DADOS DO JOGO</div>
+    <div class="nav" data-view="scout">📊 Scout</div>
     <div class="nav" data-view="confirm">🎯 Validação do CTA</div>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
@@ -891,6 +902,7 @@ const PAGE = `<!doctype html>
 
     <div id="view-mural" style="display:none"><div id="news"></div></div>
     <div id="view-navigation" style="display:none"></div>
+    <div id="view-scout" style="display:none"></div>
     <div id="view-confirm" style="display:none"></div>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
@@ -983,10 +995,11 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices',guild:'view-guild'};
+    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices',guild:'view-guild'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='navigation') renderNavigation();
+    if(v==='scout') renderScout();
     if(v==='confirm') renderConfirm();
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
@@ -1607,6 +1620,74 @@ const PAGE = `<!doctype html>
   function topList(arr, fmt){ arr=arr||[]; var mx=arr.reduce(function(a,b){return Math.max(a,b.v||0);},1);
     if(!arr.length) return '<div class="empty-note">Sem dados ainda.</div>';
     return '<div class="toplist">'+arr.map(function(r,i){ return '<div class="toprow"><span class="rk">'+(i+1)+'</span><span class="nm">'+esc(r.n)+'</span><span class="bar"><i style="width:'+Math.round((r.v||0)/mx*100)+'%"></i></span><span class="val">'+fmt(r.v||0)+'</span></div>'; }).join('')+'</div>'; }
+
+  // ===================== SCOUT / DESEMPENHO =====================
+  var scoutCache=null;
+  function renderScout(silent){
+    if(!silent) loading('view-scout','📊 Scout');
+    fetch('/api/scout').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
+      scoutCache=d;
+      var rows=d.rows||[];
+      var season=d.season||null;
+      if(!season){
+        setView('view-scout','<div class="modhead">📊 Scout</div><div class="empty-note">Nenhuma temporada encontrada.</div>');
+        return;
+      }
+      var roleOptions=['Todos','Tank','Support','Healer','Melee','Ranged','Looter','Sem função'];
+      var head='<div class="modhead">📊 Scout · Temporada '+esc(season.number)+(season.active?' · em andamento':' · encerrada')+'</div>'
+        +'<div class="statgrid">'
+        +'<div class="stat b"><div class="k">CTAs encerrados</div><div class="v">'+fmtS(d.ctaCount||0)+'</div></div>'
+        +'<div class="stat g"><div class="k">CTAs com histórico</div><div class="v">'+fmtS(d.capturedCtas||0)+'</div></div>'
+        +'<div class="stat a"><div class="k">Jogadores</div><div class="v">'+fmtS(rows.length)+'</div></div>'
+        +'</div>'
+        +'<div class="panel"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">'
+        +'<div><div class="note">Buscar jogador</div><input id="scout-q" class="brief-input" placeholder="Nome..." style="min-width:220px"></div>'
+        +'<div><div class="note">Função</div><select id="scout-role" class="brief-select">'+roleOptions.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('')+'</select></div>'
+        +'</div><div class="note" style="margin-top:10px">Os números de combate são os mesmos valores deduplicados da tela Combate. Cobertura indica em quantos CTAs com presença existe dado de combate do jogador. Ainda não há nota automática de Core.</div></div>'
+        +'<div id="scout-table"></div>';
+      setView('view-scout',head);
+      function draw(){
+        var q=(document.getElementById('scout-q').value||'').trim().toLowerCase();
+        var role=document.getElementById('scout-role').value;
+        var list=rows.filter(function(x){
+          if(q && String(x.playerName||'').toLowerCase().indexOf(q)<0) return false;
+          if(role!=='Todos' && String(x.role||'Sem função')!==role) return false;
+          return true;
+        });
+        var body='<div class="panel"><div style="overflow-x:auto"><table class="dtable"><thead><tr>'
+          +'<th>Jogador</th><th>Função</th><th>Core</th><th>Presença</th><th>Min</th><th>Dano/min</th><th>Cura/min</th><th>Kills</th><th>Mortes</th><th>Fights</th><th>PT correta</th><th>IP médio</th><th>Cobertura</th><th>Confiança</th>'
+          +'</tr></thead><tbody>';
+        body += list.length ? list.map(function(x){
+          var pc=x.partyCorrectPct==null?'—':(x.partyCorrectPct+'%');
+          var ip=x.avgItemPower==null?'—':fmtS(x.avgItemPower);
+          var cov=(x.coveragePct||0)+'%';
+          return '<tr>'
+            +'<td><b>'+esc(x.playerName||'?')+'</b></td>'
+            +'<td>'+esc(x.role||'Sem função')+'</td>'
+            +'<td>'+(x.coreVerified?'⭐':'—')+'</td>'
+            +'<td><b>'+esc(x.presencePct||0)+'%</b> <span style="color:var(--faint)">('+fmtS(x.attendedCtas||0)+'/'+fmtS(d.ctaCount||0)+')</span></td>'
+            +'<td>'+fmtS(x.voiceMinutes||0)+'</td>'
+            +'<td>'+fmtS(x.damagePerMinute||0)+'</td>'
+            +'<td>'+fmtS(x.healingPerMinute||0)+'</td>'
+            +'<td>'+fmtS(x.kills||0)+'</td>'
+            +'<td>'+fmtS(x.deaths||0)+'</td>'
+            +'<td>'+fmtS(x.fights||0)+'</td>'
+            +'<td>'+esc(pc)+'</td>'
+            +'<td>'+esc(ip)+'</td>'
+            +'<td>'+esc(cov)+' <span style="color:var(--faint)">('+fmtS(x.combatCtas||0)+' CTAs)</span></td>'
+            +'<td>'+esc(x.confidence||'baixa')+'</td>'
+            +'</tr>';
+        }).join('') : '<tr><td colspan="14" style="color:var(--faint)">Nenhum jogador com esse filtro.</td></tr>';
+        body+='</tbody></table></div></div>';
+        document.getElementById('scout-table').innerHTML=body;
+      }
+      document.getElementById('scout-q').addEventListener('input',draw);
+      document.getElementById('scout-role').addEventListener('change',draw);
+      draw();
+    }).catch(function(){
+      setView('view-scout','<div class="modhead">📊 Scout</div><div class="empty-note">Não foi possível carregar os dados do Scout.</div>');
+    });
+  }
 
   function renderConfirm(silent){
     if(!current){ noCta('view-confirm','🎯 Validação do CTA'); return; }
