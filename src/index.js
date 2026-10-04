@@ -2473,7 +2473,7 @@ async function finishCTACore(ev, actor, guild) {
   const fresh = (await db.getEvent(ev.id)) || ev;
   if (fresh.status !== "open") return { ok: false, error: `CTA ${fresh.time_label} já está encerrado.` };
   await db.setStatus(fresh.id, "closed");
-  scout.snapshotCta(db, attendance, telemetry, fresh.id)
+  scout.snapshotCta(db, attendance, telemetry, fresh.id, { pass: "first" })
     .catch((e) => console.error("scout snapshot CTA " + fresh.id + ":", e?.message || e));
   const lateScout = setTimeout(() => {
     scout.snapshotCta(db, attendance, telemetry, fresh.id)
@@ -3408,9 +3408,27 @@ async function gracefulShutdown(sig) {
 }
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+async function runScoutConsolidation(source) {
+  const r = await scout.consolidateDue(db, attendance, telemetry, { limit: 10 });
+  if (r.total || r.failed) {
+    console.log(
+      "📊 Scout consolidação " + source + ": " +
+      r.ok + "/" + r.total + " CTA(s), " + r.failed + " falha(s)"
+    );
+  }
+  return r;
+}
+
+const scoutConsolidationTimer = setInterval(() => {
+  runScoutConsolidation("30min").catch((e) =>
+    console.error("scout consolidation:", e?.message || e)
+  );
+}, 30 * 60 * 1000);
+scoutConsolidationTimer.unref?.();
+
 setInterval(async () => {
   try {
-    await db.pool.query("DELETE FROM albion_telemetry_events WHERE received_at < now() - interval '3 days'");
+    await scout.cleanupTelemetry(db.pool);
     // Presença na call é a base do attendance/rank: guarda por padrão 365 dias (mín. 60 para cobrir uma temporada).
     const voiceDays = Math.max(60, parseInt(process.env.VOICE_RETENTION_DAYS || "365", 10) || 365);
     await db.pool.query("DELETE FROM voice_presence WHERE left_at IS NOT NULL AND left_at < now() - ($1::int * interval '1 day')", [voiceDays]);
@@ -3646,9 +3664,7 @@ const webActions = {
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
     await client.login(CFG.token);
-    scout.backfillRecent(db, attendance, telemetry)
-      .then((r) => console.log(`📊 Scout backfill: ${r.ok}/${r.total} CTAs (${r.failed} falhas)`))
-      .catch((e) => console.error("scout backfill:", e?.message || e));
+    await runScoutConsolidation("boot");
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);
     process.exit(1);
