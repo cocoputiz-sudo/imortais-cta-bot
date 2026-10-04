@@ -278,8 +278,12 @@ function confidence(ctas, coveragePct) {
 }
 
 function percentile(value, peers, lowerBetter = false) {
+  if (value === null || value === undefined || value === "") return null;
   const v = Number(value);
-  const vals = (peers || []).map(Number).filter(Number.isFinite);
+  const vals = (peers || [])
+    .filter(x => x !== null && x !== undefined && x !== "")
+    .map(Number)
+    .filter(Number.isFinite);
   if (!Number.isFinite(v) || vals.length < 3) return null;
   if (vals.length === 1) return 50;
   const betterBase = vals.filter(x => lowerBetter ? x > v : x < v).length;
