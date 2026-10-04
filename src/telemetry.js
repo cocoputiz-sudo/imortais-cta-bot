@@ -53,10 +53,12 @@ function presenceMapName(value) {
 }
 
 function presencePlayerKey(player) {
-  const playerId = String((player && (player.playerId || player.guid)) || "").trim().toLowerCase();
-  if (playerId) return "id:" + playerId;
+  // O nome é a chave primária porque o próprio observer não carrega o GUID no
+  // snapshot, mas pode aparecer com GUID no snapshot de outro client.
   const name = normName(player && (player.name || player.playerName));
-  return name ? "name:" + name : "";
+  if (name) return "name:" + name;
+  const playerId = String((player && (player.playerId || player.guid)) || "").trim().toLowerCase();
+  return playerId ? "id:" + playerId : "";
 }
 
 function presenceForcesForWindow(rows, rosterKeysInput, mapName, firstAt, lastAt) {
