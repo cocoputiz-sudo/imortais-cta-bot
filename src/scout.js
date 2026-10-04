@@ -75,6 +75,11 @@ async function initSchema(dbPool) {
     ")"
   );
   await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS death_timeline JSONB");
+  // Estado de consolidação por CTA: permite uma primeira foto e exatamente uma
+  // reconciliação tardia sem depender de existirem jogadores no snapshot.
+  await pool.query("ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS scout_first_pass_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS scout_second_pass_at TIMESTAMPTZ");
+  await pool.query("ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS scout_stats_version INT");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_player_cta_stats_guild_player ON player_cta_stats(guild_id, player_key, cta_event_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_player_cta_stats_event ON player_cta_stats(cta_event_id)");
 }
@@ -112,10 +117,19 @@ function fightCounts(combat) {
   return counts;
 }
 
-async function snapshotCta(db, attendance, telemetry, eventId) {
+async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
   if (!pool) throw new Error("scout.initSchema(pool) deve rodar antes");
+  const pass = options && (options.pass === "first" || options.pass === "second") ? options.pass : null;
   const ev = await db.getEvent(eventId);
   if (!ev) return { ok: false, reason: "cta-not-found" };
+
+  // Carrega a foto antiga antes do cálculo. Se a telemetria bruta já tiver sumido,
+  // esses valores são a proteção contra regressão para zero.
+  const existingResult = await pool.query(
+    "SELECT * FROM player_cta_stats WHERE cta_event_id=$1",
+    [ev.id]
+  );
+  const existingByKey = new Map((existingResult.rows || []).map(r => [String(r.player_key), r]));
 
   const [signups, attendanceMap, combat, confirm, profilesResult] = await Promise.all([
     db.getSignups(eventId).catch(() => []),
@@ -152,6 +166,8 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
   for (const row of confirmByName.values()) ensure(row.n, null);
   for (const row of (combat?.players || [])) ensure(row.n, null);
   for (const death of (combat?.deaths || [])) ensure(death.victim, null);
+  // Se o bruto expirou, mantém também jogadores que só existiam na foto anterior.
+  for (const old of existingResult.rows || []) ensure(old.player_name, old.discord_user_id);
 
   const globalObservers = Array.isArray(combat?.audit?.devices) ? combat.audit.devices.length : 0;
   const telemetryEvents = n(combat?.meta?.totalEventos);
@@ -166,9 +182,10 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
       deathsByPlayer.get(key).push(death);
     }
   }
-  const rows = [];
 
+  const rows = [];
   for (const e of entries.values()) {
+    const old = existingByKey.get(e.key) || null;
     const signup = signupByName.get(e.key) || null;
     const att = e.userId ? attendanceMap.get(e.userId) : null;
     const c = combatByName.get(e.key) || null;
@@ -177,16 +194,17 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
     const plannedParty = signup && signup.party_index != null
       ? (displayByRaw.get(Number(signup.party_index)) || Number(signup.party_index) + 1)
       : (conf?.plannedParty ?? null);
-    rows.push({
+
+    let row = {
       guildId: ev.guild_id,
       ctaEventId: ev.id,
-      discordUserId: e.userId,
+      discordUserId: e.userId || old?.discord_user_id || null,
       playerKey: e.key,
-      playerName: e.name,
-      role: roleFor(signup?.weapon, profile?.main_role),
-      weapon: signup?.weapon || null,
-      plannedParty: plannedParty == null ? null : Number(plannedParty),
-      actualParty: conf?.actualParty == null ? null : Number(conf.actualParty),
+      playerName: e.name || old?.player_name || e.key,
+      role: roleFor(signup?.weapon, profile?.main_role) || old?.role || null,
+      weapon: signup?.weapon || old?.weapon || null,
+      plannedParty: plannedParty == null ? (old?.planned_party == null ? null : Number(old.planned_party)) : Number(plannedParty),
+      actualParty: conf?.actualParty == null ? (old?.actual_party == null ? null : Number(old.actual_party)) : Number(conf.actualParty),
       attendanceLevel: att?.level || null,
       voiceMinutes: n(att?.minutes),
       damage: n(c?.damage),
@@ -204,13 +222,39 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
       deathTimeline: deathAnalysisAvailable ? (deathsByPlayer.get(e.key) || []) : null,
       coreVerified: !!profile?.core_verified,
       profileMainRole: profile?.main_role || null
-    });
+    };
+
+    // Nunca regride uma foto que já tinha combate real para uma foto "vazia".
+    // Nessa situação atualizamos somente presença/identidade/perfil e preservamos
+    // todos os campos derivados da telemetria/validação antiga.
+    if (old?.combat_observed && !row.combatObserved) {
+      row = {
+        ...row,
+        role: old.role,
+        weapon: old.weapon,
+        plannedParty: old.planned_party == null ? null : Number(old.planned_party),
+        actualParty: old.actual_party == null ? null : Number(old.actual_party),
+        damage: n(old.damage),
+        healing: n(old.healing),
+        kills: n(old.kills),
+        deaths: n(old.deaths),
+        fights: n(old.fights),
+        combatObserved: true,
+        itemPower: old.item_power == null ? null : Number(old.item_power),
+        equipment: old.equipment || null,
+        equipmentObservedAt: old.equipment_observed_at || null,
+        observerCount: n(old.observer_count),
+        telemetryEvents: n(old.telemetry_events),
+        partySnapshots: n(old.party_snapshots),
+        deathTimeline: old.death_timeline == null ? null : old.death_timeline
+      };
+    }
+    rows.push(row);
   }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM player_cta_stats WHERE cta_event_id=$1", [ev.id]);
     for (const r of rows) {
       await client.query(
         "INSERT INTO player_cta_stats (" +
@@ -219,7 +263,16 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
         "equipment_observed_at, observer_count, telemetry_events, party_snapshots, death_timeline, core_verified, profile_main_role, stats_version, calculated_at" +
         ") VALUES (" +
         "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,now()" +
-        ")",
+        ") ON CONFLICT (cta_event_id, player_key) DO UPDATE SET " +
+        "guild_id=EXCLUDED.guild_id, discord_user_id=EXCLUDED.discord_user_id, player_name=EXCLUDED.player_name," +
+        "role=EXCLUDED.role, weapon=EXCLUDED.weapon, planned_party=EXCLUDED.planned_party, actual_party=EXCLUDED.actual_party," +
+        "attendance_level=EXCLUDED.attendance_level, voice_minutes=EXCLUDED.voice_minutes," +
+        "damage=EXCLUDED.damage, healing=EXCLUDED.healing, kills=EXCLUDED.kills, deaths=EXCLUDED.deaths, fights=EXCLUDED.fights," +
+        "combat_observed=EXCLUDED.combat_observed, item_power=EXCLUDED.item_power, equipment=EXCLUDED.equipment," +
+        "equipment_observed_at=EXCLUDED.equipment_observed_at, observer_count=EXCLUDED.observer_count," +
+        "telemetry_events=EXCLUDED.telemetry_events, party_snapshots=EXCLUDED.party_snapshots, death_timeline=EXCLUDED.death_timeline," +
+        "core_verified=EXCLUDED.core_verified, profile_main_role=EXCLUDED.profile_main_role," +
+        "stats_version=EXCLUDED.stats_version, calculated_at=now()",
         [
           r.guildId, r.ctaEventId, r.discordUserId, r.playerKey, r.playerName, r.role, r.weapon,
           r.plannedParty, r.actualParty, r.attendanceLevel, r.voiceMinutes, r.damage, r.healing,
@@ -231,6 +284,22 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
         ]
       );
     }
+
+    if (pass === "first") {
+      await client.query(
+        "UPDATE cta_events SET " +
+        "scout_first_pass_at=COALESCE(scout_first_pass_at,now()), " +
+        "scout_second_pass_at=CASE WHEN scout_stats_version IS DISTINCT FROM $2 THEN NULL ELSE scout_second_pass_at END, " +
+        "scout_stats_version=$2 WHERE id=$1",
+        [ev.id, STATS_VERSION]
+      );
+    } else if (pass === "second") {
+      await client.query(
+        "UPDATE cta_events SET scout_second_pass_at=COALESCE(scout_second_pass_at,now()), scout_stats_version=$2 WHERE id=$1",
+        [ev.id, STATS_VERSION]
+      );
+    }
+
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -239,35 +308,130 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
     client.release();
   }
 
-  return { ok: true, eventId: String(ev.id), players: rows.length, telemetryEvents, observers: globalObservers };
+  return {
+    ok: true,
+    eventId: String(ev.id),
+    players: rows.length,
+    telemetryEvents,
+    observers: globalObservers,
+    pass
+  };
 }
 
-async function backfillRecent(db, attendance, telemetry) {
-  // Attendance da temporada inteira ainda pode ser reconstruído da voice_presence.
-  // Combate/equipamento só estarão presentes enquanto a telemetria bruta existir.
-  const guildId = process.env.GUILD_ID || "683411304408416285";
-  const season = await db.getCurrentSeason(guildId) || await db.getLastEndedSeason(guildId);
-  if (!season) return { total: 0, ok: 0, failed: 0 };
+function dueWindow(attendance, ev) {
+  try {
+    const win = attendance.windowFor(ev);
+    return win && win.end instanceof Date && Number.isFinite(win.end.getTime()) ? win : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function consolidateDue(db, attendance, telemetry, options = {}) {
+  if (!pool) throw new Error("scout.initSchema(pool) deve rodar antes");
+  const now = options.now ? new Date(options.now) : new Date();
+  const limit = Math.max(1, Math.min(100, Number(options.limit) || 10));
+  const oldestCreated = new Date(now.getTime() - 4 * 24 * 60 * 60 * 1000);
 
   const { rows } = await pool.query(
-    "SELECT e.id FROM cta_events e " +
-    "WHERE e.guild_id=$1 AND e.status='closed' AND NOT e.ignored AND e.created_at >= $2 " +
-    "AND (COALESCE(e.closed_at,e.created_at) >= now() - interval '3 days' " +
-    "OR NOT EXISTS (SELECT 1 FROM player_cta_stats s WHERE s.cta_event_id=e.id AND s.stats_version >= $3)) " +
-    "ORDER BY e.id ASC LIMIT 500",
-    [guildId, season.started_at, STATS_VERSION]
+    "SELECT e.*, EXISTS (" +
+    "  SELECT 1 FROM player_cta_stats s WHERE s.cta_event_id=e.id AND s.stats_version >= $1" +
+    ") AS has_current_stats " +
+    "FROM cta_events e WHERE e.status <> 'cancelled' AND e.created_at >= $2 ORDER BY e.created_at ASC LIMIT 500",
+    [STATS_VERSION, oldestCreated]
   );
+
+  const work = [];
+  for (const ev of rows) {
+    const win = dueWindow(attendance, ev);
+    if (!win) continue;
+    const endMs = win.end.getTime();
+    const ageMs = now.getTime() - endMs;
+    const withinRetention = ageMs >= 0 && ageMs < 3 * 24 * 60 * 60 * 1000;
+    if (!withinRetention) continue;
+
+    const versionMatches = Number(ev.scout_stats_version) === STATS_VERSION;
+    const needsFirst =
+      ageMs >= 2 * 60 * 60 * 1000 &&
+      !ev.has_current_stats &&
+      (!ev.scout_first_pass_at || !versionMatches);
+    const needsSecond =
+      ageMs >= 24 * 60 * 60 * 1000 &&
+      !!ev.has_current_stats &&
+      (!ev.scout_second_pass_at || !versionMatches);
+
+    if (needsSecond) work.push({ ev, pass: "second", endMs, priority: 0 });
+    else if (needsFirst) work.push({ ev, pass: "first", endMs, priority: 1 });
+  }
+
+  work.sort((a, b) => a.endMs - b.endMs || a.priority - b.priority);
+  const selected = work.slice(0, limit);
   let ok = 0, failed = 0;
-  for (const row of rows) {
+  const done = [];
+
+  for (const item of selected) {
     try {
-      await snapshotCta(db, attendance, telemetry, row.id);
+      const result = await snapshotCta(db, attendance, telemetry, item.ev.id, { pass: item.pass });
       ok++;
+      done.push({ eventId: String(item.ev.id), pass: item.pass, players: result.players });
+      console.log(
+        "📊 Scout " + item.pass + " pass CTA " + item.ev.id +
+        " (" + item.ev.time_label + " UTC): " + result.players + " jogador(es)"
+      );
     } catch (e) {
       failed++;
-      console.error("scout backfill CTA " + row.id + ":", e?.message || e);
+      console.error("scout " + item.pass + " pass CTA " + item.ev.id + ":", e?.message || e);
     }
   }
-  return { total: rows.length, ok, failed };
+
+  return { total: selected.length, ok, failed, done };
+}
+
+// Compatibilidade com o nome antigo: o boot agora usa consolidateDue diretamente.
+// Ignorados são consolidados; somente a leitura decide escondê-los.
+async function backfillRecent(db, attendance, telemetry, options = {}) {
+  return consolidateDue(db, attendance, telemetry, { ...options, limit: options.limit || 100 });
+}
+
+async function cleanupTelemetry(dbPool = pool, options = {}) {
+  if (!dbPool) throw new Error("pool indisponível");
+  const now = options.now ? new Date(options.now) : new Date();
+
+  const hardCap = await dbPool.query(
+    "SELECT DISTINCT t.cta_event_id " +
+    "FROM albion_telemetry_events t " +
+    "LEFT JOIN cta_events e ON e.id=t.cta_event_id " +
+    "WHERE t.cta_event_id IS NOT NULL " +
+    "AND t.received_at < $1::timestamptz - interval '7 days' " +
+    "AND (e.scout_second_pass_at IS NULL OR e.scout_stats_version IS DISTINCT FROM $2) " +
+    "ORDER BY t.cta_event_id",
+    [now, STATS_VERSION]
+  );
+  const forcedCtas = hardCap.rows.map(r => String(r.cta_event_id));
+  if (forcedCtas.length) {
+    console.warn(
+      "⚠️ Scout retention: teto rígido de 7 dias apagará telemetria sem 2ª passada dos CTA(s): " +
+      forcedCtas.join(", ")
+    );
+  }
+
+  const deleted = await dbPool.query(
+    "DELETE FROM albion_telemetry_events t " +
+    "WHERE t.received_at < $1::timestamptz - interval '3 days' " +
+    "AND (" +
+    "  t.cta_event_id IS NULL " +
+    "  OR t.received_at < $1::timestamptz - interval '7 days' " +
+    "  OR EXISTS (" +
+    "    SELECT 1 FROM cta_events e " +
+    "    WHERE e.id=t.cta_event_id " +
+    "      AND e.scout_second_pass_at IS NOT NULL " +
+    "      AND e.scout_stats_version >= $2" +
+    "  )" +
+    ")",
+    [now, STATS_VERSION]
+  );
+
+  return { deleted: deleted.rowCount || 0, forcedCtas };
 }
 
 async function seasonContext(db, guildId) {
@@ -522,7 +686,7 @@ async function overview(db, guildId) {
   if (!ctx) return { season: null, ctaCount: 0, rows: [] };
 
   const eventsResult = await pool.query(
-    "SELECT id, time_label, created_at FROM cta_events WHERE guild_id=$1 AND status='closed' AND NOT ignored AND created_at >= $2 AND created_at <= $3 ORDER BY created_at ASC",
+    "SELECT id, time_label, created_at FROM cta_events WHERE guild_id=$1 AND status <> 'cancelled' AND NOT ignored AND created_at >= $2 AND created_at <= $3 ORDER BY created_at ASC",
     [guildId, ctx.startedAt, ctx.endedAt]
   );
   const dedup = new Map();
@@ -693,7 +857,7 @@ async function playerDetail(db, guildId, playerName) {
   const historyResult = await pool.query(
     "SELECT s.*, e.time_label, e.created_at, e.closed_at " +
     "FROM player_cta_stats s JOIN cta_events e ON e.id=s.cta_event_id " +
-    "WHERE s.guild_id=$1 AND s.player_key=$2 AND e.created_at >= $3 AND e.created_at <= $4 " +
+    "WHERE s.guild_id=$1 AND s.player_key=$2 AND e.status <> 'cancelled' AND NOT e.ignored AND e.created_at >= $3 AND e.created_at <= $4 " +
     "ORDER BY e.created_at DESC, e.id DESC LIMIT 100",
     [guildId, key, ctx.startedAt, ctx.endedAt]
   );
@@ -744,4 +908,14 @@ async function playerDetail(db, guildId, playerName) {
   };
 }
 
-module.exports = { initSchema, snapshotCta, backfillRecent, overview, playerDetail, normName };
+module.exports = {
+  initSchema,
+  snapshotCta,
+  consolidateDue,
+  backfillRecent,
+  cleanupTelemetry,
+  overview,
+  playerDetail,
+  normName,
+  STATS_VERSION
+};
