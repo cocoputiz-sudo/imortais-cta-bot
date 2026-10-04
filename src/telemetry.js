@@ -2517,6 +2517,66 @@ async function getCombat(db, eventId) {
   const kills = canonicalKills;
   const ourKills = kills.filter(k => k.killerIsOurs && !k.victimIsOurs);
   const ourDeaths = kills.filter(k => k.victimIsOurs && !k.killerIsOurs);
+
+  // Linha do tempo das mortes dos nossos jogadores.
+  // "rapidReturn" só fica true quando:
+  // 1) há uma morte anterior do mesmo jogador em até 10 minutos; e
+  // 2) existe atividade canônica de combate do jogador entre as duas mortes.
+  // Isso é mais conservador do que assumir "regear" apenas pelo intervalo.
+  const RAPID_REDEATH_MS = 10 * 60 * 1000;
+  const activityTimesByPlayer = new Map();
+  for (const dc of canonicalDeltaRows) {
+    const key = normName(dc.name);
+    const ts = new Date(dc.occurredAt).getTime();
+    if (!key || !Number.isFinite(ts)) continue;
+    if (!activityTimesByPlayer.has(key)) activityTimesByPlayer.set(key, []);
+    activityTimesByPlayer.get(key).push(ts);
+  }
+  for (const arr of activityTimesByPlayer.values()) arr.sort((a, b) => a - b);
+
+  const deathsByPlayer = new Map();
+  for (const k of ourDeaths) {
+    const key = normName(k.victim);
+    if (!key) continue;
+    if (!deathsByPlayer.has(key)) deathsByPlayer.set(key, []);
+    deathsByPlayer.get(key).push(k);
+  }
+
+  const ourDeathTimeline = [];
+  for (const [victimKey, arr] of deathsByPlayer) {
+    arr.sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
+    const activity = activityTimesByPlayer.get(victimKey) || [];
+    let prev = null;
+    for (const k of arr) {
+      const atMs = new Date(k.occurredAt).getTime();
+      const prevMs = prev ? new Date(prev.occurredAt).getTime() : NaN;
+      const gapMs = Number.isFinite(atMs) && Number.isFinite(prevMs) ? Math.max(0, atMs - prevMs) : null;
+      const activityBetween = gapMs != null && gapMs > 0
+        ? activity.some(t => t > prevMs && t < atMs)
+        : false;
+      const fightStartMs = k.fightBucket?.firstAt ? new Date(k.fightBucket.firstAt).getTime() : NaN;
+      const secondsIntoFight =
+        Number.isFinite(atMs) && Number.isFinite(fightStartMs)
+          ? Math.max(0, Math.round((atMs - fightStartMs) / 1000))
+          : null;
+
+      ourDeathTimeline.push({
+        victim: k.victim,
+        killer: k.killer,
+        killerGuilds: [...k.killerGuilds],
+        occurredAt: k.occurredAt,
+        map: k.map,
+        fight: k.fightBucket?.n ?? null,
+        fightFirstAt: k.fightBucket?.firstAt || null,
+        secondsIntoFight,
+        sincePreviousDeathSeconds: gapMs == null ? null : Math.round(gapMs / 1000),
+        combatActivityBetween: activityBetween,
+        rapidReturn: !!(activityBetween && gapMs > 0 && gapMs <= RAPID_REDEATH_MS),
+        observers: k.devices.size
+      });
+      prev = k;
+    }
+  }
   const overlappingDeltaFingerprints = [...deltaFingerprints.values()].filter(set => set.size > 1).length;
   const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
   const maps = [...mapAgg.values()]
@@ -2542,6 +2602,7 @@ async function getCombat(db, eventId) {
       healing: canonicalHealing
     },
     players: combatPlayerRows(players, canonicalPlayers, kills, 500),
+    deaths: ourDeathTimeline.sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt)),
     maps,
     porPt: [...ptAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
     porPtDedup: [...canonicalPtAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
