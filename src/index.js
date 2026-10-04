@@ -3668,7 +3668,7 @@ const webActions = {
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
     await client.login(CFG.token);
-    await runScoutConsolidation("boot");
+    runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);
     process.exit(1);
