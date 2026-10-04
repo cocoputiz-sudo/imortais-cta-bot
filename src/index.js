@@ -3478,6 +3478,39 @@ const webActions = {
     };
   },
   scoutOverview: async (guildId) => scout.overview(db, guildId),
+  scoutPlayer: async (guildId, playerName, eventId) => {
+    const detail = await scout.playerDetail(db, guildId, playerName);
+    if (!detail) return null;
+    if (!eventId) return detail;
+
+    const key = scout.normName(playerName);
+    const [combat, confirm] = await Promise.all([
+      telemetry.getCombat(db, eventId).catch(() => null),
+      telemetry.getConfirm(db, eventId).catch(() => null)
+    ]);
+
+    const cp = (combat?.players || []).find(p => scout.normName(p.n) === key) || null;
+    let conf = null;
+    const confirmRows = [];
+    for (const group of (confirm?.pts || [])) for (const row of (group.linhas || [])) confirmRows.push(row);
+    for (const row of (confirm?.discordNoPing || [])) confirmRows.push(row);
+    for (const row of (confirm?.gameNoSignup || [])) confirmRows.push(row);
+    conf = confirmRows.find(r => scout.normName(r.n) === key) || null;
+
+    detail.current = {
+      eventId: String(eventId),
+      damage: Number(cp?.damage || 0),
+      healing: Number(cp?.healing || 0),
+      kills: Number(cp?.kills || 0),
+      deaths: Number(cp?.deaths || 0),
+      pt: cp?.pt || conf?.actualPartyLabel || null,
+      itemPower: conf?.itemPower == null ? null : Number(conf.itemPower || 0),
+      equipment: conf?.equipment || null,
+      equipmentObservedAt: conf?.equipmentObservedAt || null,
+      equipmentInspected: !!conf?.equipmentInspected
+    };
+    return detail;
+  },
   applyEdit: async (eventId) => {
     const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return;
     const guild = client.guilds.cache.get(ev.guild_id) || null;
