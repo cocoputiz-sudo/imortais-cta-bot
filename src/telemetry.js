@@ -2507,6 +2507,7 @@ async function getCombat(db, eventId) {
       damage: canonicalDamage,
       healing: canonicalHealing
     },
+    players: combatPlayerRows(players, canonicalPlayers, kills, 500),
     maps,
     porPt: [...ptAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
     porPtDedup: [...canonicalPtAgg.values()].sort((a, b) => a.pt.localeCompare(b.pt, "pt-BR", { numeric: true })),
