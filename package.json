@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/scout-regression.js && node test/season-regression.js"
+    "test": "node test/scout-regression.js && node test/season-regression.js && node test/presence-forces.js"
   },
   "engines": {
     "node": ">=18"
