@@ -1668,6 +1668,17 @@ const PAGE = `<!doctype html>
   var scoutHoverSeq=0;
 
   function scoutPct(v){ return v==null?'—':(Math.round(Number(v))+''); }
+  function scoutAttr(s){ return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+  function scoutAge(ts){
+    if(!ts) return 'sem snapshot';
+    var n=Number(ts), t=Number.isFinite(n)?n:new Date(ts).getTime();
+    if(!Number.isFinite(t)) return 'sem snapshot';
+    var sec=Math.max(0,Math.round((Date.now()-t)/1000));
+    if(sec<60) return sec+'s';
+    if(sec<3600) return Math.floor(sec/60)+'min';
+    if(sec<86400) return Math.floor(sec/3600)+'h';
+    return Math.floor(sec/86400)+'d';
+  }
   function scoutItemIconUrl(uniqueName){ return 'https://render.albiononline.com/v1/item/'+encodeURIComponent(String(uniqueName||'')); }
   function scoutItemTier(uniqueName){
     var id=String(uniqueName||'');
@@ -1700,9 +1711,9 @@ const PAGE = `<!doctype html>
     var items=slots.map(function(s){
       var id=equipment[s[1]]||'';
       if(!id) return '<div class="scout-eq" style="opacity:.35"><div style="height:49px"></div><small>'+esc(s[0])+'</small><b>—</b></div>';
-      return '<div class="scout-eq" title="'+attr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+attr(scoutItemIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
+      return '<div class="scout-eq" title="'+scoutAttr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+scoutAttr(scoutItemIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
     }).join('');
-    return '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="note">equipamento observado</span>'+(itemPower?'<span class="scout-badge">IP '+Math.round(itemPower)+'</span>':'')+'</div><div class="scout-eq-grid">'+items+'</div>'+(observedAt?'<div class="note" style="margin-top:7px">Snapshot '+esc(age(observedAt))+' atrás.</div>':'');
+    return '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="note">equipamento observado</span>'+(itemPower?'<span class="scout-badge">IP '+Math.round(itemPower)+'</span>':'')+'</div><div class="scout-eq-grid">'+items+'</div>'+(observedAt?'<div class="note" style="margin-top:7px">Snapshot '+esc(scoutAge(observedAt))+' atrás.</div>':'');
   }
   function scoutProfileHtml(d,compact){
     var s=d.summary||{}, r=s.radar||{}, cur=d.current||null, latest=d.latestEquipment||null, prof=d.profile||null;
@@ -1816,7 +1827,7 @@ const PAGE = `<!doctype html>
         +'</div>'
         +'<div class="panel"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">'
         +'<div><div class="note">Buscar jogador</div><input id="scout-q" class="brief-input" placeholder="Nome..." style="min-width:220px"></div>'
-        +'<div><div class="note">Função</div><select id="scout-role" class="brief-select">'+roleOptions.map(function(x){return '<option value="'+attr(x)+'">'+esc(x)+'</option>';}).join('')+'</select></div>'
+        +'<div><div class="note">Função</div><select id="scout-role" class="brief-select">'+roleOptions.map(function(x){return '<option value="'+scoutAttr(x)+'">'+esc(x)+'</option>';}).join('')+'</select></div>'
         +'</div><div class="note" style="margin-top:10px">Clique em um jogador para abrir o perfil completo. Radar e percentis comparam somente pessoas da mesma função. Não existe nota automática de Core.</div></div>'
         +'<div id="scout-table"></div>';
       setView('view-scout',head);
@@ -1834,7 +1845,7 @@ const PAGE = `<!doctype html>
         body += list.length ? list.map(function(x){
           var rr=x.radar||{};
           return '<tr>'
-            +'<td><button type="button" class="scout-player-link" data-scout-player="'+attr(x.playerName||'')+'">'+esc(x.playerName||'?')+'</button></td>'
+            +'<td><button type="button" class="scout-player-link" data-scout-player="'+scoutAttr(x.playerName||'')+'">'+esc(x.playerName||'?')+'</button></td>'
             +'<td>'+esc(x.role||'Sem função')+'</td>'
             +'<td>'+(x.coreVerified?'⭐':'—')+'</td>'
             +'<td><b>'+esc(x.presencePct||0)+'%</b> <span style="color:var(--faint)">P'+scoutPct(rr.presence)+'</span></td>'
@@ -2198,7 +2209,7 @@ const PAGE = `<!doctype html>
         var items=slots.map(function(s){
           var id=state.equipment[s[1]]||'';
           if(!id) return '<div class="cv2-equip-item empty"><img class="cv2-equip-icon" alt=""><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">—</span></div>';
-          return '<div class="cv2-equip-item" title="'+attr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\\'hidden\\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
+          return '<div class="cv2-equip-item" title="'+scoutAttr(id)+'"><img class="cv2-equip-icon" loading="lazy" referrerpolicy="no-referrer" src="'+attr(equipmentIconUrl(id))+'" alt="'+attr(s[0])+'" onerror="this.style.visibility=\\'hidden\\'"><span class="cv2-equip-slot">'+esc(s[0])+'</span><span class="cv2-equip-tier">'+esc(equipmentTier(id)||'item')+'</span></div>';
         }).join('');
         var ip=Number(state.itemPower)||0;
         var observed=state.observedAt?age(state.observedAt):'snapshot atual';
@@ -2349,7 +2360,7 @@ const PAGE = `<!doctype html>
               +'<th>#</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Dano bruto</th><th>Cura bruta</th>'
               +'</tr></thead><tbody>'
               +(players.length?players.map(function(p,i){
-                return '<tr><td>'+(i+1)+'</td><td><button type="button" class="scout-player-link" data-scout-player="'+attr(p.n||'')+'">'+esc(p.n||'?')+'</button></td><td>'+esc(p.pt||'Sem PT')+'</td>'
+                return '<tr><td>'+(i+1)+'</td><td><button type="button" class="scout-player-link" data-scout-player="'+scoutAttr(p.n||'')+'">'+esc(p.n||'?')+'</button></td><td>'+esc(p.pt||'Sem PT')+'</td>'
                   +'<td><b>'+fmtS(p.damage||0)+'</b></td><td>'+fmtS(p.healing||0)+'</td>'
                   +'<td>'+fmtS(p.kills||0)+'</td><td>'+fmtS(p.deaths||0)+'</td>'
                   +'<td style="color:var(--muted)">'+fmtS(p.rawDamage||0)+'</td><td style="color:var(--muted)">'+fmtS(p.rawHealing||0)+'</td></tr>';
