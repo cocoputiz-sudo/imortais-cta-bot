@@ -1711,7 +1711,7 @@ const PAGE = `<!doctype html>
     var items=slots.map(function(s){
       var id=equipment[s[1]]||'';
       if(!id) return '<div class="scout-eq" style="opacity:.35"><div style="height:49px"></div><small>'+esc(s[0])+'</small><b>—</b></div>';
-      return '<div class="scout-eq" title="'+scoutAttr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+scoutAttr(scoutItemIconUrl(id))+'" alt="'+scoutAttr(s[0])+'" onerror="this.style.visibility=\'hidden\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
+      return '<div class="scout-eq" title="'+scoutAttr(id)+'"><img loading="lazy" referrerpolicy="no-referrer" src="'+scoutAttr(scoutItemIconUrl(id))+'" alt="'+scoutAttr(s[0])+'" onerror="this.style.visibility=\\'hidden\\'"><small>'+esc(s[0])+'</small><b>'+esc(scoutItemTier(id))+'</b></div>';
     }).join('');
     return '<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:8px"><span class="note">equipamento observado</span>'+(itemPower?'<span class="scout-badge">IP '+Math.round(itemPower)+'</span>':'')+'</div><div class="scout-eq-grid">'+items+'</div>'+(observedAt?'<div class="note" style="margin-top:7px">Snapshot '+esc(scoutAge(observedAt))+' atrás.</div>':'');
   }
