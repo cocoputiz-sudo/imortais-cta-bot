@@ -2550,6 +2550,29 @@ const PAGE = `<!doctype html>
           var deathObserver=!!(d.meta&&d.meta.zergDeathObserver);
           var killLabel=deathObserver?'Kills da zerg':'Kills candidatas';
           var deathLabel=deathObserver?'Mortes da zerg':'Mortes candidatas';
+          function renderForcesCard(forces,scope){
+            if(!forces || !forces.sampleCount) return '';
+            var ours=forces.our||{}, rows=forces.guilds||[];
+            var body='<div style="overflow-x:auto"><table class="dtable"><thead><tr>'
+              +'<th>Guilda</th><th>Únicos observados</th><th>Pico observado</th><th>Nós no pico</th><th>Diferença</th>'
+              +'</tr></thead><tbody>'
+              +'<tr><td><b>IMORTAIS · família</b></td><td>'+fmtS(ours.unique||0)+'</td><td><b>'+fmtS(ours.peak||0)+'</b></td><td>—</td><td>—</td></tr>'
+              +rows.map(function(x){
+                var d=Number(x.differenceAtPeak||0), dt=(d>0?'+':'')+d;
+                var cor=d>0?'#d9534f':(d<0?'#35c46a':'var(--faint)');
+                var guild=(x.alliance?'['+x.alliance+'] ':'')+(x.guild||'Sem guilda');
+                return '<tr><td><b>'+esc(guild)+'</b></td><td>'+fmtS(x.unique||0)+'</td><td><b>'+fmtS(x.peak||0)+'</b></td>'
+                  +'<td>'+fmtS(x.oursAtPeak||0)+'</td><td style="color:'+cor+';font-weight:700">'+dt+'</td></tr>';
+              }).join('')
+              +'</tbody></table></div>';
+            return '<div class="preview" style="margin-top:12px;padding:14px">'
+              +'<div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><b>👥 Forças observadas · '+esc(scope||'')+'</b>'
+              +'<span style="color:var(--muted)">'+fmtS(forces.observerCount||0)+' observer(s) · '+fmtS(forces.sampleCount||0)+' snapshot(s)</span></div>'
+              +body
+              +'<div class="note">Pico calculado em janelas de '+fmtS(forces.bucketSeconds||30)+'s. '+esc(forces.note||'')+'</div>'
+              +'</div>';
+          }
+
           function renderFightBlock(f){
             var fr=f.resumo||{}, fd=f.resumoDedup||fr, fa=f.audit||{}, players=f.players||[], fwhen='';
             if(f.firstAt&&f.lastAt){
@@ -2574,6 +2597,7 @@ const PAGE = `<!doctype html>
               +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(fd.healing||0)+'</div></div>'
               +'<div class="stat b"><div class="k">'+esc(killLabel)+'</div><div class="v">'+fmtS(fr.killsCandidate||0)+'</div></div>'
               +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(fr.deathsCandidate||0)+'</div></div></div>'
+              +renderForcesCard(f.forces,'batalha')
               +'<div class="split"><div><h3>🏆 Top DPS · dedup.</h3>'+topList(f.topDmgDedup||f.topDmg||[],fmtS)+'</div>'
               +'<div><h3>☠️ Top Kills</h3>'+topList(f.topKillsCandidate||[],fmtS)+'</div></div>'
               +'<h3 style="margin-top:14px">📋 Jogadores da batalha</h3>'+playerTable
@@ -2595,6 +2619,7 @@ const PAGE = `<!doctype html>
               +'<div class="stat g"><div class="k">Cura dedup. · conservador</div><div class="v">'+fmtS(md.healing||0)+'</div></div>'
               +'<div class="stat b"><div class="k">'+esc(killLabel)+'</div><div class="v">'+fmtS(mr.killsCandidate||0)+'</div></div>'
               +'<div class="stat a"><div class="k">'+esc(deathLabel)+'</div><div class="v">'+fmtS(mr.deathsCandidate||0)+'</div></div></div>'
+              +renderForcesCard(m.forces,'mapa')
               +'<div class="split"><div><h3>🏆 Top DPS do mapa · dedup.</h3>'+topList(m.topDmgDedup||m.topDmg||[],fmtS)+'</div>'
               +'<div><h3>☠️ Top Kills do mapa</h3>'+topList(m.topKillsCandidate||[],fmtS)+'</div></div>'
               +'<div class="note">Bruto do mapa: '+fmtS(mr.damage||0)+' dano · '+fmtS(mr.healing||0)+' cura. '+fmtS(ma.rawCombatDeltaEvents||0)+' deltas → '+fmtS(ma.canonicalDeltaEvents||0)+' preservados; '+fmtS(ma.collapsedCombatDeltaEvents||0)+' colapsados. '+fmtS(m.totalEvents||0)+' eventos totais · '+fmtS((m.observers||[]).length)+' observer(s) · '+fmtS(ma.reportableFights==null?fights.length:ma.reportableFights)+' Battle Report(s) exibidos'+(ma.suppressedFights?(' · '+fmtS(ma.suppressedFights)+' confronto(s) pequeno(s) ocultado(s)'):'')+'.</div>'
