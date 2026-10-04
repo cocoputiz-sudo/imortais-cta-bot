@@ -12,9 +12,9 @@
 
 const HEAL_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // só "cura" foto de temporada encerrada recentemente
 
-// Tira a foto: calcula o placar da janela da temporada e grava (permanente).
-// db e attendance entram por parâmetro para o módulo ser testável isoladamente.
-async function snapshotSeason(db, attendance, guildId, season, endOverride) {
+// Calcula o placar da janela da temporada. Usado pela foto E pelo ensaio, para
+// que o ensaio nunca mostre algo diferente do que seria salvo.
+async function computeStandings(attendance, guildId, season, endOverride) {
   const start = new Date(season.started_at);
   const end = endOverride || (season.ended_at ? new Date(season.ended_at) : new Date());
   const report = await attendance.buildReport(guildId, start, end);
@@ -33,15 +33,47 @@ async function snapshotSeason(db, attendance, guildId, season, endOverride) {
       score: r.score,
       cat: r.cat,
     }));
+  return { start, end, ctaCount: report.ctaCount, standings };
+}
+
+// Tira a foto: calcula o placar da janela da temporada e grava (permanente).
+// db e attendance entram por parâmetro para o módulo ser testável isoladamente.
+async function snapshotSeason(db, attendance, guildId, season, endOverride) {
+  const { start, end, ctaCount, standings } = await computeStandings(attendance, guildId, season, endOverride);
   return db.saveSeasonResults({
     guildId,
     seasonId: season.id,
     number: season.number,
     startedAt: start,
     endedAt: end,
-    ctaCount: report.ctaCount,
+    ctaCount,
     standings,
   });
+}
+
+// ENSAIO do fechamento: calcula exatamente o que a foto salvaria, mas NÃO grava
+// nada (não toca em season_results nem no canal de ranking). Serve para medir
+// o tempo e conferir o resultado antes do /cta_finish_temporada de verdade.
+async function previewSeason(attendance, guildId, season, endOverride) {
+  const t0 = Date.now();
+  const { start, end, ctaCount, standings } = await computeStandings(attendance, guildId, season, endOverride);
+  const blocks = offSeasonBlocks({
+    number: season.number,
+    ended_at: end,
+    cta_count: ctaCount,
+    standings,
+  });
+  return {
+    number: season.number,
+    startedAt: start,
+    endedAt: end,
+    ctaCount,
+    players: standings.length,
+    standings,
+    blocks: blocks.length,
+    longestBlock: Math.max(...blocks.map((b) => b.length)),
+    elapsedMs: Date.now() - t0,
+  };
 }
 
 // Devolve a foto da última temporada encerrada. Se a temporada acabou há pouco
@@ -112,4 +144,4 @@ function offSeasonMyRank(snap, userId) {
   );
 }
 
-module.exports = { snapshotSeason, lastSnapshotOrHeal, offSeasonBlocks, offSeasonMyRank };
+module.exports = { snapshotSeason, previewSeason, lastSnapshotOrHeal, offSeasonBlocks, offSeasonMyRank };

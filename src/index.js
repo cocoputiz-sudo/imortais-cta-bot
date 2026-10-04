@@ -1813,6 +1813,7 @@ async function onSlash(interaction) {
 
   if (name === "cta_start_temporada")  return slashStartSeason(interaction);
   if (name === "cta_finish_temporada") return slashFinishSeason(interaction);
+  if (name === "cta_temporada_ensaio") return slashSeasonPreview(interaction);
 
   if (name === "attendance_daily")   return slashAttendance(interaction, 1, "hoje");
   if (name === "attendance_week")    return slashAttendance(interaction, 7, "últimos 7 dias");
@@ -2532,6 +2533,37 @@ async function slashStartSeason(interaction) {
     (prev ? `\n_A Temporada ${prev.number} foi encerrada automaticamente e a foto do placar final foi salva._` : "") });
   await logStaff(interaction.guild, `🏁 ${interaction.user} iniciou a **Temporada ${numero}**`);
   refreshRankingBoard(interaction.guildId).catch(() => {});
+}
+
+async function slashSeasonPreview(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const season = await db.getCurrentSeason(interaction.guildId);
+  if (!season) return interaction.editReply({ content: "Nenhuma temporada ativa para ensaiar." });
+
+  try {
+    const pv = await seasonSnap.previewSeason(attendance, interaction.guildId, season);
+    const elapsed = (Number(pv.elapsedMs || 0) / 1000).toLocaleString("pt-BR", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    });
+    const top10 = (Array.isArray(pv.standings) ? pv.standings : []).slice(0, 10)
+      .map((r, i) => `${i + 1}. ${r.username} · ${r.score} pontos · ${r.cat}`)
+      .join("\n") || "(nenhum jogador pontuando)";
+    const slow = Number(pv.elapsedMs || 0) > 8000 ? "\n⚠️ demorou mais de 8 s" : "";
+
+    return interaction.editReply({
+      content:
+        `🧪 **Ensaio do fechamento · Temporada ${pv.number}** (nada foi salvo)\n` +
+        `**CTAs:** ${pv.ctaCount}\n` +
+        `**Jogadores:** ${pv.players}\n` +
+        `**Tempo de cálculo:** ${elapsed} s\n` +
+        `**Mensagens do canal:** ${pv.blocks} (a maior com ${pv.longestBlock} caracteres)${slow}\n\n` +
+        `**Top 10**\n${top10}`,
+    });
+  } catch (e) {
+    console.error("season preview:", e?.message || e);
+    return interaction.editReply({ content: `⚠️ O ensaio falhou: ${e?.message || e}` });
+  }
 }
 
 async function slashFinishSeason(interaction) {

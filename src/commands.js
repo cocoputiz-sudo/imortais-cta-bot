@@ -94,6 +94,7 @@ function commandDefs() {
     new SlashCommandBuilder().setName("cta_start_temporada").setDescription("Inicia uma temporada (Mestre de Guerra)")
       .addIntegerOption((o) => o.setName("numero").setDescription("Número da temporada, ex: 34").setRequired(true).setMinValue(1).setMaxValue(999)),
     new SlashCommandBuilder().setName("cta_finish_temporada").setDescription("Encerra a temporada atual (Mestre de Guerra)"),
+    new SlashCommandBuilder().setName("cta_temporada_ensaio").setDescription("(staff) Ensaia o fechamento da temporada sem salvar nada"),
     new SlashCommandBuilder().setName("cta_rank").setDescription("Placar de presença da temporada atual"),
     new SlashCommandBuilder().setName("cta_meurank").setDescription("Tua pontuação de presença na temporada atual"),
     // ---- PERFIL ----
