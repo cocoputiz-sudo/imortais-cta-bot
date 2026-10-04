@@ -74,6 +74,7 @@ async function initSchema(dbPool) {
     "UNIQUE(cta_event_id, player_key)" +
     ")"
   );
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS death_timeline JSONB");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_player_cta_stats_guild_player ON player_cta_stats(guild_id, player_key, cta_event_id)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_player_cta_stats_event ON player_cta_stats(cta_event_id)");
 }
@@ -149,10 +150,22 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
   for (const s of signups) ensure(s.username, s.user_id);
   for (const [uid, a] of attendanceMap) ensure(a.username, uid);
   for (const row of confirmByName.values()) ensure(row.n, null);
+  for (const row of (combat?.players || [])) ensure(row.n, null);
+  for (const death of (combat?.deaths || [])) ensure(death.victim, null);
 
   const globalObservers = Array.isArray(combat?.audit?.devices) ? combat.audit.devices.length : 0;
   const telemetryEvents = n(combat?.meta?.totalEventos);
   const partySnapshots = n(confirm?.meta?.partySnapshots);
+  const deathAnalysisAvailable = !!(combat?.meta?.zergDeathObserver && Array.isArray(combat?.deaths));
+  const deathsByPlayer = new Map();
+  if (deathAnalysisAvailable) {
+    for (const death of combat.deaths) {
+      const key = normName(death.victim);
+      if (!key) continue;
+      if (!deathsByPlayer.has(key)) deathsByPlayer.set(key, []);
+      deathsByPlayer.get(key).push(death);
+    }
+  }
   const rows = [];
 
   for (const e of entries.values()) {
@@ -188,6 +201,7 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
       observerCount: globalObservers,
       telemetryEvents,
       partySnapshots,
+      deathTimeline: deathAnalysisAvailable ? (deathsByPlayer.get(e.key) || []) : null,
       coreVerified: !!profile?.core_verified,
       profileMainRole: profile?.main_role || null
     });
@@ -202,16 +216,18 @@ async function snapshotCta(db, attendance, telemetry, eventId) {
         "INSERT INTO player_cta_stats (" +
         "guild_id, cta_event_id, discord_user_id, player_key, player_name, role, weapon, planned_party, actual_party," +
         "attendance_level, voice_minutes, damage, healing, kills, deaths, fights, combat_observed, item_power, equipment," +
-        "equipment_observed_at, observer_count, telemetry_events, party_snapshots, core_verified, profile_main_role, stats_version, calculated_at" +
+        "equipment_observed_at, observer_count, telemetry_events, party_snapshots, death_timeline, core_verified, profile_main_role, stats_version, calculated_at" +
         ") VALUES (" +
-        "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,now()" +
+        "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,now()" +
         ")",
         [
           r.guildId, r.ctaEventId, r.discordUserId, r.playerKey, r.playerName, r.role, r.weapon,
           r.plannedParty, r.actualParty, r.attendanceLevel, r.voiceMinutes, r.damage, r.healing,
           r.kills, r.deaths, r.fights, r.combatObserved, r.itemPower,
           r.equipment ? JSON.stringify(r.equipment) : null, r.equipmentObservedAt,
-          r.observerCount, r.telemetryEvents, r.partySnapshots, r.coreVerified, r.profileMainRole, STATS_VERSION
+          r.observerCount, r.telemetryEvents, r.partySnapshots,
+          r.deathTimeline == null ? null : JSON.stringify(r.deathTimeline),
+          r.coreVerified, r.profileMainRole, STATS_VERSION
         ]
       );
     }
@@ -344,6 +360,163 @@ function attachRolePercentiles(rows) {
   }
 }
 
+function analyzeDeathTimeline(timeline) {
+  if (!Array.isArray(timeline)) return null;
+  const deaths = timeline.slice().sort((a, b) => new Date(a.occurredAt) - new Date(b.occurredAt));
+  let rapidReturns = 0;
+  let earlyFightDeaths = 0;
+  let quickestRapidReturnSec = null;
+  let chain = 1;
+  let maxRapidChain = deaths.length ? 1 : 0;
+
+  for (const d of deaths) {
+    if (d && d.rapidReturn) {
+      rapidReturns++;
+      const gap = Number(d.sincePreviousDeathSeconds);
+      if (Number.isFinite(gap) && gap >= 0) {
+        quickestRapidReturnSec = quickestRapidReturnSec == null ? gap : Math.min(quickestRapidReturnSec, gap);
+      }
+      chain++;
+      maxRapidChain = Math.max(maxRapidChain, chain);
+    } else {
+      chain = 1;
+    }
+    const into = Number(d?.secondsIntoFight);
+    if (Number.isFinite(into) && into >= 0 && into <= 60) earlyFightDeaths++;
+  }
+
+  return {
+    deathsObserved: deaths.length,
+    rapidReturns,
+    earlyFightDeaths,
+    quickestRapidReturnSec,
+    maxRapidChain: rapidReturns ? maxRapidChain : 0
+  };
+}
+
+function topHighlight(rows, filterFn, sortFn, detailFn, limit = 3) {
+  return rows.filter(filterFn).sort(sortFn).slice(0, limit).map((r, i) => ({
+    rank: i + 1,
+    playerName: r.playerName,
+    playerKey: r.playerKey,
+    role: r.role,
+    coreVerified: !!r.coreVerified,
+    detail: detailFn(r)
+  }));
+}
+
+function formatGap(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem ? (m + "m" + String(rem).padStart(2, "0") + "s") : (m + "m");
+}
+
+function buildHighlights(rows, deathCapturedCtas) {
+  const positive = [
+    {
+      key: "immortal",
+      icon: "🛡️",
+      title: "Sobreviventes",
+      subtitle: "muitas fights, poucas mortes",
+      rows: topHighlight(
+        rows,
+        r => r.fights >= 5 && r.combatCtas >= 2 && r.deathsPerFight != null && r.deathsPerFight <= 0.25,
+        (a, b) => a.deathsPerFight - b.deathsPerFight || b.fights - a.fights,
+        r => r.fights + " fights · " + r.deaths + " morte(s) · " + r.deathsPerFight + "/fight"
+      )
+    },
+    {
+      key: "executor",
+      icon: "☠️",
+      title: "Executores",
+      subtitle: "kills por CTA com combate",
+      rows: topHighlight(
+        rows,
+        r => r.combatCtas >= 2 && r.kills >= 2 && r.killsPerCombatCta != null,
+        (a, b) => b.killsPerCombatCta - a.killsPerCombatCta || b.kills - a.kills,
+        r => r.killsPerCombatCta + " kills/CTA · " + r.kills + " total"
+      )
+    },
+    {
+      key: "discipline",
+      icon: "🎯",
+      title: "Disciplina",
+      subtitle: "PT correta com presença consistente",
+      rows: topHighlight(
+        rows,
+        r => r.attendedCtas >= 3 && r.partyCorrectPct != null,
+        (a, b) => b.partyCorrectPct - a.partyCorrectPct || b.presencePct - a.presencePct,
+        r => r.partyCorrectPct + "% PT correta · presença " + r.presencePct + "%"
+      )
+    }
+  ];
+
+  const alerts = [
+    {
+      key: "rapid",
+      icon: "🔄",
+      title: "Porta giratória",
+      subtitle: "voltou a gerar combate e morreu de novo em até 10 min",
+      rows: topHighlight(
+        rows,
+        r => r.deathAnalysisCtas >= 1 && r.rapidReturns > 0,
+        (a, b) => b.rapidReturns - a.rapidReturns || b.maxRapidChain - a.maxRapidChain || (a.quickestRapidReturnSec ?? Infinity) - (b.quickestRapidReturnSec ?? Infinity),
+        r => r.rapidReturns + " reentrada(s) fatal(is) · menor intervalo " + formatGap(r.quickestRapidReturnSec) +
+          (r.maxRapidChain >= 3 ? " · sequência de " + r.maxRapidChain + " mortes" : "")
+      )
+    },
+    {
+      key: "early",
+      icon: "⏱️",
+      title: "Caiu cedo",
+      subtitle: "mortes no primeiro minuto da fight",
+      rows: topHighlight(
+        rows,
+        r => r.deathAnalysisCtas >= 1 && r.earlyFightDeaths > 0,
+        (a, b) => b.earlyFightDeaths - a.earlyFightDeaths || b.deaths - a.deaths,
+        r => r.earlyFightDeaths + " morte(s) no 1º minuto · " + r.deaths + " morte(s) total"
+      )
+    },
+    {
+      key: "deathmagnet",
+      icon: "🪦",
+      title: "Imã de túmulo",
+      subtitle: "maior taxa de mortes por fight",
+      rows: topHighlight(
+        rows,
+        r => r.fights >= 3 && r.combatCtas >= 1 && r.deaths >= 2 && r.deathsPerFight != null && r.deathsPerFight >= 0.25,
+        (a, b) => b.deathsPerFight - a.deathsPerFight || b.deaths - a.deaths,
+        r => r.deathsPerFight + " mortes/fight · " + r.deaths + " morte(s)"
+      )
+    },
+    {
+      key: "glass",
+      icon: "💥",
+      title: "Canhão de vidro",
+      subtitle: "impacto alto, sobrevivência baixa",
+      rows: topHighlight(
+        rows,
+        r => r.radar?.impact != null && r.radar?.survival != null && r.radar.impact >= 70 && r.radar.survival <= 30 && r.combatCtas >= 2,
+        (a, b) => (b.radar.impact - b.radar.survival) - (a.radar.impact - a.radar.survival),
+        r => "Impacto P" + r.radar.impact + " · Sobrevivência P" + r.radar.survival
+      )
+    }
+  ];
+
+  return {
+    positive,
+    alerts,
+    meta: {
+      rapidWindowMinutes: 10,
+      earlyFightSeconds: 60,
+      deathCapturedCtas,
+      note: "Porta giratória exige duas mortes canônicas do mesmo jogador em até 10 minutos e atividade de combate dele entre as mortes. Isso sugere reentrada rápida, mas não prova troca de equipamento."
+    }
+  };
+}
+
 async function overview(db, guildId) {
   const ctx = await seasonContext(db, guildId);
   if (!ctx) return { season: null, ctaCount: 0, rows: [] };
@@ -389,7 +562,9 @@ async function overview(db, guildId) {
         ctasRecorded: 0, attendedCtas: 0, integral: 0, parcial: 0, rapida: 0, fantasma: 0,
         voiceMinutes: 0, damage: 0, healing: 0, kills: 0, deaths: 0, fights: 0,
         combatCtas: 0, partyObserved: 0, partyCorrect: 0, equipmentCtas: 0, ipSum: 0,
-        observerSum: 0, coreVerified: false
+        observerSum: 0, coreVerified: false,
+        deathAnalysisCtas: 0, rapidReturns: 0, earlyFightDeaths: 0, maxRapidChain: 0,
+        quickestRapidReturnSec: null
       });
     }
     return by.get(s.player_key);
@@ -423,6 +598,19 @@ async function overview(db, guildId) {
     }
     o.observerSum += n(s.observer_count);
     o.coreVerified = o.coreVerified || !!s.core_verified;
+    const deathAnalysis = analyzeDeathTimeline(s.death_timeline);
+    if (deathAnalysis) {
+      o.deathAnalysisCtas++;
+      o.rapidReturns += deathAnalysis.rapidReturns;
+      o.earlyFightDeaths += deathAnalysis.earlyFightDeaths;
+      o.maxRapidChain = Math.max(o.maxRapidChain, deathAnalysis.maxRapidChain);
+      if (deathAnalysis.quickestRapidReturnSec != null) {
+        o.quickestRapidReturnSec =
+          o.quickestRapidReturnSec == null
+            ? deathAnalysis.quickestRapidReturnSec
+            : Math.min(o.quickestRapidReturnSec, deathAnalysis.quickestRapidReturnSec);
+      }
+    }
   }
 
   const rows = [...by.values()].map(o => {
@@ -462,6 +650,11 @@ async function overview(db, guildId) {
       fightsPerCombatCta: o.combatCtas ? Math.round((o.fights / o.combatCtas) * 100) / 100 : null,
       deathsPerFight: o.fights ? Math.round((o.deaths / o.fights) * 1000) / 1000 : null,
       integralShare: o.attendedCtas ? Math.round((o.integral / o.attendedCtas) * 1000) / 10 : 0,
+      deathAnalysisCtas: o.deathAnalysisCtas,
+      rapidReturns: o.rapidReturns,
+      earlyFightDeaths: o.earlyFightDeaths,
+      maxRapidChain: o.maxRapidChain,
+      quickestRapidReturnSec: o.quickestRapidReturnSec,
       confidence: confidence(o.attendedCtas, coveragePct)
     };
   });
@@ -473,10 +666,17 @@ async function overview(db, guildId) {
     a.playerName.localeCompare(b.playerName, "pt-BR")
   );
 
+  const capturedCtas = new Set(stats.rows.map(x => String(x.cta_event_id))).size;
+  const deathCapturedCtas = new Set(
+    stats.rows.filter(x => x.death_timeline !== null && x.death_timeline !== undefined).map(x => String(x.cta_event_id))
+  ).size;
+
   return {
     season: { id: ctx.id, number: ctx.number, active: ctx.active, startedAt: ctx.startedAt, endedAt: ctx.endedAt },
     ctaCount,
-    capturedCtas: new Set(stats.rows.map(x => String(x.cta_event_id))).size,
+    capturedCtas,
+    deathCapturedCtas,
+    highlights: buildHighlights(rows, deathCapturedCtas),
     rows
   };
 }
@@ -527,7 +727,9 @@ async function playerDetail(db, guildId, playerName) {
     equipment: r.equipment || null,
     equipmentObservedAt: r.equipment_observed_at,
     observers: n(r.observer_count),
-    telemetryEvents: n(r.telemetry_events)
+    telemetryEvents: n(r.telemetry_events),
+    deathTimeline: Array.isArray(r.death_timeline) ? r.death_timeline : null,
+    deathAnalysis: analyzeDeathTimeline(r.death_timeline)
   }));
 
   const latestEquipment = history.find(x => x.equipment) || null;
