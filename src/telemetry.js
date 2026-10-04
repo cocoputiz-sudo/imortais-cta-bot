@@ -42,6 +42,184 @@ function normGuild(v) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function isImortaisFamilyGuildName(value) {
+  const g = normGuild(value);
+  return g === "imortais" || g === "imortais2" || g === "imortaisacademy";
+}
+
+function presenceMapName(value) {
+  const text = String(value || "").trim();
+  return text || "Mapa desconhecido";
+}
+
+function presencePlayerKey(player) {
+  const playerId = String((player && (player.playerId || player.guid)) || "").trim().toLowerCase();
+  if (playerId) return "id:" + playerId;
+  const name = normName(player && (player.name || player.playerName));
+  return name ? "name:" + name : "";
+}
+
+function presenceForcesForWindow(rows, rosterKeysInput, mapName, firstAt, lastAt) {
+  const rosterKeys = rosterKeysInput instanceof Set
+    ? rosterKeysInput
+    : new Set((rosterKeysInput || []).map(normName).filter(Boolean));
+  const wantedMap = presenceMapName(mapName).toLowerCase();
+  const startMs = new Date(firstAt).getTime();
+  const endMs = new Date(lastAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null;
+
+  const PAD_MS = 15 * 1000;
+  const BUCKET_MS = 30 * 1000;
+  const samples = [];
+  const canonical = new Map();
+
+  function mergePlayer(raw, forceOurs) {
+    const key = presencePlayerKey(raw);
+    if (!key) return null;
+    const name = String((raw && (raw.name || raw.playerName)) || "").trim() || key.replace(/^name:/, "");
+    const guild = String((raw && (raw.guild || raw.guildName)) || "").trim() || null;
+    const alliance = String((raw && (raw.alliance || raw.allianceName)) || "").trim() || null;
+    const ours = !!forceOurs || isImortaisFamilyGuildName(guild) || rosterKeys.has(normName(name));
+    const prev = canonical.get(key);
+    if (!prev) {
+      canonical.set(key, { key, name, guild, alliance, ours });
+    } else {
+      if (!prev.guild && guild) prev.guild = guild;
+      if (!prev.alliance && alliance) prev.alliance = alliance;
+      prev.ours = prev.ours || ours;
+    }
+    return key;
+  }
+
+  for (const row of rows || []) {
+    const atMs = new Date(row.occurred_at || row.occurredAt).getTime();
+    if (!Number.isFinite(atMs) || atMs < startMs - PAD_MS || atMs > endMs + PAD_MS) continue;
+    const payload = row.payload || {};
+    const cluster = presenceMapName(payload.cluster || payload.map);
+    if (cluster.toLowerCase() !== wantedMap) continue;
+
+    const keys = new Set();
+    const observer = String(row.player_name || row.playerName || "").trim();
+    if (observer && rosterKeys.has(normName(observer))) {
+      const key = mergePlayer({ name: observer, guild: "IMORTAIS" }, true);
+      if (key) keys.add(key);
+    }
+
+    const players = Array.isArray(payload.players) ? payload.players : [];
+    for (const raw of players.slice(0, 500)) {
+      const key = mergePlayer(raw, false);
+      if (key) keys.add(key);
+    }
+
+    samples.push({
+      atMs,
+      bucket: Math.floor(atMs / BUCKET_MS) * BUCKET_MS,
+      deviceId: String(row.device_id || row.deviceId || "sem-device"),
+      keys
+    });
+  }
+
+  if (!samples.length) return null;
+
+  const seenKeys = new Set();
+  const buckets = new Map();
+  const devices = new Set();
+
+  for (const sample of samples) {
+    devices.add(sample.deviceId);
+    if (!buckets.has(sample.bucket)) buckets.set(sample.bucket, new Set());
+    const bucketKeys = buckets.get(sample.bucket);
+    for (const key of sample.keys) {
+      seenKeys.add(key);
+      bucketKeys.add(key);
+    }
+  }
+
+  const ourUniqueKeys = [...seenKeys].filter(key => canonical.get(key) && canonical.get(key).ours);
+  const guildStats = new Map();
+
+  function guildRow(guild, alliance) {
+    const display = String(guild || "").trim() || "Sem guilda";
+    const key = display === "Sem guilda" ? "__sem_guilda__" : (normGuild(display) || "__sem_guilda__");
+    if (!guildStats.has(key)) {
+      guildStats.set(key, {
+        guild: display,
+        alliance: String(alliance || "").trim() || null,
+        uniqueKeys: new Set(),
+        unique: 0,
+        peak: 0,
+        oursAtPeak: 0,
+        peakAt: null
+      });
+    }
+    const item = guildStats.get(key);
+    if (!item.alliance && alliance) item.alliance = String(alliance).trim() || null;
+    return item;
+  }
+
+  for (const key of seenKeys) {
+    const p = canonical.get(key);
+    if (!p || p.ours) continue;
+    guildRow(p.guild, p.alliance).uniqueKeys.add(key);
+  }
+  for (const item of guildStats.values()) item.unique = item.uniqueKeys.size;
+
+  let ourPeak = 0;
+  let ourPeakAt = null;
+  for (const [bucketAt, keys] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
+    let ours = 0;
+    const enemyCounts = new Map();
+
+    for (const key of keys) {
+      const p = canonical.get(key);
+      if (!p) continue;
+      if (p.ours) {
+        ours++;
+        continue;
+      }
+      const item = guildRow(p.guild, p.alliance);
+      const gkey = item.guild === "Sem guilda" ? "__sem_guilda__" : (normGuild(item.guild) || "__sem_guilda__");
+      enemyCounts.set(gkey, (enemyCounts.get(gkey) || 0) + 1);
+    }
+
+    if (ours > ourPeak) {
+      ourPeak = ours;
+      ourPeakAt = new Date(bucketAt).toISOString();
+    }
+
+    for (const [gkey, count] of enemyCounts) {
+      const item = guildStats.get(gkey);
+      if (item && count > item.peak) {
+        item.peak = count;
+        item.oursAtPeak = ours;
+        item.peakAt = new Date(bucketAt).toISOString();
+      }
+    }
+  }
+
+  const guilds = [...guildStats.values()]
+    .map(item => ({
+      guild: item.guild,
+      alliance: item.alliance,
+      unique: item.unique,
+      peak: item.peak,
+      oursAtPeak: item.oursAtPeak,
+      differenceAtPeak: item.peak - item.oursAtPeak,
+      peakAt: item.peakAt
+    }))
+    .filter(item => item.unique > 0 || item.peak > 0)
+    .sort((a, b) => b.peak - a.peak || b.unique - a.unique || a.guild.localeCompare(b.guild, "pt-BR"));
+
+  return {
+    sampleCount: samples.length,
+    observerCount: devices.size,
+    bucketSeconds: Math.round(BUCKET_MS / 1000),
+    our: { unique: ourUniqueKeys.length, peak: ourPeak, peakAt: ourPeakAt },
+    guilds,
+    note: "Presença observada pelos Combat Clients via snapshots de NewCharacter/Leave. Os números representam jogadores vistos pela nossa rede de observers, não a população absoluta do mapa."
+  };
+}
+
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -1845,13 +2023,21 @@ async function getLoot(db, eventId) {
 }
 
 async function getCombat(db, eventId) {
-  const { rows } = await pool.query(`
-    SELECT event_id, device_id, type, player_name, payload, occurred_at, received_at
-    FROM albion_telemetry_events
-    WHERE cta_event_id=$1
-      AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result','player_death_observed')
-    ORDER BY occurred_at ASC, received_at ASC
-  `, [eventId]);
+  const [{ rows }, { rows: presenceRows }] = await Promise.all([
+    pool.query(`
+      SELECT event_id, device_id, type, player_name, payload, occurred_at, received_at
+      FROM albion_telemetry_events
+      WHERE cta_event_id=$1
+        AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result','player_death_observed')
+      ORDER BY occurred_at ASC, received_at ASC
+    `, [eventId]),
+    pool.query(`
+      SELECT event_id, device_id, player_name, payload, occurred_at, received_at
+      FROM albion_telemetry_events
+      WHERE cta_event_id=$1 AND type='player_presence_snapshot'
+      ORDER BY occurred_at ASC, received_at ASC
+    `, [eventId])
+  ]);
 
   const signups = await db.getSignups(eventId).catch(() => []);
   const ev = await db.getEvent(eventId).catch(() => null);
@@ -1877,8 +2063,7 @@ async function getCombat(db, eventId) {
     return text || "Mapa desconhecido";
   }
   function isImortaisFamilyGuild(value) {
-    const g = normGuild(value);
-    return g === "imortais" || g === "imortais2" || g === "imortaisacademy";
+    return isImortaisFamilyGuildName(value);
   }
   function ptFor(name) {
     const s = signupByName.get(normName(name));
@@ -2582,6 +2767,14 @@ async function getCombat(db, eventId) {
   const maps = [...mapAgg.values()]
     .map(serializeMap)
     .filter(m => (m.fights || []).length > 0)
+    .map(m => ({
+      ...m,
+      forces: presenceForcesForWindow(presenceRows, rosterKeys, m.map, m.firstAt, m.lastAt),
+      fights: (m.fights || []).map(f => ({
+        ...f,
+        forces: presenceForcesForWindow(presenceRows, rosterKeys, m.map, f.firstAt, f.lastAt)
+      }))
+    }))
     .sort((a, b) => {
       if (a.map === "Mapa desconhecido" && b.map !== "Mapa desconhecido") return 1;
       if (b.map === "Mapa desconhecido" && a.map !== "Mapa desconhecido") return -1;
@@ -2614,6 +2807,7 @@ async function getCombat(db, eventId) {
     killScore: killScoreFor(kills),
     audit: {
       rosterPlayers: rosterKeys.size,
+      presenceSnapshots: presenceRows.length,
       rawCombatDeltaEvents,
       canonicalCombatDeltaEvents,
       collapsedCombatDeltaEvents,
@@ -3510,5 +3704,6 @@ module.exports = {
   getLoot,
   getCombat,
   getGuildPresence,
+  __test: { presenceForcesForWindow },
   getGuildPresenceProbeDiagnostics
 };
