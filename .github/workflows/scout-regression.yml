@@ -6,11 +6,13 @@ on:
       - "src/scout.js"
       - "src/index.js"
       - "src/web.js"
+      - "src/telemetry.js"
       - "src/season.js"
       - "src/db.js"
       - "src/commands.js"
       - "test/scout-regression.js"
       - "test/season-regression.js"
+      - "test/presence-forces.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -52,3 +54,5 @@ jobs:
         run: node test/scout-regression.js
       - name: Season regression em PostgreSQL temporário
         run: node test/season-regression.js
+      - name: Presence forces
+        run: node test/presence-forces.js
