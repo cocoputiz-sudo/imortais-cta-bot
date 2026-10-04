@@ -3478,6 +3478,52 @@ const webActions = {
     };
   },
   scoutOverview: async (guildId) => scout.overview(db, guildId),
+  scoutPlayer: async (guildId, playerName, eventId) => {
+    let detail = await scout.playerDetail(db, guildId, playerName);
+    if (!detail && !eventId) return null;
+
+    const key = scout.normName(playerName);
+    if (!detail) {
+      detail = {
+        season: null,
+        ctaCount: 0,
+        capturedCtas: 0,
+        summary: {
+          playerKey: key,
+          playerName: String(playerName || "?"),
+          role: "Sem função",
+          coreVerified: false,
+          attendedCtas: 0,
+          presencePct: 0,
+          coveragePct: 0,
+          damagePerMinute: 0,
+          healingPerMinute: 0,
+          kills: 0,
+          deaths: 0,
+          fights: 0,
+          combatCtas: 0,
+          partyCorrectPct: null,
+          integralShare: 0,
+          confidence: "baixa",
+          radar: { presence: null, impact: null, survival: null, discipline: null, consistency: null, peerCount: 0, impactBasis: "sem histórico suficiente" }
+        },
+        profile: null,
+        latestEquipment: null,
+        history: []
+      };
+    }
+    if (!eventId) return detail;
+
+    const equipment = await telemetry.getPlayerEquipment(eventId, playerName).catch(() => null);
+    detail.current = {
+      eventId: String(eventId),
+      itemPower: equipment?.itemPower == null ? null : Number(equipment.itemPower || 0),
+      equipment: equipment?.equipment || null,
+      equipmentObservedAt: equipment?.occurredAt || null,
+      equipmentInspected: !!equipment?.inspected
+    };
+    return detail;
+  },
   applyEdit: async (eventId) => {
     const ev = await db.getEvent(eventId).catch(() => null); if (!ev) return;
     const guild = client.guilds.cache.get(ev.guild_id) || null;

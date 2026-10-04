@@ -376,6 +376,40 @@ async function latestPartyMembers(eventId) {
   return { members, snapshots: rows };
 }
 
+async function getPlayerEquipment(eventId, playerName) {
+  const key = normName(playerName);
+  if (!key) return null;
+  const party = await latestPartyMembers(eventId);
+  let best = null;
+  const slots = ["mainHand","offHand","head","chest","shoes","bag","cape","mount","potion","food"];
+
+  for (const row of party.snapshots || []) {
+    const states = row.payload && Array.isArray(row.payload.memberStates) ? row.payload.memberStates : [];
+    for (const state of states) {
+      if (!state || normName(state.name) !== key) continue;
+      const src = state.equipment && typeof state.equipment === "object" ? state.equipment : {};
+      const equipment = {};
+      let itemCount = 0;
+      for (const slot of slots) {
+        const value = String(src[slot] || "").trim();
+        equipment[slot] = value || null;
+        if (value) itemCount++;
+      }
+      if (!itemCount) continue;
+      const candidate = {
+        playerName: String(state.name || playerName || ""),
+        itemPower: Math.max(0, Number(state.itemPower) || 0),
+        inspected: !!state.inspected,
+        equipment,
+        occurredAt: row.occurred_at,
+        deviceId: row.device_id
+      };
+      if (!best || new Date(candidate.occurredAt) > new Date(best.occurredAt)) best = candidate;
+    }
+  }
+  return best;
+}
+
 async function getConfirm(db, eventId) {
   const ev = await db.getEvent(eventId).catch(() => null);
   if (!ev) return null;
@@ -3411,6 +3445,7 @@ module.exports = {
   setZoneChangeHandler,
   getNavigationState,
   getConfirm,
+  getPlayerEquipment,
   getLoot,
   getCombat,
   getGuildPresence,

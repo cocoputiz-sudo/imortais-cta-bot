@@ -22,9 +22,21 @@ function n(v) {
   return Number.isFinite(x) ? x : 0;
 }
 
+function canonicalRole(v) {
+  const raw = String(v || "").trim();
+  const key = raw.toLowerCase();
+  if (key === "tank" || key === "tanker") return "Tank";
+  if (key === "support" || key === "suporte") return "Support";
+  if (key === "healer" || key === "heal") return "Healer";
+  if (key === "melee") return "Melee";
+  if (key === "ranged") return "Ranged";
+  if (key === "looter") return "Looter";
+  return raw || null;
+}
+
 function roleFor(weapon, fallback) {
   const key = String(weapon || "").trim().toUpperCase();
-  return (WEAPONS[key] && WEAPONS[key].role) || fallback || null;
+  return (WEAPONS[key] && WEAPONS[key].role) || canonicalRole(fallback) || null;
 }
 
 async function initSchema(dbPool) {
@@ -265,6 +277,73 @@ function confidence(ctas, coveragePct) {
   return "baixa";
 }
 
+function percentile(value, peers, lowerBetter = false) {
+  if (value === null || value === undefined || value === "") return null;
+  const v = Number(value);
+  const vals = (peers || [])
+    .filter(x => x !== null && x !== undefined && x !== "")
+    .map(Number)
+    .filter(Number.isFinite);
+  if (!Number.isFinite(v) || vals.length < 3) return null;
+  if (vals.length === 1) return 50;
+  const betterBase = vals.filter(x => lowerBetter ? x > v : x < v).length;
+  const equals = vals.filter(x => x === v).length;
+  const rank = betterBase + Math.max(0, equals - 1) / 2;
+  return Math.max(0, Math.min(100, Math.round((rank / (vals.length - 1)) * 100)));
+}
+
+function impactValue(row) {
+  if (!row || row.combatCtas < 1) return null;
+  if (row.role === "Healer") return row.healingPerMinute;
+  if (row.role === "Melee" || row.role === "Ranged") return row.damagePerMinute;
+  if (row.role === "Tank" || row.role === "Support") return row.fightsPerCombatCta;
+  return Math.max(row.damagePerMinute || 0, row.healingPerMinute || 0);
+}
+
+function impactBasis(role) {
+  if (role === "Healer") return "cura/min";
+  if (role === "Melee" || role === "Ranged") return "dano/min + kills/CTA";
+  if (role === "Tank" || role === "Support") return "participação em fights/CTA";
+  return "atividade de combate";
+}
+
+function attachRolePercentiles(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const role = canonicalRole(row.role) || "Sem função";
+    row.role = role;
+    if (!groups.has(role)) groups.set(role, []);
+    groups.get(role).push(row);
+  }
+
+  for (const [role, peers] of groups) {
+    const presenceVals = peers.map(x => x.presencePct);
+    const consistencyVals = peers.map(x => x.integralShare);
+    const disciplineVals = peers.map(x => x.partyCorrectPct).filter(x => x != null);
+    const survivalVals = peers.map(x => x.deathsPerFight).filter(x => x != null);
+    const impactVals = peers.map(impactValue).filter(x => x != null);
+    const killVals = peers.map(x => x.killsPerCombatCta).filter(x => x != null);
+
+    for (const row of peers) {
+      let impact = percentile(impactValue(row), impactVals);
+      if ((role === "Melee" || role === "Ranged") && row.killsPerCombatCta != null) {
+        const killPct = percentile(row.killsPerCombatCta, killVals);
+        if (impact != null && killPct != null) impact = Math.round(impact * 0.75 + killPct * 0.25);
+        else if (killPct != null) impact = killPct;
+      }
+      row.radar = {
+        presence: percentile(row.presencePct, presenceVals),
+        impact,
+        survival: percentile(row.deathsPerFight, survivalVals, true),
+        discipline: percentile(row.partyCorrectPct, disciplineVals),
+        consistency: percentile(row.integralShare, consistencyVals),
+        peerCount: peers.length,
+        impactBasis: impactBasis(role)
+      };
+    }
+  }
+}
+
 async function overview(db, guildId) {
   const ctx = await seasonContext(db, guildId);
   if (!ctx) return { season: null, ctaCount: 0, rows: [] };
@@ -379,9 +458,16 @@ async function overview(db, guildId) {
       partyCorrectPct,
       avgItemPower: o.equipmentCtas ? Math.round(o.ipSum / o.equipmentCtas) : null,
       avgObservers: o.ctasRecorded ? Math.round((o.observerSum / o.ctasRecorded) * 10) / 10 : 0,
+      killsPerCombatCta: o.combatCtas ? Math.round((o.kills / o.combatCtas) * 100) / 100 : null,
+      fightsPerCombatCta: o.combatCtas ? Math.round((o.fights / o.combatCtas) * 100) / 100 : null,
+      deathsPerFight: o.fights ? Math.round((o.deaths / o.fights) * 1000) / 1000 : null,
+      integralShare: o.attendedCtas ? Math.round((o.integral / o.attendedCtas) * 1000) / 10 : 0,
       confidence: confidence(o.attendedCtas, coveragePct)
     };
-  }).sort((a,b) =>
+  });
+
+  attachRolePercentiles(rows);
+  rows.sort((a,b) =>
     b.attendedCtas - a.attendedCtas ||
     b.coveragePct - a.coveragePct ||
     a.playerName.localeCompare(b.playerName, "pt-BR")
@@ -395,4 +481,65 @@ async function overview(db, guildId) {
   };
 }
 
-module.exports = { initSchema, snapshotCta, backfillRecent, overview };
+async function playerDetail(db, guildId, playerName) {
+  const key = normName(playerName);
+  if (!key) return null;
+
+  const ov = await overview(db, guildId);
+  const summary = (ov.rows || []).find(x => x.playerKey === key);
+  if (!summary) return null;
+
+  const ctx = await seasonContext(db, guildId);
+  const historyResult = await pool.query(
+    "SELECT s.*, e.time_label, e.created_at, e.closed_at " +
+    "FROM player_cta_stats s JOIN cta_events e ON e.id=s.cta_event_id " +
+    "WHERE s.guild_id=$1 AND s.player_key=$2 AND e.created_at >= $3 AND e.created_at <= $4 " +
+    "ORDER BY e.created_at DESC, e.id DESC LIMIT 100",
+    [guildId, key, ctx.startedAt, ctx.endedAt]
+  );
+
+  const profileResult = summary.discordUserId
+    ? await pool.query(
+        "SELECT user_id, username, main_role, role2, fill_role, w1, w2, r2w1, r2w2, fw1, fw2, turnos, core_claimed, core_verified " +
+        "FROM players WHERE guild_id=$1 AND user_id=$2 LIMIT 1",
+        [guildId, summary.discordUserId]
+      ).catch(() => ({ rows: [] }))
+    : { rows: [] };
+
+  const history = historyResult.rows.map(r => ({
+    eventId: String(r.cta_event_id),
+    time: r.time_label,
+    createdAt: r.created_at,
+    closedAt: r.closed_at,
+    role: canonicalRole(r.role || r.profile_main_role),
+    weapon: r.weapon,
+    plannedParty: r.planned_party == null ? null : Number(r.planned_party),
+    actualParty: r.actual_party == null ? null : Number(r.actual_party),
+    attendanceLevel: r.attendance_level,
+    voiceMinutes: n(r.voice_minutes),
+    damage: n(r.damage),
+    healing: n(r.healing),
+    kills: n(r.kills),
+    deaths: n(r.deaths),
+    fights: n(r.fights),
+    combatObserved: !!r.combat_observed,
+    itemPower: r.item_power == null ? null : n(r.item_power),
+    equipment: r.equipment || null,
+    equipmentObservedAt: r.equipment_observed_at,
+    observers: n(r.observer_count),
+    telemetryEvents: n(r.telemetry_events)
+  }));
+
+  const latestEquipment = history.find(x => x.equipment) || null;
+  return {
+    season: ov.season,
+    ctaCount: ov.ctaCount,
+    capturedCtas: ov.capturedCtas,
+    summary,
+    profile: profileResult.rows[0] || null,
+    latestEquipment,
+    history
+  };
+}
+
+module.exports = { initSchema, snapshotCta, backfillRecent, overview, playerDetail, normName };
