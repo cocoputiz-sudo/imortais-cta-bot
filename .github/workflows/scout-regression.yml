@@ -13,6 +13,7 @@ on:
       - "test/scout-regression.js"
       - "test/season-regression.js"
       - "test/presence-forces.js"
+      - "test/scout-area-presence.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -56,3 +57,5 @@ jobs:
         run: node test/season-regression.js
       - name: Presence forces
         run: node test/presence-forces.js
+      - name: Scout area presence
+        run: node test/scout-area-presence.js

@@ -75,6 +75,13 @@ async function initSchema(dbPool) {
     ")"
   );
   await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS death_timeline JSONB");
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS area_seen_buckets INT");
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS area_total_buckets INT");
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS area_observed BOOLEAN NOT NULL DEFAULT false");
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS albion_player_id TEXT");
+  // Marcador independente da versão do Scout. Ele serve somente para a passada
+  // retroativa de presença dos CTAs já resumidos e NÃO participa da retenção.
+  await pool.query("ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS scout_area_backfill_at TIMESTAMPTZ");
   // Estado de consolidação por CTA: permite uma primeira foto e exatamente uma
   // reconciliação tardia sem depender de existirem jogadores no snapshot.
   await pool.query("ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS scout_first_pass_at TIMESTAMPTZ");
@@ -117,6 +124,58 @@ function fightCounts(combat) {
   return counts;
 }
 
+function emptyAreaSummary() {
+  return { observed: false, totalBuckets: 0, players: [] };
+}
+
+async function loadAreaSummary(telemetry, eventId) {
+  if (!telemetry || typeof telemetry.getPresenceArea !== "function") return emptyAreaSummary();
+  const summary = await telemetry.getPresenceArea(eventId);
+  return summary && typeof summary === "object" ? summary : emptyAreaSummary();
+}
+
+function areaState(summary) {
+  const observed = !!summary?.observed;
+  const totalBuckets = observed ? Math.max(0, Math.round(n(summary?.totalBuckets))) : 0;
+  const byPlayer = new Map();
+  for (const p of (summary?.players || [])) {
+    const key = normName(p?.playerKey);
+    if (!key) continue;
+    byPlayer.set(key, {
+      seenBuckets: Math.max(0, Math.round(n(p?.seenBuckets))),
+      albionPlayerId: String(p?.albionPlayerId || "").trim() || null
+    });
+  }
+  return { observed, totalBuckets, byPlayer };
+}
+
+function areaFieldsFor(old, playerKey, state) {
+  if (!state.observed) {
+    if (old?.area_observed) {
+      return {
+        areaSeenBuckets: old.area_seen_buckets == null ? null : n(old.area_seen_buckets),
+        areaTotalBuckets: old.area_total_buckets == null ? null : n(old.area_total_buckets),
+        areaObserved: true,
+        albionPlayerId: old.albion_player_id || null
+      };
+    }
+    return {
+      areaSeenBuckets: null,
+      areaTotalBuckets: null,
+      areaObserved: false,
+      albionPlayerId: old?.albion_player_id || null
+    };
+  }
+
+  const current = state.byPlayer.get(playerKey) || null;
+  return {
+    areaSeenBuckets: current ? current.seenBuckets : 0,
+    areaTotalBuckets: state.totalBuckets,
+    areaObserved: true,
+    albionPlayerId: current?.albionPlayerId || old?.albion_player_id || null
+  };
+}
+
 async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
   if (!pool) throw new Error("scout.initSchema(pool) deve rodar antes");
   const pass = options && (options.pass === "first" || options.pass === "second") ? options.pass : null;
@@ -131,7 +190,48 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
   );
   const existingByKey = new Map((existingResult.rows || []).map(r => [String(r.player_key), r]));
 
-  const [signups, attendanceMap, combat, confirm, profilesResult] = await Promise.all([
+  // Passada retroativa: atualiza SOMENTE as quatro colunas de área de linhas que
+  // já existem. Não cria jogador, não mexe em stats_version nem nos markers first/second.
+  if (options?.areaOnly) {
+    const area = areaState(await loadAreaSummary(telemetry, eventId));
+    if (!area.observed) {
+      return { ok: true, eventId: String(ev.id), players: existingResult.rows.length, areaObserved: false, areaOnly: true };
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const old of existingResult.rows || []) {
+        const fields = areaFieldsFor(old, String(old.player_key), area);
+        await client.query(
+          "UPDATE player_cta_stats SET area_seen_buckets=$2, area_total_buckets=$3, area_observed=$4, albion_player_id=$5 " +
+          "WHERE cta_event_id=$1 AND player_key=$6",
+          [ev.id, fields.areaSeenBuckets, fields.areaTotalBuckets, fields.areaObserved, fields.albionPlayerId, old.player_key]
+        );
+      }
+      await client.query(
+        "UPDATE cta_events SET scout_area_backfill_at=COALESCE(scout_area_backfill_at,now()) WHERE id=$1",
+        [ev.id]
+      );
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    return {
+      ok: true,
+      eventId: String(ev.id),
+      players: existingResult.rows.length,
+      areaObserved: true,
+      areaTotalBuckets: area.totalBuckets,
+      areaOnly: true
+    };
+  }
+
+  const [signups, attendanceMap, combat, confirm, profilesResult, areaSummary] = await Promise.all([
     db.getSignups(eventId).catch(() => []),
     attendance.processEvent(ev).catch(() => new Map()),
     telemetry.getCombat(db, eventId).catch(() => ({ players: [], maps: [], audit: {}, meta: {} })),
@@ -139,9 +239,11 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
     pool.query(
       "SELECT user_id, username, main_role, core_verified FROM players WHERE guild_id=$1",
       [ev.guild_id]
-    ).catch(() => ({ rows: [] }))
+    ).catch(() => ({ rows: [] })),
+    loadAreaSummary(telemetry, eventId)
   ]);
 
+  const area = areaState(areaSummary);
   const profileByUser = new Map((profilesResult.rows || []).map(p => [String(p.user_id), p]));
   const confirmByName = flattenConfirm(confirm);
   const combatByName = new Map(((combat && combat.players) || []).map(p => [normName(p.n), p]));
@@ -221,7 +323,8 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
       partySnapshots,
       deathTimeline: deathAnalysisAvailable ? (deathsByPlayer.get(e.key) || []) : null,
       coreVerified: !!profile?.core_verified,
-      profileMainRole: profile?.main_role || null
+      profileMainRole: profile?.main_role || null,
+      ...areaFieldsFor(old, e.key, area)
     };
 
     // Nunca regride uma foto que já tinha combate real para uma foto "vazia".
@@ -260,9 +363,10 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
         "INSERT INTO player_cta_stats (" +
         "guild_id, cta_event_id, discord_user_id, player_key, player_name, role, weapon, planned_party, actual_party," +
         "attendance_level, voice_minutes, damage, healing, kills, deaths, fights, combat_observed, item_power, equipment," +
-        "equipment_observed_at, observer_count, telemetry_events, party_snapshots, death_timeline, core_verified, profile_main_role, stats_version, calculated_at" +
+        "equipment_observed_at, observer_count, telemetry_events, party_snapshots, death_timeline, core_verified, profile_main_role," +
+        "area_seen_buckets, area_total_buckets, area_observed, albion_player_id, stats_version, calculated_at" +
         ") VALUES (" +
-        "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,now()" +
+        "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,$28,$29,$30,$31,now()" +
         ") ON CONFLICT (cta_event_id, player_key) DO UPDATE SET " +
         "guild_id=EXCLUDED.guild_id, discord_user_id=EXCLUDED.discord_user_id, player_name=EXCLUDED.player_name," +
         "role=EXCLUDED.role, weapon=EXCLUDED.weapon, planned_party=EXCLUDED.planned_party, actual_party=EXCLUDED.actual_party," +
@@ -272,6 +376,8 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
         "equipment_observed_at=EXCLUDED.equipment_observed_at, observer_count=EXCLUDED.observer_count," +
         "telemetry_events=EXCLUDED.telemetry_events, party_snapshots=EXCLUDED.party_snapshots, death_timeline=EXCLUDED.death_timeline," +
         "core_verified=EXCLUDED.core_verified, profile_main_role=EXCLUDED.profile_main_role," +
+        "area_seen_buckets=EXCLUDED.area_seen_buckets, area_total_buckets=EXCLUDED.area_total_buckets," +
+        "area_observed=EXCLUDED.area_observed, albion_player_id=EXCLUDED.albion_player_id," +
         "stats_version=EXCLUDED.stats_version, calculated_at=now()",
         [
           r.guildId, r.ctaEventId, r.discordUserId, r.playerKey, r.playerName, r.role, r.weapon,
@@ -280,7 +386,9 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
           r.equipment ? JSON.stringify(r.equipment) : null, r.equipmentObservedAt,
           r.observerCount, r.telemetryEvents, r.partySnapshots,
           r.deathTimeline == null ? null : JSON.stringify(r.deathTimeline),
-          r.coreVerified, r.profileMainRole, STATS_VERSION
+          r.coreVerified, r.profileMainRole,
+          r.areaSeenBuckets, r.areaTotalBuckets, r.areaObserved, r.albionPlayerId,
+          STATS_VERSION
         ]
       );
     }
@@ -297,6 +405,16 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
       await client.query(
         "UPDATE cta_events SET scout_second_pass_at=COALESCE(scout_second_pass_at,now()), scout_stats_version=$2 WHERE id=$1",
         [ev.id, STATS_VERSION]
+      );
+    }
+
+    // Se a própria passada normal já viu snapshots, a área já está preenchida.
+    // Marcar aqui evita uma passada retroativa redundante; a segunda passada normal
+    // continua recalculando a área mesmo com este marker preenchido.
+    if (area.observed) {
+      await client.query(
+        "UPDATE cta_events SET scout_area_backfill_at=COALESCE(scout_area_backfill_at,now()) WHERE id=$1",
+        [ev.id]
       );
     }
 
@@ -341,6 +459,44 @@ async function consolidateDue(db, attendance, telemetry, options = {}) {
     [STATS_VERSION, oldestCreated]
   );
 
+  // Compatibilidade para CTAs que já tinham sido resumidos antes das colunas de área.
+  // É uma passada própria, UMA vez por CTA, limitada à telemetria ainda dentro dos 3 dias.
+  // Não altera STATS_VERSION, scout_first/second_pass_at nem a regra de cleanupTelemetry.
+  const areaCandidates = await pool.query(
+    "SELECT e.id, e.time_label, e.created_at FROM cta_events e " +
+    "WHERE e.status <> 'cancelled' " +
+    "AND e.created_at >= $1 " +
+    "AND e.scout_area_backfill_at IS NULL " +
+    "AND EXISTS (SELECT 1 FROM player_cta_stats s WHERE s.cta_event_id=e.id) " +
+    "AND EXISTS (" +
+    "  SELECT 1 FROM albion_telemetry_events t " +
+    "  WHERE t.cta_event_id=e.id AND t.type='player_presence_snapshot' " +
+    "    AND t.received_at >= $2::timestamptz - interval '3 days'" +
+    ") " +
+    "ORDER BY e.created_at ASC LIMIT $3",
+    [oldestCreated, now, limit]
+  );
+
+  let areaOk = 0, areaFailed = 0;
+  const areaDone = [];
+  for (const ev of areaCandidates.rows || []) {
+    try {
+      const result = await snapshotCta(db, attendance, telemetry, ev.id, { areaOnly: true });
+      if (result.areaObserved) {
+        areaOk++;
+        areaDone.push({ eventId: String(ev.id), pass: "area", players: result.players, buckets: result.areaTotalBuckets });
+        console.log(
+          "📍 Scout area backfill CTA " + ev.id +
+          " (" + ev.time_label + " UTC): " + result.players + " jogador(es), " +
+          result.areaTotalBuckets + " bucket(s)"
+        );
+      }
+    } catch (e) {
+      areaFailed++;
+      console.error("scout area backfill CTA " + ev.id + ":", e?.message || e);
+    }
+  }
+
   const work = [];
   for (const ev of rows) {
     const win = dueWindow(attendance, ev);
@@ -384,7 +540,13 @@ async function consolidateDue(db, attendance, telemetry, options = {}) {
     }
   }
 
-  return { total: selected.length, ok, failed, done };
+  return {
+    total: selected.length + areaDone.length,
+    ok: ok + areaOk,
+    failed: failed + areaFailed,
+    done: [...areaDone, ...done],
+    areaBackfill: { total: areaCandidates.rows.length, ok: areaOk, failed: areaFailed, done: areaDone }
+  };
 }
 
 // Compatibilidade com o nome antigo: o boot agora usa consolidateDue diretamente.
@@ -727,6 +889,7 @@ async function overview(db, guildId) {
         voiceMinutes: 0, damage: 0, healing: 0, kills: 0, deaths: 0, fights: 0,
         combatCtas: 0, partyObserved: 0, partyCorrect: 0, equipmentCtas: 0, ipSum: 0,
         observerSum: 0, coreVerified: false,
+        areaSeenBuckets: 0, areaTotalBuckets: 0, areaObserved: false, albionPlayerId: null,
         deathAnalysisCtas: 0, rapidReturns: 0, earlyFightDeaths: 0, maxRapidChain: 0,
         quickestRapidReturnSec: null
       });
@@ -762,6 +925,12 @@ async function overview(db, guildId) {
     }
     o.observerSum += n(s.observer_count);
     o.coreVerified = o.coreVerified || !!s.core_verified;
+    if (s.area_observed) {
+      o.areaObserved = true;
+      o.areaSeenBuckets += n(s.area_seen_buckets);
+      o.areaTotalBuckets += n(s.area_total_buckets);
+    }
+    if (s.albion_player_id) o.albionPlayerId = s.albion_player_id;
     const deathAnalysis = analyzeDeathTimeline(s.death_timeline);
     if (deathAnalysis) {
       o.deathAnalysisCtas++;
@@ -810,6 +979,10 @@ async function overview(db, guildId) {
       partyCorrectPct,
       avgItemPower: o.equipmentCtas ? Math.round(o.ipSum / o.equipmentCtas) : null,
       avgObservers: o.ctasRecorded ? Math.round((o.observerSum / o.ctasRecorded) * 10) / 10 : 0,
+      area_seen_buckets: o.areaSeenBuckets,
+      area_total_buckets: o.areaTotalBuckets,
+      area_observed: o.areaObserved,
+      albion_player_id: o.albionPlayerId,
       killsPerCombatCta: o.combatCtas ? Math.round((o.kills / o.combatCtas) * 100) / 100 : null,
       fightsPerCombatCta: o.combatCtas ? Math.round((o.fights / o.combatCtas) * 100) / 100 : null,
       deathsPerFight: o.fights ? Math.round((o.deaths / o.fights) * 1000) / 1000 : null,
@@ -892,6 +1065,10 @@ async function playerDetail(db, guildId, playerName) {
     equipmentObservedAt: r.equipment_observed_at,
     observers: n(r.observer_count),
     telemetryEvents: n(r.telemetry_events),
+    area_seen_buckets: r.area_seen_buckets == null ? null : n(r.area_seen_buckets),
+    area_total_buckets: r.area_total_buckets == null ? null : n(r.area_total_buckets),
+    area_observed: !!r.area_observed,
+    albion_player_id: r.albion_player_id || null,
     deathTimeline: Array.isArray(r.death_timeline) ? r.death_timeline : null,
     deathAnalysis: analyzeDeathTimeline(r.death_timeline)
   }));

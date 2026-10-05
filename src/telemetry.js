@@ -222,6 +222,70 @@ function presenceForcesForWindow(rows, rosterKeysInput, mapName, firstAt, lastAt
   };
 }
 
+async function getPresenceSnapshotRows(eventId) {
+  const { rows } = await pool.query(`
+    SELECT event_id, device_id, player_name, payload, occurred_at, received_at
+    FROM albion_telemetry_events
+    WHERE cta_event_id=$1 AND type='player_presence_snapshot'
+    ORDER BY occurred_at ASC, received_at ASC
+  `, [eventId]);
+  return rows || [];
+}
+
+function presenceAreaSummary(rows) {
+  const BUCKET_MS = 15 * 1000;
+  const totalBuckets = new Set();
+  const byPlayer = new Map();
+
+  for (const row of rows || []) {
+    const atMs = new Date(row.occurred_at || row.occurredAt).getTime();
+    if (!Number.isFinite(atMs)) continue;
+
+    const bucket = Math.floor(atMs / BUCKET_MS) * BUCKET_MS;
+    totalBuckets.add(bucket);
+
+    const players = Array.isArray(row?.payload?.players) ? row.payload.players : [];
+    for (const raw of players.slice(0, 500)) {
+      const identity = presencePlayerKey(raw);
+      if (!identity || !identity.startsWith("name:")) continue;
+      const playerKey = identity.slice(5);
+      if (!playerKey) continue;
+
+      if (!byPlayer.has(playerKey)) {
+        byPlayer.set(playerKey, {
+          playerKey,
+          seenBuckets: new Set(),
+          albionPlayerId: null,
+          guidAtMs: -Infinity
+        });
+      }
+
+      const item = byPlayer.get(playerKey);
+      item.seenBuckets.add(bucket);
+
+      const guid = String(raw?.playerId || raw?.guid || "").trim();
+      if (guid && atMs >= item.guidAtMs) {
+        item.albionPlayerId = guid;
+        item.guidAtMs = atMs;
+      }
+    }
+  }
+
+  return {
+    observed: totalBuckets.size > 0,
+    totalBuckets: totalBuckets.size,
+    players: [...byPlayer.values()].map(item => ({
+      playerKey: item.playerKey,
+      seenBuckets: item.seenBuckets.size,
+      albionPlayerId: item.albionPlayerId
+    }))
+  };
+}
+
+async function getPresenceArea(eventId) {
+  return presenceAreaSummary(await getPresenceSnapshotRows(eventId));
+}
+
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -2025,7 +2089,7 @@ async function getLoot(db, eventId) {
 }
 
 async function getCombat(db, eventId) {
-  const [{ rows }, { rows: presenceRows }] = await Promise.all([
+  const [combatResult, presenceRows] = await Promise.all([
     pool.query(`
       SELECT event_id, device_id, type, player_name, payload, occurred_at, received_at
       FROM albion_telemetry_events
@@ -2033,13 +2097,9 @@ async function getCombat(db, eventId) {
         AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result','player_death_observed')
       ORDER BY occurred_at ASC, received_at ASC
     `, [eventId]),
-    pool.query(`
-      SELECT event_id, device_id, player_name, payload, occurred_at, received_at
-      FROM albion_telemetry_events
-      WHERE cta_event_id=$1 AND type='player_presence_snapshot'
-      ORDER BY occurred_at ASC, received_at ASC
-    `, [eventId])
+    getPresenceSnapshotRows(eventId)
   ]);
+  const rows = combatResult.rows || [];
 
   const signups = await db.getSignups(eventId).catch(() => []);
   const ev = await db.getEvent(eventId).catch(() => null);
@@ -3705,7 +3765,8 @@ module.exports = {
   getPlayerEquipment,
   getLoot,
   getCombat,
+  getPresenceArea,
   getGuildPresence,
-  __test: { presenceForcesForWindow },
+  __test: { presenceForcesForWindow, presenceAreaSummary },
   getGuildPresenceProbeDiagnostics
 };
