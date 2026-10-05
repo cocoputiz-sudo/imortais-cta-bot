@@ -128,9 +128,17 @@ function emptyAreaSummary() {
   return { observed: false, totalBuckets: 0, players: [] };
 }
 
-async function loadAreaSummary(telemetry, eventId) {
+async function loadPresenceRows(telemetry, eventId) {
+  if (!telemetry || typeof telemetry.getPresenceSnapshotRows !== "function") return null;
+  return telemetry.getPresenceSnapshotRows(eventId);
+}
+
+async function loadAreaSummary(telemetry, eventId, presenceRows) {
   if (!telemetry || typeof telemetry.getPresenceArea !== "function") return emptyAreaSummary();
-  const summary = await telemetry.getPresenceArea(eventId);
+  const summary = await telemetry.getPresenceArea(
+    eventId,
+    Array.isArray(presenceRows) ? presenceRows : undefined
+  );
   return summary && typeof summary === "object" ? summary : emptyAreaSummary();
 }
 
@@ -193,7 +201,8 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
   // Passada retroativa: atualiza SOMENTE as quatro colunas de área de linhas que
   // já existem. Não cria jogador, não mexe em stats_version nem nos markers first/second.
   if (options?.areaOnly) {
-    const area = areaState(await loadAreaSummary(telemetry, eventId));
+    const presenceRows = await loadPresenceRows(telemetry, eventId);
+    const area = areaState(await loadAreaSummary(telemetry, eventId, presenceRows));
     if (!area.observed) {
       return { ok: true, eventId: String(ev.id), players: existingResult.rows.length, areaObserved: false, areaOnly: true };
     }
@@ -231,16 +240,23 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
     };
   }
 
+  const presenceRowsPromise = loadPresenceRows(telemetry, eventId);
   const [signups, attendanceMap, combat, confirm, profilesResult, areaSummary] = await Promise.all([
     db.getSignups(eventId).catch(() => []),
     attendance.processEvent(ev).catch(() => new Map()),
-    telemetry.getCombat(db, eventId).catch(() => ({ players: [], maps: [], audit: {}, meta: {} })),
+    presenceRowsPromise
+      .then(presenceRows => telemetry.getCombat(
+        db,
+        eventId,
+        Array.isArray(presenceRows) ? { presenceRows } : undefined
+      ))
+      .catch(() => ({ players: [], maps: [], audit: {}, meta: {} })),
     telemetry.getConfirm(db, eventId).catch(() => null),
     pool.query(
       "SELECT user_id, username, main_role, core_verified FROM players WHERE guild_id=$1",
       [ev.guild_id]
     ).catch(() => ({ rows: [] })),
-    loadAreaSummary(telemetry, eventId)
+    presenceRowsPromise.then(presenceRows => loadAreaSummary(telemetry, eventId, presenceRows))
   ]);
 
   const area = areaState(areaSummary);

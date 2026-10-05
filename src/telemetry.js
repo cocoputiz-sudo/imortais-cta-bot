@@ -8,6 +8,11 @@ const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
 const _confirmCache = new Map(); // eventId -> { at, payload }
 const CONFIRM_TTL_MS = 2000;
+const _combatCache = new Map(); // eventId -> { at, promise }
+const _combatInFlight = new Set();
+const COMBAT_CACHE_OPEN_TTL_MS = 8000;
+const COMBAT_CACHE_CLOSED_TTL_MS = 60000;
+const COMBAT_CACHE_MAX_ENTRIES = 20;
 const GUILD_STATE_FRESH_MS = Math.max(60_000, Number(process.env.GUILD_STATE_FRESH_MS) || 10 * 60 * 1000);
 const OBSERVER_HEARTBEAT_FRESH_MS = Math.max(30_000, Number(process.env.OBSERVER_HEARTBEAT_FRESH_MS) || 60 * 1000);
 const COMBAT_FIGHT_GAP_MS = Math.max(30_000, Number(process.env.COMBAT_FIGHT_GAP_MS) || 2 * 60 * 1000);
@@ -223,13 +228,22 @@ function presenceForcesForWindow(rows, rosterKeysInput, mapName, firstAt, lastAt
 }
 
 async function getPresenceSnapshotRows(eventId) {
+  const startedAt = Date.now();
   const { rows } = await pool.query(`
     SELECT event_id, device_id, player_name, payload, occurred_at, received_at
     FROM albion_telemetry_events
     WHERE cta_event_id=$1 AND type='player_presence_snapshot'
     ORDER BY occurred_at ASC, received_at ASC
   `, [eventId]);
-  return rows || [];
+  const out = rows || [];
+  const elapsedMs = Date.now() - startedAt;
+  if (elapsedMs > 2000) {
+    console.log(
+      "⏱️ Presence snapshots CTA " + eventId + ": " +
+      out.length + " snapshot(s) em " + elapsedMs + " ms"
+    );
+  }
+  return out;
 }
 
 function presenceAreaSummary(rows) {
@@ -282,8 +296,11 @@ function presenceAreaSummary(rows) {
   };
 }
 
-async function getPresenceArea(eventId) {
-  return presenceAreaSummary(await getPresenceSnapshotRows(eventId));
+async function getPresenceArea(eventId, presenceRows) {
+  const rows = Array.isArray(presenceRows)
+    ? presenceRows
+    : await getPresenceSnapshotRows(eventId);
+  return presenceAreaSummary(rows);
 }
 
 function num(v, fallback = 0) {
@@ -2088,7 +2105,8 @@ async function getLoot(db, eventId) {
   };
 }
 
-async function getCombat(db, eventId) {
+async function getCombat(db, eventId, options = {}) {
+  const hasPresenceRows = Array.isArray(options?.presenceRows);
   const [combatResult, presenceRows] = await Promise.all([
     pool.query(`
       SELECT event_id, device_id, type, player_name, payload, occurred_at, received_at
@@ -2097,7 +2115,7 @@ async function getCombat(db, eventId) {
         AND type IN ('combat_delta','death','kill','knockout','knocked_out','combat_result','player_death_observed')
       ORDER BY occurred_at ASC, received_at ASC
     `, [eventId]),
-    getPresenceSnapshotRows(eventId)
+    hasPresenceRows ? Promise.resolve(options.presenceRows) : getPresenceSnapshotRows(eventId)
   ]);
   const rows = combatResult.rows || [];
 
@@ -2941,6 +2959,78 @@ async function getCombat(db, eventId) {
   };
 }
 
+function combatCacheTtl(event) {
+  return String(event?.status || "").toLowerCase() === "open"
+    ? COMBAT_CACHE_OPEN_TTL_MS
+    : COMBAT_CACHE_CLOSED_TTL_MS;
+}
+
+function evictOldestCombatCache() {
+  while (_combatCache.size > COMBAT_CACHE_MAX_ENTRIES) {
+    let oldestKey = null;
+    let oldestAt = Infinity;
+    for (const [key, entry] of _combatCache) {
+      const at = Number(entry?.at) || 0;
+      if (at < oldestAt) {
+        oldestAt = at;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey == null) break;
+    _combatCache.delete(oldestKey);
+    _combatInFlight.delete(oldestKey);
+  }
+}
+
+async function getCombatCached(db, eventId, options = {}) {
+  const id = String(eventId || "");
+  const nowFn = typeof options.now === "function" ? options.now : Date.now;
+  const loader = typeof options.loader === "function" ? options.loader : getCombat;
+  const getEvent = typeof options.getEvent === "function"
+    ? options.getEvent
+    : (eventKey => db.getEvent(eventKey));
+  let now = Number(nowFn());
+
+  let cached = _combatCache.get(id);
+  if (cached && _combatInFlight.has(id)) return cached.promise;
+
+  // 8 s é o menor TTL possível. Dentro desta janela nem precisamos consultar
+  // o estado do CTA para saber que a entrada ainda é válida.
+  if (cached && now - cached.at < COMBAT_CACHE_OPEN_TTL_MS) return cached.promise;
+
+  const event = await Promise.resolve(getEvent(id)).catch(() => null);
+  now = Number(nowFn());
+
+  // Outro request pode ter preenchido o single-flight enquanto aguardávamos getEvent.
+  cached = _combatCache.get(id);
+  if (cached && _combatInFlight.has(id)) return cached.promise;
+
+  const ttl = combatCacheTtl(event);
+  if (cached && now - cached.at < ttl) return cached.promise;
+
+  let promise;
+  promise = Promise.resolve().then(() => loader(db, id));
+  _combatCache.set(id, { at: now, promise });
+  _combatInFlight.add(id);
+  evictOldestCombatCache();
+
+  try {
+    return await promise;
+  } catch (e) {
+    const current = _combatCache.get(id);
+    if (current?.promise === promise) _combatCache.delete(id);
+    throw e;
+  } finally {
+    const current = _combatCache.get(id);
+    if (current?.promise === promise) _combatInFlight.delete(id);
+  }
+}
+
+function resetCombatCache() {
+  _combatCache.clear();
+  _combatInFlight.clear();
+}
+
 function jsonShape(value) {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
@@ -3699,7 +3789,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   app.get("/api/telemetry/combat", async (req, res) => {
     if (!requireMember(req, res)) return;
     const id = String(req.query.event || "");
-    res.json(await getCombat(db, id).catch(e => { console.error("telemetry combat:", e); return { error: "server" }; }));
+    res.json(await getCombatCached(db, id).catch(e => { console.error("telemetry combat:", e); return { error: "server" }; }));
   });
 
   app.get("/api/navigation/zones", async (req, res) => {
@@ -3765,8 +3855,15 @@ module.exports = {
   getPlayerEquipment,
   getLoot,
   getCombat,
+  getPresenceSnapshotRows,
   getPresenceArea,
   getGuildPresence,
-  __test: { presenceForcesForWindow, presenceAreaSummary },
+  __test: {
+    presenceForcesForWindow,
+    presenceAreaSummary,
+    getCombatCached,
+    resetCombatCache,
+    combatCacheTtl
+  },
   getGuildPresenceProbeDiagnostics
 };
