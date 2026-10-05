@@ -408,6 +408,16 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
       );
     }
 
+    // Se a própria passada normal já viu snapshots, a área já está preenchida.
+    // Marcar aqui evita uma passada retroativa redundante; a segunda passada normal
+    // continua recalculando a área mesmo com este marker preenchido.
+    if (area.observed) {
+      await client.query(
+        "UPDATE cta_events SET scout_area_backfill_at=COALESCE(scout_area_backfill_at,now()) WHERE id=$1",
+        [ev.id]
+      );
+    }
+
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
