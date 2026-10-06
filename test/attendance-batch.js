@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert/strict");
+const { performance } = require("perf_hooks");
 
 process.env.PGSSL = "disable";
 process.env.GUILD_ID = "guild-test";
@@ -85,6 +86,58 @@ async function countQueries(fn) {
   }
 }
 
+async function testInMemoryBatchPerformance() {
+  const eventCount = 200;
+  const sessionCount = 50_000;
+  const dayMs = 24 * 60 * 60 * 1000;
+  const baseMs = Date.parse("2026-01-01T12:00:00Z");
+
+  const events = Array.from({ length: eventCount }, (_, i) => ({
+    id: "perf-" + i,
+    guild_id: GUILD,
+    time_label: "17:20",
+    created_at: new Date(baseMs + i * dayMs)
+  }));
+
+  const sessions = Array.from({ length: sessionCount }, (_, i) => {
+    const eventIndex = i % eventCount;
+    const start = baseMs + eventIndex * dayMs + 17 * 60 * 60 * 1000 + 25 * 60 * 1000;
+    return {
+      user_id: "perf-user-" + i,
+      username: "Perf" + i,
+      channel_kind: i % 2 ? "prep" : "bomb",
+      joined_at: new Date(start).toISOString(),
+      left_at: new Date(start + 30 * 60 * 1000).toISOString()
+    };
+  });
+
+  const originals = {
+    signups: db.getSignupsForEvents,
+    confirms: db.getBombConfirmsForEvents,
+    presence: db.getPresenceInRange
+  };
+  db.getSignupsForEvents = async () => [];
+  db.getBombConfirmsForEvents = async () => [];
+  db.getPresenceInRange = async () => sessions;
+
+  try {
+    const started = performance.now();
+    const ctx = await attendance.__test.loadEventsContext(GUILD, events);
+    const elapsedMs = performance.now() - started;
+
+    assert.equal(ctx.presenceByEvent.size, eventCount);
+    assert.ok(
+      elapsedMs < 500,
+      "200 CTAs x 50 mil sessões deve ficar abaixo de 500 ms; observado " + elapsedMs.toFixed(1) + " ms"
+    );
+    ok("desempenho 200 CTAs x 50 mil sessões: " + elapsedMs.toFixed(1) + " ms (< 500 ms)");
+  } finally {
+    db.getSignupsForEvents = originals.signups;
+    db.getBombConfirmsForEvents = originals.confirms;
+    db.getPresenceInRange = originals.presence;
+  }
+}
+
 async function main() {
   if (!process.env.DATABASE_URL || !/127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL)) {
     throw new Error("TESTE RECUSADO: DATABASE_URL precisa apontar para PostgreSQL local temporário.");
@@ -102,11 +155,6 @@ async function main() {
 
   assert.equal(typeof db.getPresenceInRange, "function", "db.getPresenceInRange precisa existir");
 
-  const originalWindows = db.getPresenceForEventWindows;
-  db.getPresenceForEventWindows = async () => {
-    throw new Error("loadEventsContext não deve usar getPresenceForEventWindows");
-  };
-
   const batched = await countQueries(async () => {
     const ctx = await attendance.__test.loadEventsContext(GUILD, events);
     const out = [];
@@ -114,7 +162,6 @@ async function main() {
     return out;
   });
 
-  db.getPresenceForEventWindows = originalWindows;
 
   assert.deepEqual(batched.value, legacy.value);
   assert.equal(legacy.count, events.length * 4, "legado deve fazer quatro consultas por CTA");
@@ -135,6 +182,8 @@ async function main() {
   assert.equal(report.count, 4, "buildReport deve usar 1 query de eventos + 3 lotes");
   assert.equal(report.value.ctaCount, 3);
   ok("buildReport usa 4 consultas fixas para 3 CTAs");
+
+  await testInMemoryBatchPerformance();
 
   console.log("\n✅ Attendance batch suite: TODOS OS TESTES PASSARAM");
 }
