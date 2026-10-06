@@ -590,6 +590,7 @@ const PAGE = `<!doctype html>
     --disp:'Cinzel',Georgia,serif; --sans:'Inter',system-ui,sans-serif;
   }
   *{box-sizing:border-box;}
+  html,body{ width:100%; max-width:100%; overflow-x:hidden; }
   body{ margin:0; color:var(--text); font-family:var(--sans); font-size:14px;
     background:radial-gradient(circle at 50% -20%,#1a2433 0,#0b0f15 34%,var(--bg) 70%); background-attachment:fixed;
     padding-top:env(safe-area-inset-top,0); }
@@ -692,6 +693,21 @@ const PAGE = `<!doctype html>
   .news-body p{ margin:6px 0; color:#d3d7de; line-height:1.55; max-width:76ch; }
   .news-body blockquote{ margin:6px 0; padding:5px 0 5px 14px; border-left:3px solid var(--line2); color:var(--muted); font-size:13.5px; }
   .news-body strong{ color:var(--text); }
+  .news-body a{ color:#7fb0ff; text-decoration:none; overflow-wrap:anywhere; }
+  .news-body a:hover{ text-decoration:underline; }
+  .mural-system{ border-color:#33445a; background:linear-gradient(180deg,#121923,#0e141d); }
+  .mural-system .mural-title{ color:#8fb9ff; }
+  .mural-feature-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+  .mural-feature{ min-width:0; border:1px solid #26374a; background:#0c131c; border-radius:9px; padding:9px 10px; }
+  .mural-feature b{ display:block; margin-bottom:3px; color:#edf2f7; }
+  .mural-feature span{ color:#9eacc0; font-size:12px; line-height:1.45; }
+  .mural-ranking{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px 12px; margin-top:10px; }
+  .mural-rank{ border-bottom:1px solid #202b39; padding:6px 4px; color:#d5dde8; }
+  .mural-rank strong{ color:#fff; }
+  .mural-rank.podium{ color:#e7c16d; }
+  .mural-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .mural-link{ display:inline-flex; align-items:center; min-height:38px; border:1px solid #40536f; border-radius:9px; padding:8px 12px; background:#111a25; color:#9fc2ff!important; font-weight:800; text-decoration:none!important; }
+  .mural-link.primary-link{ border-color:#9a3c45; background:#291518; color:#fff!important; }
   .empty-note{ color:var(--faint); text-align:center; padding:34px; }
   .gate{ padding:70px 18px; color:var(--muted); text-align:center; font-size:15px; line-height:1.7; }
   .gate-btn{ display:inline-block; margin-top:10px; background:var(--panel); border:1px solid var(--line2); color:#7fb0ff; padding:10px 20px; border-radius:10px; text-decoration:none; }
@@ -996,6 +1012,54 @@ const PAGE = `<!doctype html>
   .nav2-empty{padding:18px;color:var(--muted);text-align:center;border:1px dashed #2b394b;border-radius:10px}
   @media(max-width:900px){.nav2-layout{grid-template-columns:1fr}.nav2-current{grid-template-columns:1fr}.nav2-row{grid-template-columns:1fr}}
 
+  .mobile-nav{display:none}
+  @media(max-width:1050px){
+    body{background-attachment:scroll}
+    .mobile-nav{
+      display:flex;position:sticky;top:64px;z-index:19;gap:6px;overflow-x:auto;overflow-y:hidden;
+      max-width:100%;padding:7px 10px;background:rgba(8,11,16,.97);border-bottom:1px solid var(--line);
+      -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scrollbar-width:thin;
+    }
+    .mobile-nav .nav{
+      flex:0 0 auto;margin:0;padding:8px 10px;border:1px solid var(--line);border-left:1px solid var(--line);
+      border-radius:8px;white-space:nowrap;font-size:12px;background:#10151d;
+    }
+    .mobile-nav .nav.on{border-color:#87343d;background:#271317}
+    main{width:100%;max-width:100%;min-width:0;padding:14px 12px 32px}
+    main>div,.panel,.mural,.card,.party,.reserve,.split,.statgrid,.hero,.board{min-width:0;max-width:100%}
+    .panel{overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+    .mural{overflow:hidden}
+  }
+  @media(max-width:760px){
+    header{padding:0 10px;gap:8px}
+    .crest{width:36px;height:36px;flex-basis:36px}
+    .brand h1{font-size:15px;letter-spacing:1.5px}
+    .brand small{font-size:8px;letter-spacing:2px}
+    #live{display:none}
+    #auth{gap:6px;font-size:11px;min-width:0}
+    #auth span{max-width:135px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .slots{grid-template-columns:1fr}
+    .col+.col{border-left:0;border-top:1px solid var(--line)}
+    .slot{grid-template-columns:20px 7px minmax(72px,1fr) minmax(64px,1fr) auto;padding:6px 8px;gap:5px}
+    .statgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .mural{padding:14px 13px}
+    .mural-h{flex-wrap:wrap;gap:5px}
+    .mural-meta{margin-left:0;width:100%}
+    .mural-feature-grid,.mural-ranking{grid-template-columns:1fr}
+    .news-body h2{font-size:17px}
+    .modal,.scout-overlay{align-items:flex-start;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:8px}
+    .sheet{max-height:calc(100dvh - 16px);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px 16px}
+    .scout-modal{max-height:calc(100dvh - 16px);overflow-y:auto}
+    .timegrid{grid-template-columns:repeat(2,1fr)}
+  }
+  @media(max-width:420px){
+    .brand small{display:none}
+    #auth span{max-width:105px}
+    .mobile-nav{padding-left:8px;padding-right:8px}
+    main{padding-left:8px;padding-right:8px}
+    .statgrid{grid-template-columns:1fr}
+  }
+
 </style>
 </head>
 <body>
@@ -1005,6 +1069,18 @@ const PAGE = `<!doctype html>
   <span id="live">conectando…</span>
   <span id="auth"></span>
 </header>
+<nav class="mobile-nav" id="mobile-nav" aria-label="Navegação do War Room">
+  <div class="nav on" data-view="board">⚔ Formação</div>
+  <div class="nav" data-view="navigation">🧭 Navegação</div>
+  <div class="nav" data-view="mural">📣 Mural</div>
+  <div class="nav" id="mobile-stats">📊 Meu desempenho</div>
+  <div class="nav" data-view="scout">📊 Scout</div>
+  <div class="nav" data-view="confirm">🎯 Validação</div>
+  <div class="nav" data-view="loot">📦 Loot</div>
+  <div class="nav" data-view="combat">⚔️ Combate</div>
+  <div class="nav" data-view="guild">🟢 Guilda</div>
+  <div class="nav" data-view="devices">🖥️ Dispositivos</div>
+</nav>
 <div class="shell">
   <aside id="side">
     <div class="navtitle">OPERAÇÃO</div>
@@ -1197,15 +1273,84 @@ const PAGE = `<!doctype html>
     }).catch(function(){ b.innerHTML='Erro ao carregar.'; });
   }
 
+  function systemMuralPosts(){
+    return [
+      {
+        system:true,
+        author:'IMORTAIS · Attendance',
+        time:'2026-10-06T05:12:00.000Z',
+        html:'<h2>🏆 Vencedores da última premiação semanal de Attendance</h2>'
+          +'<p>Parabéns aos 10 jogadores que fecharam a última premiação semanal no topo do attendance da IMORTAIS.</p>'
+          +'<div class="mural-ranking">'
+          +'<div class="mural-rank podium">🥇 <strong>1º SepoDeMadeiraRs</strong></div>'
+          +'<div class="mural-rank podium">🥈 <strong>2º N1Demon</strong></div>'
+          +'<div class="mural-rank podium">🥉 <strong>3º LOBODONORDESTE</strong></div>'
+          +'<div class="mural-rank"><strong>4º girabel88</strong></div>'
+          +'<div class="mural-rank"><strong>5º ZendsXD</strong></div>'
+          +'<div class="mural-rank"><strong>6º Kodamm</strong></div>'
+          +'<div class="mural-rank"><strong>7º MONNARKKA</strong></div>'
+          +'<div class="mural-rank"><strong>8º Sisal</strong></div>'
+          +'<div class="mural-rank"><strong>9º ThorXIII</strong></div>'
+          +'<div class="mural-rank"><strong>10º VanWes</strong></div>'
+          +'</div>'
+          +'<p style="margin-top:11px">O ranking de attendance continua sendo a referência para reconhecer frequência e participação nos CTAs.</p>'
+      },
+      {
+        system:true,
+        author:'IMORTAIS · War Room',
+        time:'2026-10-06T05:11:00.000Z',
+        html:'<h2>⚔️ CTA War Room · central operacional da IMORTAIS</h2>'
+          +'<p>O War Room já concentra a preparação, acompanhamento e auditoria dos nossos CTAs em um único lugar.</p>'
+          +'<div class="mural-feature-grid">'
+          +'<div class="mural-feature"><b>⚔ Formação ao vivo</b><span>PTs, vagas, funções, armas, reservas, presença e ajustes do caller em tempo real.</span></div>'
+          +'<div class="mural-feature"><b>🧭 Navegação</b><span>Objetivos, rotas e orientação operacional para movimentação da zerg.</span></div>'
+          +'<div class="mural-feature"><b>📊 Attendance e desempenho</b><span>Presença por CTA, ranking, histórico individual, temporada e resultado final.</span></div>'
+          +'<div class="mural-feature"><b>🎯 Validação do CTA</b><span>Compara formação/pings com presença observada e ajuda a auditar quem realmente esteve no CTA.</span></div>'
+          +'<div class="mural-feature"><b>📦 Registros & Loot</b><span>Loot observado pelos Combat Clients, deduplicação, valores, top looters e conferência por dia/horário.</span></div>'
+          +'<div class="mural-feature"><b>⚔️ Combate</b><span>Dano, cura, kills, mortes, Kill Fame, Death Fame, Battle Reports, mapas e placar contra guildas inimigas.</span></div>'
+          +'<div class="mural-feature"><b>📊 Scout</b><span>Perfis dos jogadores, histórico, destaques, alertas, presença por área e indicadores de desempenho.</span></div>'
+          +'<div class="mural-feature"><b>🟢 Guilda online</b><span>Jogadores observados online, cruzamento da lista do jogo com pings e call, contribuinte e quem ainda está equipando.</span></div>'
+          +'<div class="mural-feature"><b>🖥️ Dispositivos</b><span>Heartbeat e saúde dos Combat Clients conectados à telemetria do War Room.</span></div>'
+          +'<div class="mural-feature"><b>📣 Mural</b><span>Comunicados importantes da guilda e atualizações do próprio sistema.</span></div>'
+          +'</div>'
+          +'<p style="margin-top:11px">A ideia é simples: menos planilha, menos conferência manual e mais informação útil para o caller durante e depois da fight.</p>'
+      },
+      {
+        system:true,
+        author:'IMORTAIS · Combat Client',
+        time:'2026-10-06T05:10:00.000Z',
+        html:'<h2>🖥️ Download do IMORTAIS Combat Client</h2>'
+          +'<p>O Combat Client envia ao War Room a telemetria que alimenta presença, party, combate, mortes, loot, mapa e diagnóstico dos dispositivos.</p>'
+          +'<p><strong>Windows:</strong> versão estável atual <strong>v0.5.9</strong>. Use preferencialmente o instalador oficial.</p>'
+          +'<div class="mural-actions">'
+          +'<a class="mural-link primary-link" href="https://github.com/cocoputiz-sudo/imortais-combat-client/releases/download/v0.5.9/IMORTAIS-Combat-Client-Setup-v0.5.9.exe" target="_blank" rel="noopener noreferrer">⬇️ Baixar Windows v0.5.9</a>'
+          +'<a class="mural-link" href="https://github.com/cocoputiz-sudo/imortais-combat-client/releases" target="_blank" rel="noopener noreferrer">📦 Ver todas as releases</a>'
+          +'</div>'
+          +'<p style="margin-top:11px"><strong>Linux:</strong> o cliente nativo continua em validação real no Ubuntu antes de virar release estável para uso geral.</p>'
+      }
+    ];
+  }
+
+  function renderMuralPosts(list){
+    var box=document.getElementById('news');
+    list=Array.isArray(list)?list:[];
+    if(!list.length){
+      box.innerHTML='<div class="mural"><div class="empty-note">📭 Nenhuma notícia por enquanto.</div></div>';
+      return;
+    }
+    box.innerHTML=list.map(function(n){
+      var when=new Date(n.time).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      return '<div class="mural'+(n.system?' mural-system':'')+'"><div class="mural-h"><span class="mural-title">'+(n.system?'📌 Comunicado IMORTAIS':'📣 Mural da guilda')+'</span><span class="mural-meta">'+esc(n.author)+' · '+when+'</span></div><div class="news-body">'+n.html+'</div></div>';
+    }).join('');
+  }
+
   function loadNews(){
+    var systemPosts=systemMuralPosts();
     fetch('/api/news').then(function(r){return r.json();}).then(function(list){
-      var box=document.getElementById('news');
-      if(!list||!list.length){ box.innerHTML='<div class="mural"><div class="empty-note">📭 Nenhuma notícia por enquanto.</div></div>'; return; }
-      box.innerHTML=list.map(function(n){
-        var when=new Date(n.time).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-        return '<div class="mural"><div class="mural-h"><span class="mural-title">📣 Mural da guilda</span><span class="mural-meta">'+esc(n.author)+' · '+when+'</span></div><div class="news-body">'+n.html+'</div></div>';
-      }).join('');
-    }).catch(function(){});
+      renderMuralPosts(systemPosts.concat(Array.isArray(list)?list:[]));
+    }).catch(function(){
+      renderMuralPosts(systemPosts);
+    });
   }
 
   function post(url,body){
@@ -1424,6 +1569,7 @@ const PAGE = `<!doctype html>
 
   Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.onclick=function(){ show(b.getAttribute('data-view')); }; });
   document.getElementById('nav-stats').onclick=openStats;
+  var mobileStats=document.getElementById('mobile-stats'); if(mobileStats) mobileStats.onclick=openStats;
   Array.prototype.forEach.call(document.querySelectorAll('.modal'),function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
 
   // ===================== NAVEGAÇÃO / WAZE ZVZ =====================
