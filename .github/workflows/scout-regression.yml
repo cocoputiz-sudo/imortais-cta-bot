@@ -86,3 +86,69 @@ jobs:
         run: node test/ingest-route.js
       - name: CTA time rollover
         run: node test/cta-time.js
+      - name: Prova negativa - ingest falha com escopo antigo
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src/telemetry.js";
+          let src = fs.readFileSync(path, "utf8");
+          src = src.replace(
+            '      let inserted = 0, duplicate = 0;\n      const fameEnrichmentQueue = [];\n      const client = await pool.connect();',
+            '      let inserted = 0, duplicate = 0;\n      const client = await pool.connect();'
+          );
+          src = src.replace(
+            '          const presenceProbes = [];\n          const zoneChanges = [];',
+            '          const presenceProbes = [];\n          const zoneChanges = [];\n          const fameEnrichmentQueue = [];'
+          );
+          fs.writeFileSync(path, src);
+          NODE
+          set +e
+          node test/ingest-route.js > mutation-ingest.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-ingest.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: ingest-route não detectou o bug fameEnrichmentQueue fora de escopo"
+            exit 1
+          fi
+          grep -q "fameEnrichmentQueue is not defined" mutation-ingest.log
+          echo "✅ prova negativa: ingest-route falha ao restaurar o bug de escopo"
+      - name: Prova negativa - CTA time falha com cálculo antigo
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          cat > src/ctatime.js <<'NODE'
+          "use strict";
+          function ctaPingTime(event) {
+            const m = /^(\d{1,2}):(\d{2})$/.exec(String(event?.time_label || "").trim());
+            if (!m) return null;
+            const base = new Date(event.created_at);
+            return new Date(Date.UTC(
+              base.getUTCFullYear(),
+              base.getUTCMonth(),
+              base.getUTCDate(),
+              Number(m[1]),
+              Number(m[2]),
+              0,
+              0
+            ));
+          }
+          module.exports = { ctaPingTime };
+          NODE
+          set +e
+          node test/cta-time.js > mutation-cta-time.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-cta-time.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: cta-time não detectou o cálculo antigo sem virada UTC"
+            exit 1
+          fi
+          grep -q "2026-10-06T00:00:00.000Z" mutation-cta-time.log
+          echo "✅ prova negativa: cta-time falha ao restaurar o cálculo antigo"
