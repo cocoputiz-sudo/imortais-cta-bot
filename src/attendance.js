@@ -97,15 +97,22 @@ async function loadEventsContext(guildId, events) {
     db.getPresenceInRange(guildId, rangeStart, rangeEnd, ["prep", "bomb"])
   ]);
 
+  // Converte os timestamps UMA vez por sessão. A filtragem abaixo é CTA x sessão,
+  // então construir Date dentro do laço interno multiplicava esse custo por todos os CTAs.
+  // Mantemos a row original no resultado para preservar exatamente o contrato anterior.
+  const preparedPresence = (presence || []).map(row => ({
+    row,
+    joinedMs: new Date(row.joined_at).getTime(),
+    leftMs: row.left_at == null ? null : new Date(row.left_at).getTime()
+  }));
+
   const presenceByEvent = new Map();
   for (const { event, win } of valid) {
     const rows = [];
     const startMs = win.start.getTime();
     const endMs = win.end.getTime();
-    for (const p of presence || []) {
-      const joinedMs = new Date(p.joined_at).getTime();
-      const leftMs = p.left_at == null ? null : new Date(p.left_at).getTime();
-      if (joinedMs < endMs && (leftMs == null || leftMs > startMs)) rows.push(p);
+    for (const p of preparedPresence) {
+      if (p.joinedMs < endMs && (p.leftMs == null || p.leftMs > startMs)) rows.push(p.row);
     }
     presenceByEvent.set(String(event.id), rows);
   }
