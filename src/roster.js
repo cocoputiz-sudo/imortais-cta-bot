@@ -420,6 +420,10 @@ function shortLabel(slot) {
   return "DPS";
 }
 
+function isSecondCaller(signup) {
+  return !!signup?.second_caller;
+}
+
 function renderRoster(signups, numParties = 4, partyList = null) {
   const bySlot = new Map();
   const reserves = [];
@@ -443,7 +447,7 @@ function renderRoster(signups, numParties = 4, partyList = null) {
       if (su) {
         filled++;
         const flag = su.presence === "online" ? "🟢" : "🕐";
-        const caller2Tag = su.second_caller ? " 👑2" : "";
+        const caller2Tag = isSecondCaller(su) ? " 👑2" : "";
         const ipTag =
           su.ip && ["URSINAS", "CRAVADAS", "CANÇÃO", "PRISMA"].includes((su.weapon || "").toUpperCase())
             ? ` \`IP ${su.ip}\``
@@ -461,7 +465,7 @@ function renderRoster(signups, numParties = 4, partyList = null) {
   if (reserves.length) {
     blocks.push(
       `__**⏳ Aguardando PT** (sem vaga nas PTs abertas)__\n` +
-        reserves.map((r) => r.second_caller
+        reserves.map((r) => isSecondCaller(r)
           ? `• 👑 **2 CALLER · ${r.username}** — ${r.weapon}`
           : `• **${r.username}** — ${r.weapon}`).join("\n")
     );
@@ -470,7 +474,7 @@ function renderRoster(signups, numParties = 4, partyList = null) {
 }
 
 module.exports = {
-  findBestSlot, suggestUpgrade, renderRoster,
+  findBestSlot, suggestUpgrade, renderRoster, isSecondCaller,
   solve, reallocate, consolidate, affinityScore,
   findOpenSlot: (w, s) => findBestSlot(w, s),
 };

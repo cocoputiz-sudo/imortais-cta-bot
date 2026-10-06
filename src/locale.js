@@ -198,19 +198,33 @@ function canonicalWeapon(input) {
   const q = norm(input);
   if (!q) return null;
 
+  // Chaves canônicas em português: mantém exatamente a regra histórica.
   for (const weapon of Object.keys(WEAPONS)) {
     if (norm(weapon) === q || q.includes(norm(weapon))) return weapon;
   }
 
-  for (const [weapon, label] of Object.entries(WEAPON_ES)) {
-    const ln = norm(label);
-    if (ln === q || q.includes(ln)) return weapon;
+  // Espanhol: nomes maiores vencem nomes menores. Um rótulo/apelido de UMA
+  // palavra só exige igualdade exata para evitar falsos positivos em frases
+  // comuns ("silencio en la call" não pode cadastrar SILENCE).
+  const spanishCandidates = [
+    ...Object.entries(WEAPON_ES).map(([weapon, label], order) => ({
+      needle: norm(label), weapon, order
+    })),
+    ...Object.entries(EXTRA_WEAPON_ALIASES_ES).map(([alias, weapon], order) => ({
+      needle: norm(alias), weapon, order: Object.keys(WEAPON_ES).length + order
+    })),
+  ]
+    .filter((x) => x.needle)
+    .sort((a, b) => b.needle.length - a.needle.length || a.order - b.order);
+
+  for (const candidate of spanishCandidates) {
+    const words = candidate.needle.split(" ").filter(Boolean);
+    const matches = words.length === 1
+      ? q === candidate.needle
+      : (q === candidate.needle || q.includes(candidate.needle));
+    if (matches) return candidate.weapon;
   }
 
-  for (const [alias, weapon] of Object.entries(EXTRA_WEAPON_ALIASES_ES)) {
-    const an = norm(alias);
-    if (an === q || q.includes(an)) return weapon;
-  }
   return null;
 }
 

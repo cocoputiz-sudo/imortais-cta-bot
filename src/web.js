@@ -9,6 +9,7 @@
 const express = require("express");
 const db = require("./db");
 const { PARTIES, WEAPONS } = require("./comps");
+const { isSecondCaller } = require("./roster");
 const crypto = require("crypto");
 const telemetry = require("./telemetry");
 const scout = require("./scout");
@@ -133,7 +134,7 @@ async function buildRosterData(ev) {
       const su = bySlot.get(`${p}:${i}`);
       if (su) {
         filled++;
-        slots.push({ n: i + 1, filled: true, role: slot.role, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, userId: su.user_id, core: coreSet.has(String(su.user_id)), options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
+        slots.push({ n: i + 1, filled: true, role: slot.role, locked: !!slot.locked, weapon: su.weapon, username: su.username, presence: su.presence, manual: !!su.manual, secondCaller: isSecondCaller(su), userId: su.user_id, core: coreSet.has(String(su.user_id)), options: [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon) });
       } else {
         const options = [...slot.accepts].sort((a, b) => a.weight - b.weight).map((a) => a.weapon);
         slots.push({ n: i + 1, filled: false, role: slot.role, locked: !!slot.locked, options });
@@ -152,7 +153,7 @@ async function buildRosterData(ev) {
   return {
     event: { id: ev.id, time: ev.time_label, status: ev.status, reallocationLocks: [...reallocationLocks] },
     parties,
-    reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon, userId: r.user_id, core: coreSet.has(String(r.user_id)) })),
+    reserves: reserves.map((r) => ({ username: r.username, weapon: r.weapon, secondCaller: isSecondCaller(r), userId: r.user_id, core: coreSet.has(String(r.user_id)) })),
   };
 }
 
@@ -1145,7 +1146,24 @@ const PAGE = `<!doctype html>
   function openStats(){
     var b=document.getElementById('stats-body'); b.innerHTML='carregando…'; mopen('m-stats');
     fetch('/api/me/stats').then(function(r){return r.json();}).then(function(s){
-      if(s.season===false){ b.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa.'; return; }
+      if(s.season===false){
+        if(!s.offSeason){ b.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa.'; return; }
+        var o=s.offSeason, ended=o.endedAt?new Date(o.endedAt).toLocaleDateString('pt-BR'):'';
+        if(o.found===false){
+          b.innerHTML='<h2>📊 OFF-SEASON · Temporada '+o.number+'</h2>'
+            +(ended?'<div class="srow">Encerrada em '+ended+'</div>':'')
+            +'<div class="srow">Você não pontuou no resultado final desta temporada.</div>';
+          return;
+        }
+        var came=(o.integral||0)+(o.parcial||0)+(o.rapida||0);
+        b.innerHTML='<h2>📊 OFF-SEASON · Temporada '+o.number+'</h2>'
+          +(ended?'<div class="srow">Resultado final · encerrada em '+ended+'</div>':'<div class="srow">Resultado final</div>')
+          +'<div class="big">#'+o.position+' <small>de '+o.total+'</small></div>'
+          +'<div class="srow"><b>'+o.score+'</b> pontos · '+esc(o.cat)+'</div>'
+          +'<div class="srow">✅ Veio: <b>'+came+'</b> de '+o.ctaCount+' CTAs <span style="color:var(--faint)">('+(o.integral||0)+' integrais · '+(o.parcial||0)+' parciais · '+(o.rapida||0)+' rápidas)</span></div>'
+          +'<div class="srow">🔴 Faltou (pingou e não veio): <b>'+(o.fantasma||0)+'</b></div>';
+        return;
+      }
       if(!s.found){ b.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>Você ainda não pontuou nesta temporada.'; return; }
       b.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>'
         +'<div class="big">#'+s.rank+' <small>de '+s.total+'</small></div>'
@@ -1228,7 +1246,7 @@ const PAGE = `<!doctype html>
         var rc=ROLE[s.role]||'';
         if(s.filled){
           var dot=s.presence==='online'?'pres on':'pres wait';
-          row.innerHTML='<span class="num">'+n+'</span><i class="role role-'+rc+'"></i><span class="weapon">'+esc(s.weapon)+'</span><span class="player">'+esc(s.username)+'</span><span class="tail">'+(s.core?'<span class="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="'+dot+'"></span></span>';
+          row.innerHTML='<span class="num">'+n+'</span><i class="role role-'+rc+'"></i><span class="weapon">'+esc(s.weapon)+'</span><span class="player">'+esc(s.username)+(s.secondCaller?' 👑2':'')+'</span><span class="tail">'+(s.core?'<span class="core">⭐</span>':'')+(s.manual?'<span class="lock">🔒</span>':'')+'<span class="'+dot+'"></span></span>';
         } else {
           var opts=s.locked?'👑 CALLER':((s.options||[]).slice(0,2).join(' / ')+(((s.options||[]).length>2)?'…':''));
           row.innerHTML='<span class="num">'+n+'</span><i class="role role-'+rc+'" style="opacity:.4"></i><span class="weapon">'+esc(opts)+'</span><span class="player">vazio</span><span class="tail"></span>';
@@ -1256,7 +1274,7 @@ const PAGE = `<!doctype html>
       var wrap=document.createElement('div'); wrap.className='reserve';
       wrap.innerHTML='<div class="reservehead">AGUARDANDO PT <span>'+data.reserves.length+' jogadores</span></div>';
       var chips=document.createElement('div'); chips.className='chips';
-      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='chip'; d.innerHTML='<b>'+esc(r.username)+'</b> · '+esc(r.weapon)+(r.core?' <span class="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',r.userId); e.dataTransfer.effectAllowed='move'; }); } chips.appendChild(d); });
+      data.reserves.forEach(function(r){ var d=document.createElement('div'); d.className='chip'; d.innerHTML='<b>'+esc(r.username)+(r.secondCaller?' 👑2':'')+'</b> · '+esc(r.weapon)+(r.core?' <span class="core">⭐</span>':''); if(authState.canEdit && r.userId){ d.classList.add('drag'); d.setAttribute('draggable','true'); d.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',r.userId); e.dataTransfer.effectAllowed='move'; }); } chips.appendChild(d); });
       wrap.appendChild(chips); rz.appendChild(wrap);
     }
   }
