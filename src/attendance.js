@@ -89,17 +89,31 @@ async function loadEventsContext(guildId, events) {
   }
 
   const ids = valid.map(x => x.event.id);
-  const windows = valid.map(x => ({ eventId: x.event.id, start: x.win.start, end: x.win.end }));
+  const rangeStart = new Date(Math.min(...valid.map(x => x.win.start.getTime())));
+  const rangeEnd = new Date(Math.max(...valid.map(x => x.win.end.getTime())));
   const [signups, bombConfirms, presence] = await Promise.all([
     db.getSignupsForEvents(ids),
     db.getBombConfirmsForEvents(ids),
-    db.getPresenceForEventWindows(guildId, windows, ["prep", "bomb"])
+    db.getPresenceInRange(guildId, rangeStart, rangeEnd, ["prep", "bomb"])
   ]);
+
+  const presenceByEvent = new Map();
+  for (const { event, win } of valid) {
+    const rows = [];
+    const startMs = win.start.getTime();
+    const endMs = win.end.getTime();
+    for (const p of presence || []) {
+      const joinedMs = new Date(p.joined_at).getTime();
+      const leftMs = p.left_at == null ? null : new Date(p.left_at).getTime();
+      if (joinedMs < endMs && (leftMs == null || leftMs > startMs)) rows.push(p);
+    }
+    presenceByEvent.set(String(event.id), rows);
+  }
 
   return {
     signupsByEvent: groupRowsByEvent(signups, "event_id"),
     bombConfirmsByEvent: groupRowsByEvent(bombConfirms, "event_id"),
-    presenceByEvent: groupRowsByEvent(presence, "attendance_event_id")
+    presenceByEvent
   };
 }
 

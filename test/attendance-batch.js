@@ -100,6 +100,13 @@ async function main() {
     return out;
   });
 
+  assert.equal(typeof db.getPresenceInRange, "function", "db.getPresenceInRange precisa existir");
+
+  const originalWindows = db.getPresenceForEventWindows;
+  db.getPresenceForEventWindows = async () => {
+    throw new Error("loadEventsContext não deve usar getPresenceForEventWindows");
+  };
+
   const batched = await countQueries(async () => {
     const ctx = await attendance.__test.loadEventsContext(GUILD, events);
     const out = [];
@@ -107,11 +114,14 @@ async function main() {
     return out;
   });
 
+  db.getPresenceForEventWindows = originalWindows;
+
   assert.deepEqual(batched.value, legacy.value);
   assert.equal(legacy.count, events.length * 4, "legado deve fazer quatro consultas por CTA");
   assert.equal(batched.count, 3, "lote deve fazer exatamente inscrições + confirmações + presença");
   assert.ok(batched.count < legacy.count);
 
+  ok("getPresenceInRange alimenta o contexto em lote");
   ok("processEvent(event, ctx) é equivalente ao legado");
   ok("consultas: legado=" + legacy.count + " / lote=" + batched.count);
 
