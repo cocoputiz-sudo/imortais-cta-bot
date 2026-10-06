@@ -283,6 +283,37 @@ async function testPersistenceAndNoRegression() {
   ok("Combate expõe fame; Scout persiste e não regride após apagar telemetria bruta");
 }
 
+function testSemanticDedupMapExpires() {
+  killFame.__test.resetForTests();
+
+  let now = 1_000_000;
+  killFame.__test.setNow(() => now);
+  const windowMs = killFame.__test.config().semanticDedupMs;
+  const resolved = Promise.resolve(null);
+
+  for (let i = 0; i < 1000; i++) {
+    killFame.__test.rememberSemanticEnrichment(
+      "killer-" + i + "|victim-" + i,
+      BASE + i,
+      resolved
+    );
+  }
+
+  assert.equal(killFame.__test.semanticEnrichmentSize(), 1000);
+
+  now += windowMs + 1;
+  killFame.__test.rememberSemanticEnrichment("fresh|pair", BASE + 2000, resolved);
+
+  assert.equal(
+    killFame.__test.semanticEnrichmentSize(),
+    1,
+    "após a janela, 1.000 pares antigos devem ser varridos antes da nova inserção"
+  );
+
+  killFame.__test.resetForTests();
+  ok("dedup semântico: mapa não cresce após expirar 1.000 pares distintos");
+}
+
 async function testEnemyFilteringDedupAndCoalesce() {
   killFame.__test.resetForTests();
   killFame.__test.setSleep(async () => {});
@@ -368,6 +399,7 @@ async function main() {
   await testSingleFlightAnd429();
   await testConcurrencyLimit();
   testConservativeMatch();
+  testSemanticDedupMapExpires();
   await testEnemyFilteringDedupAndCoalesce();
   await testPersistenceAndNoRegression();
 
