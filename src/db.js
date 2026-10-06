@@ -668,6 +668,22 @@ async function getPresenceInWindow(guildId, channelKind, startUTC, endUTC) {
   return rows;
 }
 
+async function getPresenceInRange(guildId, startUTC, endUTC, channelKinds = ["prep", "bomb"]) {
+  const kinds = [...new Set((channelKinds || []).map(x => String(x || "").trim()).filter(Boolean))];
+  if (!kinds.length) return [];
+
+  const { rows } = await pool.query(
+    `SELECT * FROM voice_presence
+      WHERE guild_id=$1
+        AND channel_kind = ANY($4::text[])
+        AND joined_at < $3
+        AND (left_at IS NULL OR left_at > $2)
+      ORDER BY channel_kind ASC, user_id ASC, joined_at ASC`,
+    [guildId, startUTC, endUTC, kinds]
+  );
+  return rows;
+}
+
 async function getPresenceForEventWindows(guildId, windows, channelKinds = ["prep", "bomb"]) {
   const rows = Array.isArray(windows) ? windows.filter(w => w && w.eventId != null && w.start && w.end) : [];
   const kinds = [...new Set((channelKinds || []).map(x => String(x || "").trim()).filter(Boolean))];
@@ -1238,7 +1254,7 @@ module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, parseReallocationLocks, setReallocationLocks, setEventBrief, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, getBombConfirmsForEvents, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
-  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getPresenceForEventWindows, getEventsInRange, setEventIgnored,
+  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getPresenceInRange, getPresenceForEventWindows, getEventsInRange, setEventIgnored,
   getCurrentSeason, startSeason, finishSeason,
   saveSeasonResults, getLastSeasonResults, getLastEndedSeason,
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
