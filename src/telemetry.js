@@ -53,6 +53,16 @@ function isImortaisFamilyGuildName(value) {
   return g === "imortais" || g === "imortais2" || g === "imortaisacademy";
 }
 
+function shouldEnrichKillFame(payload, rosterKeysInput) {
+  const rosterKeys = rosterKeysInput instanceof Set
+    ? rosterKeysInput
+    : new Set((rosterKeysInput || []).map(normName).filter(Boolean));
+  return isImortaisFamilyGuildName(payload?.killerGuild) ||
+    isImortaisFamilyGuildName(payload?.victimGuild) ||
+    rosterKeys.has(normName(payload?.killer)) ||
+    rosterKeys.has(normName(payload?.victim));
+}
+
 function presenceMapName(value) {
   const text = String(value || "").trim();
   return text || "Mapa desconhecido";
@@ -3651,6 +3661,23 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         if (!ev || ev.status !== "open") ctaEventId = null;
       }
 
+      // O roster só é carregado quando o lote contém uma morte candidata a Kill Fame.
+      // Assim, mortes puramente inimigas são descartadas antes da fila/API sem custo
+      // permanente para batches que não carregam DiedEvent letal.
+      const hasFameCandidates = events.some(e => {
+        const type = String(e?.type || e?.Type || "").trim();
+        const payload = e?.payload ?? e?.Payload ?? {};
+        return type === "player_death_observed" &&
+          payload?.isLethal !== false &&
+          payload?.killer &&
+          payload?.victim;
+      });
+      let fameRosterKeys = new Set();
+      if (ctaEventId && hasFameCandidates) {
+        const roster = await db.getSignups(ctaEventId).catch(() => []);
+        fameRosterKeys = new Set((roster || []).map(row => normName(row?.username)).filter(Boolean));
+      }
+
       await pool.query(`
         INSERT INTO albion_telemetry_devices(device_id, player_name, version)
         VALUES($1,$2,$3)
@@ -3695,7 +3722,8 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
                 type === "player_death_observed" &&
                 payload?.isLethal !== false &&
                 payload?.killer &&
-                payload?.victim
+                payload?.victim &&
+                shouldEnrichKillFame(payload, fameRosterKeys)
               ) {
                 fameEnrichmentQueue.push({ eventId, payload, occurredAt });
               }
@@ -3969,7 +3997,9 @@ module.exports = {
     getCombatCached,
     resetCombatCache,
     invalidateCombatCache,
-    combatCacheTtl
+    combatCacheTtl,
+    shouldEnrichKillFame,
+    isImortaisFamilyGuildName
   },
   getGuildPresenceProbeDiagnostics
 };
