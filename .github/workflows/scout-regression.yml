@@ -7,6 +7,7 @@ on:
       - "src/index.js"
       - "src/web.js"
       - "src/telemetry.js"
+      - "src/killFame.js"
       - "src/season.js"
       - "src/db.js"
       - "src/commands.js"
@@ -17,6 +18,7 @@ on:
       - "test/combat-presence-cache.js"
       - "test/attendance-batch.js"
       - "test/locale-weapons.js"
+      - "test/kill-fame.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -68,3 +70,5 @@ jobs:
         run: node test/attendance-batch.js
       - name: Locale weapons
         run: node test/locale-weapons.js
+      - name: Kill Fame
+        run: node test/kill-fame.js
