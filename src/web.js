@@ -2822,7 +2822,7 @@ const PAGE = `<!doctype html>
     if(!copy) return;
     var names=((d.groups||{}).equipando||[]).map(function(x){return String(x.name||'').trim();}).filter(Boolean);
     copy.onclick=function(){
-      var text=names.join('\n');
+      var text=names.join('\\n');
       var done=function(){ flash('● nomes de Equipando copiados','var(--green)'); };
       if(navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(text).then(done).catch(function(){ flash('● não foi possível copiar','var(--red)'); });
