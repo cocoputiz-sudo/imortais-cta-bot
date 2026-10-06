@@ -110,6 +110,7 @@ function testClassifyScenario() {
   assert.deepEqual(names("contribuinte"), ["2varinha10", "ANGELXXOFC"]);
   assert.deepEqual(r.groups.semCorrespondencia.map((x) => x.name).sort(), ["[IM] Fantasma", "[IM] Visitante"]);
   assert.equal(r.groups.semCorrespondencia.find((x) => x.name === "[IM] Fantasma").pinged, true);
+  assert.equal(r.groups.semCorrespondencia.find((x) => x.name === "[IM] Fantasma").weapon, "CANÇÃO");
   assert.equal(r.groups.semCorrespondencia.find((x) => x.name === "[IM] Visitante").inCall, true);
 
   assert.equal(r.groups.equipando[0].strike, true, "cargo 'Strike 1' sinalizado");
