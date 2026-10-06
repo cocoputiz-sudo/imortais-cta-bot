@@ -18,10 +18,14 @@ function ok(name) {
   console.log("✅ " + name);
 }
 
-function fakeResponse(status, body) {
+function fakeResponse(status, body, headers = {}) {
+  const normalized = new Map(
+    Object.entries(headers).map(([key, value]) => [String(key).toLowerCase(), String(value)])
+  );
   return {
     status,
     ok: status >= 200 && status < 300,
+    headers: { get(name) { return normalized.get(String(name).toLowerCase()) || null; } },
     async json() { return body; }
   };
 }
@@ -94,20 +98,22 @@ async function testSingleFlightAnd429() {
   assert.equal(searchCalls, 1, "10 chamadas simultâneas devem compartilhar a busca");
 
   killFame.__test.resetForTests();
-  killFame.__test.setSleep(async () => {});
+  const sleeps = [];
+  killFame.__test.setSleep(async (ms) => { sleeps.push(ms); });
   killFame.__test.setRetryMs([0, 0, 0, 0]);
 
   let attempts = 0;
   killFame.__test.setFetch(async () => {
     attempts++;
     return attempts === 1
-      ? fakeResponse(429, {})
+      ? fakeResponse(429, {}, { "Retry-After": "2" })
       : fakeResponse(200, { ok: true });
   });
 
   assert.deepEqual(await killFame.__test.albionJson("/429-test"), { ok: true });
   assert.equal(attempts, 2);
-  ok("GameInfo: 10 chamadas = 1 request; HTTP 429 respeita retry/backoff");
+  assert.ok(sleeps.some(ms => ms >= 2000), "Retry-After de 2 s deve prevalecer sobre backoff menor");
+  ok("GameInfo: 10 chamadas = 1 request; HTTP 429 respeita Retry-After/backoff");
 }
 
 async function testConcurrencyLimit() {
@@ -277,6 +283,82 @@ async function testPersistenceAndNoRegression() {
   ok("Combate expõe fame; Scout persiste e não regride após apagar telemetria bruta");
 }
 
+async function testEnemyFilteringDedupAndCoalesce() {
+  killFame.__test.resetForTests();
+  killFame.__test.setSleep(async () => {});
+  killFame.__test.setRetryMs([]);
+  killFame.__test.setResolvedCoalesceMs(5);
+
+  const roster = new Set(["alice"]);
+  const at = new Date(BASE + 30_000).toISOString();
+  const observed = [];
+
+  for (let i = 0; i < 270; i++) {
+    observed.push({
+      eventId: "enemy-" + i,
+      occurredAt: new Date(BASE + i * 1000).toISOString(),
+      payload: {
+        killer: "EnemyK" + i,
+        victim: "EnemyV" + i,
+        killerGuild: "ARCH",
+        victimGuild: "POE",
+        isLethal: true
+      }
+    });
+  }
+  for (let i = 0; i < 30; i++) {
+    observed.push({
+      eventId: "ours-observer-" + i,
+      occurredAt: new Date(BASE + 30_000 + (i % 3) * 250).toISOString(),
+      payload: {
+        killer: "Alice",
+        victim: "EnemyBoss",
+        killerGuild: "IMORTAIS",
+        victimGuild: "ARCH",
+        isLethal: true
+      }
+    });
+  }
+
+  const eligible = observed.filter(x => telemetry.__test.shouldEnrichKillFame(x.payload, roster));
+  assert.equal(eligible.length, 30, "270 mortes entre inimigos não devem entrar na fila");
+
+  let requests = 0;
+  const official = officialEvent("official-one", 30, "Alice", "EnemyBoss", 77777);
+  killFame.__test.setFetch(async (url) => {
+    requests++;
+    const s = String(url);
+    if (s.includes("/search?q=Alice")) {
+      return fakeResponse(200, { players: [{ Name: "Alice", Id: "alice-id" }] });
+    }
+    if (s.includes("/search?q=EnemyBoss")) {
+      return fakeResponse(200, { players: [{ Name: "EnemyBoss", Id: "enemy-id" }] });
+    }
+    if (s.includes("/players/alice-id/kills")) return fakeResponse(200, [official]);
+    if (s.includes("/players/enemy-id/deaths")) return fakeResponse(200, [official]);
+    throw new Error("URL inesperada: " + s);
+  });
+
+  let invalidations = 0;
+  const fakePool = {
+    async query() { return { rows: [{ cta_event_id: "cta-1" }] }; }
+  };
+
+  await Promise.all(eligible.map(item => killFame.queueEnrichment({
+    pool: fakePool,
+    eventId: item.eventId,
+    payload: item.payload,
+    occurredAt: item.occurredAt,
+    onResolved: () => { invalidations++; }
+  })));
+
+  await new Promise(resolve => setTimeout(resolve, 20));
+
+  assert.ok(requests <= 4, "30 observações do mesmo kill devem gerar no máximo 4 requests; observado " + requests);
+  assert.equal(invalidations, 1, "resoluções do mesmo CTA devem coalescer em uma invalidação por janela");
+  ok("300 mortes: 270 inimigas filtradas, kill multi-observer deduplicado e 1 invalidação coalescida");
+}
+
 async function main() {
   if (!process.env.DATABASE_URL || !/127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL)) {
     throw new Error("TESTE RECUSADO: DATABASE_URL precisa apontar para PostgreSQL local temporário.");
@@ -286,6 +368,7 @@ async function main() {
   await testSingleFlightAnd429();
   await testConcurrencyLimit();
   testConservativeMatch();
+  await testEnemyFilteringDedupAndCoalesce();
   await testPersistenceAndNoRegression();
 
   console.log("\n✅ Kill Fame suite: TODOS OS TESTES PASSARAM");
