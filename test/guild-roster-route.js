@@ -47,6 +47,17 @@ function testBrowserScriptSyntax() {
   ok("JavaScript do navegador em web.js tem sintaxe válida");
 }
 
+function testMobileAndMuralShell() {
+  const page = String(web.__test.PAGE || "");
+  assert.ok(page.includes('id="mobile-nav"'), "War Room mobile precisa manter menu de navegação");
+  assert.ok(page.includes("overflow-x:hidden"), "shell mobile precisa impedir overflow horizontal da página");
+  assert.ok(page.includes("100dvh"), "modais mobile precisam respeitar viewport dinâmica");
+  assert.ok(page.includes("SepoDeMadeiraRs") && page.includes("VanWes"), "mural precisa manter vencedores do attendance");
+  assert.ok(page.includes("IMORTAIS-Combat-Client-Setup-v0.5.9.exe"), "mural precisa manter download estável do Combat Client");
+  assert.ok(page.includes("CTA War Room · central operacional da IMORTAIS"), "mural precisa manter card de funcionalidades do War Room");
+  ok("War Room mobile e comunicados fixos do mural presentes");
+}
+
 async function seedRouteScenario() {
   await db.pool.query("TRUNCATE TABLE voice_presence, cta_signups, cta_events RESTART IDENTITY CASCADE");
 
@@ -147,6 +158,7 @@ async function main() {
   await db.init();
   await telemetry.initSchema(db.pool);
   testBrowserScriptSyntax();
+  testMobileAndMuralShell();
   await testRouteAccessAndResponses();
   console.log("\n✅ Guild roster route suite: TODOS OS TESTES PASSARAM");
 }
