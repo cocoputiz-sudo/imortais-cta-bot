@@ -46,6 +46,7 @@ let resolvedCoalesceMs = DEFAULT_RESOLVED_COALESCE_MS;
 
 let fetchImpl = (...args) => fetch(...args);
 let sleepImpl = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+let nowImpl = () => Date.now();
 let retryMs = [...DEFAULT_RETRY_MS];
 
 function normName(v) {
@@ -353,6 +354,23 @@ function semanticPairKey(payload) {
   return killer && victim ? killer + "|" + victim : "";
 }
 
+function sweepSemanticEnrichments(now = nowImpl()) {
+  for (const [key, entry] of semanticEnrichments) {
+    if (!entry || entry.expiresAt <= now) semanticEnrichments.delete(key);
+  }
+}
+
+function rememberSemanticEnrichment(pairKey, occurredMs, promise) {
+  if (!pairKey || !Number.isFinite(occurredMs)) return;
+  const now = nowImpl();
+  sweepSemanticEnrichments(now);
+  semanticEnrichments.set(pairKey, {
+    occurredMs,
+    promise,
+    expiresAt: now + SEMANTIC_DEDUP_MS,
+  });
+}
+
 function scheduleResolved(ctaEventId, callback, patch) {
   const key = String(ctaEventId || "");
   if (!key || typeof callback !== "function") return;
@@ -379,6 +397,7 @@ function queueEnrichment(args) {
   const pairKey = semanticPairKey(args.payload);
   const occurredMs = new Date(args?.occurredAt).getTime();
   if (pairKey && Number.isFinite(occurredMs)) {
+    sweepSemanticEnrichments();
     const recent = semanticEnrichments.get(pairKey);
     if (recent && Math.abs(occurredMs - recent.occurredMs) <= SEMANTIC_DEDUP_MS) {
       return recent.promise;
@@ -402,7 +421,7 @@ function queueEnrichment(args) {
 
   enrichmentFlights.set(key, promise);
   if (pairKey && Number.isFinite(occurredMs)) {
-    semanticEnrichments.set(pairKey, { occurredMs, promise });
+    rememberSemanticEnrichment(pairKey, occurredMs, promise);
   }
   return promise;
 }
@@ -422,6 +441,7 @@ function resetForTests() {
   resolvedCoalesceMs = DEFAULT_RESOLVED_COALESCE_MS;
   fetchImpl = (...args) => fetch(...args);
   sleepImpl = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  nowImpl = () => Date.now();
   retryMs = [...DEFAULT_RETRY_MS];
 }
 
@@ -437,7 +457,11 @@ module.exports = {
     resetForTests,
     setFetch: fn => { fetchImpl = fn; },
     setSleep: fn => { sleepImpl = fn; },
+    setNow: fn => { nowImpl = typeof fn === "function" ? fn : (() => Date.now()); },
     setRetryMs: values => { retryMs = Array.isArray(values) ? values.map(Number) : [...DEFAULT_RETRY_MS]; },
+    rememberSemanticEnrichment,
+    sweepSemanticEnrichments,
+    semanticEnrichmentSize: () => semanticEnrichments.size,
     setResolvedCoalesceMs: value => { resolvedCoalesceMs = Math.max(1, Number(value) || DEFAULT_RESOLVED_COALESCE_MS); },
     concurrency: () => ({ active: activeRequests, queued: requestQueue.length, max: API_CONCURRENCY }),
     pendingResolved: () => resolvedByCta.size,
