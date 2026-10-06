@@ -23,6 +23,7 @@ const roaming = require("./roaming");
 const castelo = require("./castelo");
 const locale = require("./locale");
 const { ctaPingTime } = require("./ctatime");
+const { parseConsolidationSteps, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
 const CALLER_WEAPONS = Object.freeze(["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA", "HAND OF JUSTICE"]);
@@ -1083,7 +1084,6 @@ async function onLooter(interaction) {
 }
 
 const notifyTimers = new Map();
-const ctaFrozen = new Set();
 const notifyPending = new Map();
 
 async function applyReallocation(ev, guild, focusUserId) {
@@ -1091,7 +1091,7 @@ async function applyReallocation(ev, guild, focusUserId) {
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
 
-  if (ctaFrozen.has(String(fresh.id))) {
+  if (fresh.frozen_at) {
     // CTA travado: ninguém que já tem vaga é movido. Só encaixamos quem está
     // sem vaga (reservas / "Aguardando PT") nas vagas abertas das PTs abertas.
     // Cobre tanto uma inscrição nova (focusUserId) quanto abrir PT nova via /cta_show.
@@ -1946,9 +1946,9 @@ async function applyConsolidation(ev, guild) {
 async function slashConsolidar(interaction, ev) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await applyConsolidation(ev, interaction.guild);
+  await db.markCtaFrozen(ev.id);
   await interaction.editReply({ content: `🧲 Participantes amontoados nas PTs da frente (CTA ${ev.time_label}).` });
   await logStaff(interaction.guild, `🧲 ${interaction.user} disparou o amontoamento · CTA ${ev.time_label}`);
-  ctaFrozen.add(String(ev.id));
 }
 
 // ==================  ROAMING  =============================================
@@ -3334,7 +3334,6 @@ async function checkReminders() {
   } catch (e) { console.error("reminders:", e); }
 }
 
-const consolidWarned = new Map();
 async function checkConsolidation() {
   try {
     const guilds = client.guilds.cache;
@@ -3345,7 +3344,8 @@ async function checkConsolidation() {
         if (!ping) continue;
         const saida = new Date(ping.getTime() + 40 * 60000);
         const minAteSaida = Math.round((saida.getTime() - Date.now()) / 60000);
-        const done = consolidWarned.get(String(ev.id)) || new Set();
+        const done = parseConsolidationSteps(ev.consolid_warned);
+        const steps = consolidationStepsToRun(minAteSaida, done, ev.status);
 
         const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
         const briefText = ctaBriefText(await resolveCtaBrief(ev));
@@ -3358,25 +3358,26 @@ async function checkConsolidation() {
           await pingMainChannel(ev, full);
         };
 
-        if (minAteSaida <= 25 && minAteSaida > 20 && !done.has(25)) {
-          await avisar(`${mention} ⚠️ ${ctaLabel} — precisamos ajustar as vagas faltantes!`);
-          done.add(25);
+        for (const step of steps) {
+          let text = null;
+
+          if (step === 25) {
+            text = `${mention} ⚠️ ${ctaLabel} — precisamos ajustar as vagas faltantes!`;
+          } else if (step === 20) {
+            text = `${mention} ⚠️ ${ctaLabel} — ajustem o quanto antes pra não haver lacunas na sua equipe!`;
+          } else if (step === 15) {
+            text = `${mention} 🧲 ${ctaLabel} — amontoamento de participantes disparado.`;
+          } else if (step === 10) {
+            await applyConsolidation(ev, client.guilds.cache.get(gid));
+            await db.markCtaFrozen(ev.id);
+            text = `${mention} 🔒 ${ctaLabel} — formação consolidada e travada. Entrem nas suas vagas!`;
+          }
+
+          // Persistimos logo depois da ação e antes do ping. Em caso de queda
+          // nesse intervalo, é melhor perder um aviso do que mencionar @Imortal duas vezes.
+          const marked = await db.markConsolidationWarned(ev.id, step);
+          if (marked && text) await avisar(text);
         }
-        if (minAteSaida <= 20 && minAteSaida > 15 && !done.has(20)) {
-          await avisar(`${mention} ⚠️ ${ctaLabel} — ajustem o quanto antes pra não haver lacunas na sua equipe!`);
-          done.add(20);
-        }
-        if (minAteSaida <= 15 && minAteSaida > 10 && !done.has(15)) {
-          await avisar(`${mention} 🧲 ${ctaLabel} — amontoamento de participantes disparado.`);
-          done.add(15);
-        }
-        if (minAteSaida <= 10 && minAteSaida > -5 && !done.has(10)) {
-          await applyConsolidation(ev, client.guilds.cache.get(gid));
-          ctaFrozen.add(String(ev.id));
-          await avisar(`${mention} 🔒 ${ctaLabel} — formação consolidada e travada. Entrem nas suas vagas!`);
-          done.add(10);
-        }
-        consolidWarned.set(String(ev.id), done);
       }
     }
   } catch (e) { console.error("consolidation:", e); }
