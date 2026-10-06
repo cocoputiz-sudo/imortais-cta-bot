@@ -15,6 +15,7 @@ on:
       - "test/presence-forces.js"
       - "test/scout-area-presence.js"
       - "test/combat-presence-cache.js"
+      - "test/attendance-batch.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -62,3 +63,5 @@ jobs:
         run: node test/scout-area-presence.js
       - name: Combat presence cache
         run: node test/combat-presence-cache.js
+      - name: Attendance batch
+        run: node test/attendance-batch.js
