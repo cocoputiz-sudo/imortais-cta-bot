@@ -196,11 +196,14 @@ function classifyRoster({ members, signups = [], voice = [], exemptRoles = DEFAU
   }
 
   const unmatched = new Map();
-  for (const [k, s] of pingByKey) if (!memberKeys.has(k)) unmatched.set(k, { name: s.username, pinged: true, inCall: callByKey.has(k), userId: s.user_id || null });
+  for (const [k, s] of pingByKey) if (!memberKeys.has(k)) unmatched.set(k, {
+    name: s.username, pinged: true, inCall: callByKey.has(k), userId: s.user_id || null,
+    weapon: s.weapon || null, roles: [],
+  });
   for (const [k, v] of callByKey) if (!memberKeys.has(k)) {
     const cur = unmatched.get(k);
     if (cur) cur.inCall = true;
-    else unmatched.set(k, { name: v.username, pinged: false, inCall: true, userId: v.user_id || null });
+    else unmatched.set(k, { name: v.username, pinged: false, inCall: true, userId: v.user_id || null, weapon: null, roles: [] });
   }
   groups.semCorrespondencia = [...unmatched.values()];
 
