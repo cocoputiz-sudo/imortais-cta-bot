@@ -1108,6 +1108,7 @@ const PAGE = `<!doctype html>
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var openEventsCache=[];
   var lootSelectedEvent=null;
+  var lootSelectedDay=null;
   var _viewCache={};
   function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
   var combatSelectedEvent=null;
@@ -2471,6 +2472,26 @@ const PAGE = `<!doctype html>
           return;
         }
 
+        function lootDayKey(x){
+          var stamp=x&& (x.ctaAt||x.createdAt||x.closedAt);
+          return fmtUtcDate(stamp);
+        }
+
+        var days=[], byDay={};
+        ctas.forEach(function(x){
+          var day=lootDayKey(x);
+          if(!byDay[day]){ byDay[day]=[]; days.push(day); }
+          byDay[day].push(x);
+        });
+
+        var selectedEventDay=lootDayKey(selected);
+        if(!lootSelectedDay || !byDay[lootSelectedDay]) lootSelectedDay=selectedEventDay || days[0] || null;
+
+        var dayCtas=(lootSelectedDay&&byDay[lootSelectedDay])?byDay[lootSelectedDay]:[];
+        if(dayCtas.length && !dayCtas.some(function(x){return String(x.id)===String(selected.id);})){
+          selected=dayCtas[0];
+        }
+
         lootSelectedEvent=String(selected.id);
 
         fetchTelemetry('/api/telemetry/loot?event='+encodeURIComponent(lootSelectedEvent)).then(function(d){
@@ -2482,13 +2503,25 @@ const PAGE = `<!doctype html>
             ? '<div class="preview" style="color:#8ce5ad;background:#10241a;border-color:#214f31">🔒 Loot observado pelos Combat Clients · entram IMORTAIS, IMORTAIS ACADEMY e IMORTAIS 2; telemetria antiga sem guild usa a formação/party do CTA</div>'
             : '';
 
-          var picker='<div class="panel"><h3>CTA PARA CONFERÊNCIA</h3><div class="lootctas">'
-            +ctas.map(function(x){
-              var on=String(x.id)===String(lootSelectedEvent);
-              var label=ctaHistoryLabel(x)+(x.status==='closed'?' · encerrado':' · ao vivo');
-              return '<button class="tab loot-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+esc(label)+' <span style="color:var(--muted)">('+(x.lootEventsRaw==null?x.lootEvents:x.lootEventsRaw)+' brutos)</span></button>';
+          var picker='<div class="panel combat-picker"><h3 style="margin-top:0">CTA PARA CONFERÊNCIA</h3>'
+            +'<div class="combat-picker-row"><div class="combat-picker-label">DIA</div>'
+            +days.map(function(day){
+              var on=day===lootSelectedDay;
+              var qtd=(byDay[day]||[]).length;
+              return '<button class="tab loot-day'+(on?' on':'')+'" data-day="'+esc(day)+'">'+esc(day)+' <span style="color:var(--muted)">('+qtd+')</span></button>';
             }).join('')
-            +'</div><div class="note" style="margin-top:10px">CTAs encerrados ficam disponíveis aqui por 3 dias para conferência de loot.</div></div>';
+            +'</div>'
+            +'<div class="combat-picker-row"><div class="combat-picker-label">CTA UTC</div>'
+            +dayCtas.map(function(x){
+              var on=String(x.id)===String(lootSelectedEvent);
+              var stamp=x.ctaAt||x.createdAt||x.closedAt;
+              var time=String(x.time||'').trim() || fmtUtcTime(stamp,false);
+              var status=x.status==='closed'?'encerrado':'ao vivo';
+              var raw=x.lootEventsRaw==null?x.lootEvents:x.lootEventsRaw;
+              return '<button class="tab loot-cta'+(on?' on':'')+'" data-id="'+esc(x.id)+'">'+esc(time)+' · '+esc(status)+' <span style="color:var(--muted)">· '+fmtS(raw||0)+' brutos</span></button>';
+            }).join('')
+            +'</div>'
+            +'<div class="note" style="margin-top:9px">Selecione o dia e depois o CTA. CTAs encerrados ficam disponíveis aqui por 3 dias para conferência de loot.</div></div>';
 
           var html=picker+liveBadge(lootNote)+filterBadge+'<div class="modhead">📦 Registros &amp; Loot · '+esc(ctaHistoryLabel(selected))+'</div>'
             +'<div class="statgrid">'
@@ -2503,9 +2536,21 @@ const PAGE = `<!doctype html>
           if(d.meta&&d.meta.note) html+='<div class="note">'+esc(d.meta.note)+'</div>';
           setView('view-loot',html);
 
+          Array.prototype.forEach.call(document.querySelectorAll('.loot-day'),function(b){
+            b.onclick=function(){
+              var day=b.getAttribute('data-day');
+              lootSelectedDay=day;
+              var first=(byDay[day]||[])[0]||null;
+              if(first) lootSelectedEvent=String(first.id);
+              renderLoot(false);
+            };
+          });
+
           Array.prototype.forEach.call(document.querySelectorAll('.loot-cta'),function(b){
             b.onclick=function(){
               lootSelectedEvent=b.getAttribute('data-id');
+              var chosen=ctas.find(function(x){return String(x.id)===String(lootSelectedEvent);});
+              if(chosen) lootSelectedDay=lootDayKey(chosen);
               renderLoot(false);
             };
           });
