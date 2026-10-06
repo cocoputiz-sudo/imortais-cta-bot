@@ -8,6 +8,7 @@ process.env.PGSSL = "disable";
 process.env.PORT = String(39000 + (process.pid % 1000));
 
 const db = require("../src/db");
+const telemetry = require("../src/telemetry");
 const web = require("../src/web");
 
 const G = process.env.GUILD_ID || "guild-test";
@@ -144,6 +145,7 @@ async function main() {
   }
 
   await db.init();
+  await telemetry.initSchema(db.pool);
   testBrowserScriptSyntax();
   await testRouteAccessAndResponses();
   console.log("\n✅ Guild roster route suite: TODOS OS TESTES PASSARAM");
