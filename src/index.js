@@ -22,6 +22,7 @@ const navigation = require("./navigation");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const locale = require("./locale");
+const { ctaPingTime } = require("./ctatime");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
 const CALLER_WEAPONS = Object.freeze(["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA", "HAND OF JUSTICE"]);
@@ -3340,10 +3341,8 @@ async function checkConsolidation() {
     for (const [gid] of guilds) {
       const abertos = await db.getOpenEvents(gid);
       for (const ev of abertos) {
-        const m = /^(\d{1,2}):(\d{2})$/.exec((ev.time_label || "").trim());
-        if (!m) continue;
-        const base = new Date(ev.created_at);
-        const ping = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), +m[1], +m[2], 0, 0));
+        const ping = ctaPingTime(ev);
+        if (!ping) continue;
         const saida = new Date(ping.getTime() + 40 * 60000);
         const minAteSaida = Math.round((saida.getTime() - Date.now()) / 60000);
         const done = consolidWarned.get(String(ev.id)) || new Set();
