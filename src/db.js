@@ -684,34 +684,6 @@ async function getPresenceInRange(guildId, startUTC, endUTC, channelKinds = ["pr
   return rows;
 }
 
-async function getPresenceForEventWindows(guildId, windows, channelKinds = ["prep", "bomb"]) {
-  const rows = Array.isArray(windows) ? windows.filter(w => w && w.eventId != null && w.start && w.end) : [];
-  const kinds = [...new Set((channelKinds || []).map(x => String(x || "").trim()).filter(Boolean))];
-  if (!rows.length || !kinds.length) return [];
-
-  const eventIds = rows.map(w => Number(w.eventId));
-  const starts = rows.map(w => new Date(w.start));
-  const ends = rows.map(w => new Date(w.end));
-
-  const { rows: result } = await pool.query(
-    `WITH windows AS (
-       SELECT *
-       FROM unnest($2::bigint[], $3::timestamptz[], $4::timestamptz[])
-         AS w(event_id, start_utc, end_utc)
-     )
-     SELECT w.event_id AS attendance_event_id, vp.*
-       FROM windows w
-       JOIN voice_presence vp
-         ON vp.guild_id=$1
-        AND vp.channel_kind = ANY($5::text[])
-        AND vp.joined_at < w.end_utc
-        AND (vp.left_at IS NULL OR vp.left_at > w.start_utc)
-      ORDER BY w.event_id ASC, vp.channel_kind ASC, vp.user_id ASC, vp.joined_at ASC`,
-    [guildId, eventIds, starts, ends, kinds]
-  );
-  return result;
-}
-
 async function setEventIgnored(eventId, ignored) {
   await pool.query(`UPDATE cta_events SET ignored=$2 WHERE id=$1`, [eventId, !!ignored]);
 }
@@ -1254,7 +1226,7 @@ module.exports = {
   pool, init, createEvent, setThread, setRosterMsg, setNumParties, setPartyList, parsePartyList, parseReallocationLocks, setReallocationLocks, setEventBrief, getEvent, getEventByThread,
   setBombThread, setBombPingMsg, upsertBombConfirm, getBombConfirms, getBombConfirmsForEvents, setBombComp, setBombRoster,
   upsertBombSignup, getBombSignups, deleteBombSignup,
-  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getPresenceInRange, getPresenceForEventWindows, getEventsInRange, setEventIgnored,
+  voiceJoin, voiceLeave, voiceCloseAllOpen, getPresenceInWindow, getPresenceInRange, getEventsInRange, setEventIgnored,
   getCurrentSeason, startSeason, finishSeason,
   saveSeasonResults, getLastSeasonResults, getLastEndedSeason,
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
