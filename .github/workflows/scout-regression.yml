@@ -9,6 +9,7 @@ on:
       - "src/guildroster.js"
       - "src/telemetry.js"
       - "src/ctatime.js"
+      - "src/consolidation-state.js"
       - "src/killFame.js"
       - "src/season.js"
       - "src/db.js"
@@ -25,6 +26,7 @@ on:
       - "test/kill-fame.js"
       - "test/ingest-route.js"
       - "test/cta-time.js"
+      - "test/cta-freeze.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -86,7 +88,9 @@ jobs:
         run: node test/ingest-route.js
       - name: CTA time rollover
         run: node test/cta-time.js
-      - name: Prova negativa - ingest falha com escopo antigo
+      - name: CTA freeze persistence
+        run: node test/cta-freeze.js
+      - name: Prova negativa - Kill Fame falha com escopo pós-resposta quebrado
         shell: bash
         run: |
           tmp="$(mktemp -d)"
@@ -96,27 +100,92 @@ jobs:
           const fs = require("fs");
           const path = "src/telemetry.js";
           let src = fs.readFileSync(path, "utf8");
+          const before = src;
           src = src.replace(
-            '      let inserted = 0, duplicate = 0;\n      const fameEnrichmentQueue = [];\n      const client = await pool.connect();',
-            '      let inserted = 0, duplicate = 0;\n      const client = await pool.connect();'
+            '      if (fameEnrichmentQueue?.length) {',
+            '      if (missingFameEnrichmentQueue?.length) {'
           );
-          src = src.replace(
-            '          const presenceProbes = [];\n          const zoneChanges = [];',
-            '          const presenceProbes = [];\n          const zoneChanges = [];\n          const fameEnrichmentQueue = [];'
-          );
+          if (src === before) throw new Error("mutação Kill Fame não aplicada");
           fs.writeFileSync(path, src);
           NODE
           set +e
-          node test/ingest-route.js > mutation-ingest.log 2>&1
+          node test/ingest-route.js > mutation-ingest-killfame.log 2>&1
           rc=$?
           set -e
-          cat mutation-ingest.log
+          cat mutation-ingest-killfame.log
           if [ "$rc" -eq 0 ]; then
-            echo "ERRO: ingest-route não detectou o bug fameEnrichmentQueue fora de escopo"
+            echo "ERRO: ingest-route não detectou o bug de escopo pós-resposta"
             exit 1
           fi
-          grep -q "fameEnrichmentQueue is not defined" mutation-ingest.log
-          echo "✅ prova negativa: ingest-route falha ao restaurar o bug de escopo"
+          grep -q "missingFameEnrichmentQueue" mutation-ingest-killfame.log
+          echo "✅ prova negativa: ingest-route falha ao quebrar o escopo pós-resposta"
+      - name: Prova negativa - ingest malformado volta a derrubar o lote
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src/telemetry.js";
+          let src = fs.readFileSync(path, "utf8");
+          const before = src;
+          src = src.replace(
+            '  return String(value ?? "").replace(/\\u0000/g, "");',
+            '  return String(value ?? "");'
+          );
+          src = src.replace(
+            '  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();',
+            '  return value;'
+          );
+          src = src.replace(
+            '          } catch (fastError) {\n            await client.query("ROLLBACK").catch(() => {});\n\n            // Fallback isolado:',
+            '          } catch (fastError) {\n            await client.query("ROLLBACK").catch(() => {});\n            throw fastError;\n\n            // Fallback isolado:'
+          );
+          if (src === before) throw new Error("mutação do ingest malformado não aplicada");
+          fs.writeFileSync(path, src);
+          NODE
+          set +e
+          node test/ingest-route.js > mutation-malformed-ingest.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-malformed-ingest.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: ingest-route não detectou a regressão de lote fatal"
+            exit 1
+          fi
+          echo "✅ prova negativa: ingest-route falha ao restaurar lote fatal sem saneamento/fallback"
+
+      - name: Prova negativa - CTA perde trava sem persistência
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src/db.js";
+          let src = fs.readFileSync(path, "utf8");
+          const start = src.indexOf("async function markCtaFrozen");
+          const end = src.indexOf("\n\nasync function setThread", start);
+          if (start < 0 || end < 0) throw new Error("funções de persistência não encontradas");
+          src = src.slice(0, start) +
+            'async function markCtaFrozen() { return null; }\n\n' +
+            'async function markConsolidationWarned() { return true; }' +
+            src.slice(end);
+          fs.writeFileSync(path, src);
+          NODE
+          set +e
+          node test/cta-freeze.js > mutation-cta-freeze.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-cta-freeze.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: cta-freeze não detectou a perda de persistência"
+            exit 1
+          fi
+          echo "✅ prova negativa: cta-freeze falha ao remover a persistência"
+
       - name: Prova negativa - CTA time falha com cálculo antigo
         shell: bash
         run: |

@@ -21,7 +21,7 @@ function ok(name) {
 
 async function resetDb() {
   await db.pool.query(
-    "TRUNCATE TABLE albion_telemetry_events, albion_telemetry_devices, albion_telemetry_agent_tokens, " +
+    "TRUNCATE TABLE albion_guild_presence, albion_telemetry_events, albion_telemetry_devices, albion_telemetry_agent_tokens, " +
     "cta_signups, bomb_confirms, voice_presence, cta_events RESTART IDENTITY CASCADE"
   );
 }
@@ -46,11 +46,49 @@ async function postIngest(base, events, deviceId = "ingest-route-device") {
   return { status: response.status, json };
 }
 
+async function withPoolQueryObserver(observer, fn) {
+  const originalConnect = db.pool.connect;
+  db.pool.connect = function (...args) {
+    // pool.query() usa connect(callback) internamente; não interceptamos esse caminho.
+    // O ingest usa await pool.connect(), que é o caminho que queremos observar.
+    if (typeof args[0] === "function") {
+      return originalConnect.apply(this, args);
+    }
+    return originalConnect.apply(this, args).then((client) => {
+      const originalQuery = client.query;
+      const originalRelease = client.release;
+
+    client.query = function (...queryArgs) {
+      const first = queryArgs[0];
+      const sql = typeof first === "string" ? first : String(first?.text || "");
+      const params = Array.isArray(queryArgs[1]) ? queryArgs[1] : [];
+      observer({ sql, params });
+      return originalQuery.apply(client, queryArgs);
+    };
+
+    client.release = function (...releaseArgs) {
+      client.query = originalQuery;
+      client.release = originalRelease;
+      return originalRelease.apply(client, releaseArgs);
+    };
+
+      return client;
+    });
+  };
+
+  try {
+    return await fn();
+  } finally {
+    db.pool.connect = originalConnect;
+  }
+}
+
 async function testHealthyBatchHasNoPostResponseFailure(base) {
   await resetDb();
 
   const errors = [];
   const rejections = [];
+  let savepointStatements = 0;
   const originalError = console.error;
   const onUnhandled = (reason) => rejections.push(reason);
 
@@ -60,17 +98,38 @@ async function testHealthyBatchHasNoPostResponseFailure(base) {
   process.on("unhandledRejection", onUnhandled);
 
   try {
-    const result = await postIngest(base, [{
-      eventId: "healthy-heartbeat-1",
-      type: "heartbeat",
-      occurredAt: new Date().toISOString(),
-      playerName: "Alice",
-      payload: { source: "ingest-route-test" },
-    }]);
+    const result = await withPoolQueryObserver(({ sql }) => {
+      if (/\bSAVEPOINT\b/i.test(sql)) savepointStatements++;
+    }, () => postIngest(base, [
+      {
+        eventId: "healthy-heartbeat-1",
+        type: "heartbeat",
+        occurredAt: new Date().toISOString(),
+        playerName: "Alice",
+        payload: { source: "ingest-route-test-1" },
+      },
+      {
+        eventId: "healthy-heartbeat-2",
+        type: "heartbeat",
+        occurredAt: new Date().toISOString(),
+        playerName: "Alice",
+        payload: { source: "ingest-route-test-2" },
+      },
+      {
+        eventId: "healthy-heartbeat-3",
+        type: "heartbeat",
+        occurredAt: new Date().toISOString(),
+        playerName: "Alice",
+        payload: { source: "ingest-route-test-3" },
+      },
+    ]));
 
     assert.equal(result.status, 200, "lote saudável precisa responder 200");
     assert.equal(result.json.ok, true);
-    assert.equal(result.json.inserted, 1);
+    assert.equal(result.json.inserted, 3);
+    assert.equal(result.json.duplicate, 0);
+    assert.equal(result.json.rejected, 0);
+    assert.equal(savepointStatements, 0, "lote 100% saudável não pode usar SAVEPOINT por evento");
 
     await new Promise((resolve) => setTimeout(resolve, 200));
 
@@ -81,7 +140,171 @@ async function testHealthyBatchHasNoPostResponseFailure(base) {
     console.error = originalError;
   }
 
-  ok("ingest saudável: HTTP 200, zero console.error e zero unhandledRejection");
+  ok("ingest saudável: caminho rápido, HTTP 200, zero SAVEPOINT e zero unhandledRejection");
+}
+
+async function testSanitizesNulAndInvalidOccurredAt(base) {
+  await resetDb();
+
+  const rejections = [];
+  const onUnhandled = (reason) => rejections.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+
+  const windowsPath = "C:\\Games\\Albion Online\\game_x64";
+  const batch = [
+    {
+      eventId: "good-a",
+      type: "heartbeat",
+      occurredAt: "2026-10-06T20:00:00.000Z",
+      playerName: "Alice",
+      payload: { value: "ok-a" },
+    },
+    {
+      eventId: "good-b",
+      type: "zone_change",
+      occurredAt: "2026-10-06T20:00:01.000Z",
+      playerName: "Alice",
+      payload: { cluster: "Thunderrock Upland" },
+    },
+    {
+      eventId: "nul\u0000-event",
+      type: "heart\u0000beat",
+      occurredAt: "2026-10-06T20:00:02.000Z",
+      playerName: "Al\u0000ice",
+      payload: {
+        text: "ab\u0000cd",
+        nested: { value: "x\u0000y", path: windowsPath },
+        array: ["left\u0000right", "\\u0000 literal precisa continuar literal"],
+      },
+    },
+    {
+      eventId: "invalid-date",
+      type: "heartbeat",
+      occurredAt: "data-invalida",
+      playerName: "Alice",
+      payload: { value: "server-time" },
+    },
+  ];
+
+  try {
+    const first = await postIngest(base, batch, "ingest-route-sanitize-device");
+    assert.equal(first.status, 200);
+    assert.equal(first.json.ok, true);
+    assert.equal(first.json.inserted, 4);
+    assert.equal(first.json.duplicate, 0);
+    assert.equal(first.json.rejected, 0);
+
+    const { rows } = await db.pool.query(
+      "SELECT event_id, type, occurred_at, player_name, payload FROM albion_telemetry_events ORDER BY event_id"
+    );
+    assert.equal(rows.length, 4, "todos os eventos saneáveis precisam ser gravados");
+
+    const nul = rows.find((row) => row.event_id === "nul-event");
+    assert.ok(nul, "NUL no event_id deve ser removido");
+    assert.equal(nul.type, "heartbeat");
+    assert.equal(nul.player_name, "Alice");
+    assert.equal(nul.payload.text, "abcd");
+    assert.equal(nul.payload.nested.value, "xy");
+    assert.equal(nul.payload.nested.path, windowsPath, "barras invertidas legítimas precisam ser preservadas");
+    assert.equal(nul.payload.array[0], "leftright");
+    assert.equal(nul.payload.array[1], "\\u0000 literal precisa continuar literal");
+
+    const invalidDate = rows.find((row) => row.event_id === "invalid-date");
+    assert.ok(invalidDate);
+    const occurredMs = new Date(invalidDate.occurred_at).getTime();
+    assert.ok(Number.isFinite(occurredMs), "occurredAt inválido precisa virar data válida do servidor");
+    assert.ok(Math.abs(Date.now() - occurredMs) < 30_000, "occurredAt inválido precisa usar horário atual do servidor");
+
+    const second = await postIngest(base, batch, "ingest-route-sanitize-device");
+    assert.equal(second.status, 200);
+    assert.equal(second.json.inserted, 0);
+    assert.equal(second.json.duplicate, 4);
+    assert.equal(second.json.rejected, 0);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(rejections, [], "saneamento/reenvio não pode gerar unhandledRejection");
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled);
+  }
+
+  ok("ingest saneia NUL/data inválida e o reenvio vira 100% duplicate");
+}
+
+async function testFallbackIsolatesBadPresenceProbe(base) {
+  await resetDb();
+
+  const warnings = [];
+  const rejections = [];
+  let savepointStatements = 0;
+  const originalWarn = console.warn;
+  const onUnhandled = (reason) => rejections.push(reason);
+  console.warn = (...args) => warnings.push(args.map(String).join(" "));
+  process.on("unhandledRejection", onUnhandled);
+
+  try {
+    const result = await withPoolQueryObserver(({ sql, params }) => {
+      if (/\bSAVEPOINT\b/i.test(sql)) savepointStatements++;
+      if (/INSERT INTO albion_guild_presence/i.test(sql) && params[1] === "BadProbe") {
+        const error = new Error("synthetic invalid presence probe");
+        error.code = "22007";
+        throw error;
+      }
+    }, () => postIngest(base, [
+      {
+        eventId: "fallback-good-1",
+        type: "heartbeat",
+        occurredAt: new Date().toISOString(),
+        playerName: "Alice",
+        payload: { source: "good-1" },
+      },
+      {
+        eventId: "fallback-bad-probe",
+        type: "guild_presence_probe",
+        occurredAt: new Date().toISOString(),
+        playerName: "Alice",
+        payload: {
+          eventName: "GuildPlayerUpdated",
+          parameters: {
+            "0": { previewBase64: "player-id" },
+            "1": "BadProbe",
+            "2": true,
+            "3": 638953440000000000,
+          },
+        },
+      },
+      {
+        eventId: "fallback-good-2",
+        type: "heartbeat",
+        occurredAt: new Date().toISOString(),
+        playerName: "Alice",
+        payload: { source: "good-2" },
+      },
+    ], "ingest-route-fallback-device"));
+
+    assert.equal(result.status, 200, "probe ruim não pode derrubar o lote");
+    assert.equal(result.json.ok, true);
+    assert.equal(result.json.inserted, 2);
+    assert.equal(result.json.duplicate, 0);
+    assert.equal(result.json.rejected, 1);
+    assert.ok(savepointStatements > 0, "fallback precisa usar SAVEPOINT por evento");
+
+    const { rows } = await db.pool.query(
+      "SELECT event_id FROM albion_telemetry_events ORDER BY event_id"
+    );
+    assert.deepEqual(rows.map((row) => row.event_id), ["fallback-good-1", "fallback-good-2"]);
+
+    assert.equal(warnings.length, 1, "rejeições do lote precisam gerar uma única linha resumida");
+    assert.match(warnings[0], /rejected=1/);
+    assert.doesNotMatch(warnings[0], /parameters|previewBase64|payload/i, "log não pode imprimir payload");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(rejections, [], "fallback não pode gerar unhandledRejection");
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled);
+    console.warn = originalWarn;
+  }
+
+  ok("fallback: probe ruim é rejeitada isoladamente e eventos bons são gravados");
 }
 
 async function testLethalDeathQueuesKillFame(base) {
@@ -131,6 +354,7 @@ async function testLethalDeathQueuesKillFame(base) {
 
     assert.equal(result.status, 200);
     assert.equal(result.json.ok, true);
+    assert.equal(result.json.rejected, 0);
     assert.equal(String(result.json.ctaEventId), String(ev.id));
 
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -162,6 +386,8 @@ async function main() {
 
   try {
     await testHealthyBatchHasNoPostResponseFailure(base);
+    await testSanitizesNulAndInvalidOccurredAt(base);
+    await testFallbackIsolatesBadPresenceProbe(base);
     await testLethalDeathQueuesKillFame(base);
     console.log("\n✅ Ingest route suite: TODOS OS TESTES PASSARAM");
   } finally {
