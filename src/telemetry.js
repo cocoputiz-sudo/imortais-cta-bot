@@ -3152,6 +3152,67 @@ function dotNetTicksToDate(value, fallback) {
   return Number.isNaN(d.getTime()) ? (fallback instanceof Date ? fallback : new Date(fallback)) : d;
 }
 
+function stripTelemetryNul(value) {
+  return String(value ?? "").replace(/\u0000/g, "");
+}
+
+function sanitizeTelemetryPayload(value) {
+  if (typeof value === "string") return value.replace(/\u0000/g, "");
+  if (Array.isArray(value)) return value.map(sanitizeTelemetryPayload);
+  if (!value || typeof value !== "object") return value;
+
+  const out = {};
+  for (const [key, nested] of Object.entries(value)) {
+    out[String(key).replace(/\u0000/g, "")] = sanitizeTelemetryPayload(nested);
+  }
+  return out;
+}
+
+function normalizeTelemetryOccurredAt(value) {
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
+}
+
+function sanitizeTelemetryEvent(event) {
+  const source = event && typeof event === "object" ? event : {};
+  const rawPlayerName = source.playerName ?? source.PlayerName;
+  return {
+    eventId: stripTelemetryNul(source.eventId ?? source.EventId).trim(),
+    type: stripTelemetryNul(source.type ?? source.Type).trim(),
+    occurredAt: normalizeTelemetryOccurredAt(source.occurredAt ?? source.OccurredAt),
+    playerName: rawPlayerName == null ? null : stripTelemetryNul(rawPlayerName),
+    payload: sanitizeTelemetryPayload(source.payload ?? source.Payload ?? {}),
+  };
+}
+
+function telemetryRejectReason(error) {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "evento inválido")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, 160);
+  return code ? `${code} ${message}` : message;
+}
+
+function isRejectableTelemetryError(error) {
+  const code = String(error?.code || "");
+  return /^22/.test(code);
+}
+
+function addTelemetryRejectSummary(summary, event, reason) {
+  const type = String(event?.type || "<sem-tipo>").slice(0, 80);
+  const key = `${type} | ${reason}`;
+  summary.set(key, (summary.get(key) || 0) + 1);
+}
+
+function logTelemetryRejectSummary(rejected, summary) {
+  if (!rejected) return;
+  const details = [...summary.entries()]
+    .map(([key, count]) => `${count}x ${key}`)
+    .join("; ");
+  console.warn(`[telemetry ingest] rejected=${rejected}${details ? " · " + details : ""}`);
+}
+
 async function applyGuildPresenceProbe({ payload, deviceId, occurredAt, dbClient = pool }) {
   if (!payload || String(payload.eventName || "") !== "GuildPlayerUpdated") return;
   const parameters = payload.parameters && typeof payload.parameters === "object" ? payload.parameters : {};
@@ -3635,14 +3696,31 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const events = Array.isArray(body.events) ? body.events : [];
       if (!events.length || events.length > 500) return res.status(400).json({ error: "events" });
 
+      let rejected = 0;
+      const rejectSummary = new Map();
+      const normalizedEvents = [];
+      for (const rawEvent of events) {
+        const event = sanitizeTelemetryEvent(rawEvent);
+        if (!event.eventId || !event.type) {
+          rejected++;
+          addTelemetryRejectSummary(
+            rejectSummary,
+            event,
+            !event.eventId ? "event_id vazio após saneamento" : "type vazio após saneamento"
+          );
+          continue;
+        }
+        normalizedEvents.push(event);
+      }
+
       // O CTA informado pelo client e apenas uma dica. O servidor revalida o contexto
       // para impedir que um currentCtaId antigo "grude" todos os lotes no CTA mais recente.
       let clientCtaEventId = body.ctaEventId != null && String(body.ctaEventId).trim() !== ""
         ? String(body.ctaEventId).trim()
         : null;
       if (!clientCtaEventId) {
-        const hbCta = events
-          .map(e => (e.payload ?? e.Payload ?? {}))
+        const hbCta = normalizedEvents
+          .map(e => e.payload ?? {})
           .map(p => p.currentCtaId)
           .find(v => v != null && String(v).trim() !== "");
         if (hbCta) clientCtaEventId = String(hbCta).trim();
@@ -3664,14 +3742,12 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       // O roster só é carregado quando o lote contém uma morte candidata a Kill Fame.
       // Assim, mortes puramente inimigas são descartadas antes da fila/API sem custo
       // permanente para batches que não carregam DiedEvent letal.
-      const hasFameCandidates = events.some(e => {
-        const type = String(e?.type || e?.Type || "").trim();
-        const payload = e?.payload ?? e?.Payload ?? {};
-        return type === "player_death_observed" &&
-          payload?.isLethal !== false &&
-          payload?.killer &&
-          payload?.victim;
-      });
+      const hasFameCandidates = normalizedEvents.some(e =>
+        e.type === "player_death_observed" &&
+        e.payload?.isLethal !== false &&
+        e.payload?.killer &&
+        e.payload?.victim
+      );
       let fameRosterKeys = new Set();
       if (ctaEventId && hasFameCandidates) {
         const roster = await db.getSignups(ctaEventId).catch(() => []);
@@ -3685,84 +3761,201 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       `, [deviceId, device.playerName || null, device.version || null]);
 
       let inserted = 0, duplicate = 0;
-      const fameEnrichmentQueue = [];
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
+      let fameEnrichmentQueue = [];
+      let zoneChanges = [];
+
+      if (normalizedEvents.length) {
+        const client = await pool.connect();
         try {
-          const presenceProbes = [];
-          const zoneChanges = [];
-          for (const e of events) {
-            const eventId = String(e.eventId || e.EventId || "").trim();
-            const type = String(e.type || e.Type || "").trim();
-            const occurredAt = e.occurredAt || e.OccurredAt || new Date().toISOString();
-            const playerName = e.playerName ?? e.PlayerName ?? null;
-            const payload = e.payload ?? e.Payload ?? {};
-            if (!eventId || !type) continue;
-            const q = await client.query(`
-              INSERT INTO albion_telemetry_events(event_id, cta_event_id, device_id, type, occurred_at, player_name, payload)
-              VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
-              ON CONFLICT(event_id) DO NOTHING
-            `, [eventId, ctaEventId, deviceId, type, occurredAt, playerName, JSON.stringify(payload || {})]);
-            if (q.rowCount) {
-              inserted++;
-              if (type === "guild_presence_probe") {
-                presenceProbes.push({ payload, deviceId, occurredAt });
+          try {
+            await client.query("BEGIN");
+            const fastPresenceProbes = [];
+            const fastZoneChanges = [];
+            const fastFameEnrichmentQueue = [];
+            let fastInserted = 0;
+            let fastDuplicate = 0;
+
+            for (const event of normalizedEvents) {
+              const q = await client.query(`
+                INSERT INTO albion_telemetry_events(event_id, cta_event_id, device_id, type, occurred_at, player_name, payload)
+                VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
+                ON CONFLICT(event_id) DO NOTHING
+              `, [
+                event.eventId,
+                ctaEventId,
+                deviceId,
+                event.type,
+                event.occurredAt,
+                event.playerName,
+                JSON.stringify(event.payload ?? {}),
+              ]);
+
+              if (!q.rowCount) {
+                fastDuplicate++;
+                continue;
               }
-              if (type === "zone_change") {
-                zoneChanges.push({
+
+              fastInserted++;
+              if (event.type === "guild_presence_probe") {
+                fastPresenceProbes.push({
+                  payload: event.payload,
+                  deviceId,
+                  occurredAt: event.occurredAt,
+                });
+              }
+              if (event.type === "zone_change") {
+                fastZoneChanges.push({
                   ctaEventId,
                   deviceId,
-                  playerName: playerName || device.playerName || null,
-                  payload,
-                  occurredAt
+                  playerName: event.playerName || device.playerName || null,
+                  payload: event.payload,
+                  occurredAt: event.occurredAt,
                 });
               }
               if (
-                type === "player_death_observed" &&
-                payload?.isLethal !== false &&
-                payload?.killer &&
-                payload?.victim &&
-                shouldEnrichKillFame(payload, fameRosterKeys)
+                event.type === "player_death_observed" &&
+                event.payload?.isLethal !== false &&
+                event.payload?.killer &&
+                event.payload?.victim &&
+                shouldEnrichKillFame(event.payload, fameRosterKeys)
               ) {
-                fameEnrichmentQueue.push({ eventId, payload, occurredAt });
+                fastFameEnrichmentQueue.push({
+                  eventId: event.eventId,
+                  payload: event.payload,
+                  occurredAt: event.occurredAt,
+                });
               }
-            } else {
-              duplicate++;
+            }
+
+            // Dois observers podem receber o mesmo burst de GuildPlayerUpdated em ordens
+            // diferentes. Ordenar as chaves antes dos UPSERTs garante a mesma ordem de locks
+            // entre transacoes concorrentes e evita o ciclo de deadlock visto em producao.
+            fastPresenceProbes.sort((a, b) => {
+              const aName = normName(a.payload?.parameters?.["1"]);
+              const bName = normName(b.payload?.parameters?.["1"]);
+              return aName.localeCompare(bName);
+            });
+            for (const probe of fastPresenceProbes) {
+              await applyGuildPresenceProbe({ ...probe, dbClient: client });
+            }
+
+            await client.query("COMMIT");
+            inserted = fastInserted;
+            duplicate = fastDuplicate;
+            zoneChanges = fastZoneChanges;
+            fameEnrichmentQueue = fastFameEnrichmentQueue;
+          } catch (fastError) {
+            await client.query("ROLLBACK").catch(() => {});
+
+            // Fallback isolado: só é usado se o batch rápido falhar. Cada evento fica
+            // protegido por SAVEPOINT; erros de dados (classe SQLSTATE 22) rejeitam só
+            // aquele evento. Falha estrutural/servidor continua propagando HTTP 500.
+            await client.query("BEGIN");
+            try {
+              const fallbackZoneChanges = [];
+              const fallbackFameEnrichmentQueue = [];
+              let fallbackInserted = 0;
+              let fallbackDuplicate = 0;
+
+              for (let index = 0; index < normalizedEvents.length; index++) {
+                const event = normalizedEvents[index];
+                const savepoint = `telemetry_event_${index}`;
+                await client.query(`SAVEPOINT ${savepoint}`);
+
+                try {
+                  const q = await client.query(`
+                    INSERT INTO albion_telemetry_events(event_id, cta_event_id, device_id, type, occurred_at, player_name, payload)
+                    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
+                    ON CONFLICT(event_id) DO NOTHING
+                  `, [
+                    event.eventId,
+                    ctaEventId,
+                    deviceId,
+                    event.type,
+                    event.occurredAt,
+                    event.playerName,
+                    JSON.stringify(event.payload ?? {}),
+                  ]);
+
+                  if (q.rowCount) {
+                    if (event.type === "guild_presence_probe") {
+                      await applyGuildPresenceProbe({
+                        payload: event.payload,
+                        deviceId,
+                        occurredAt: event.occurredAt,
+                        dbClient: client,
+                      });
+                    }
+
+                    fallbackInserted++;
+                    if (event.type === "zone_change") {
+                      fallbackZoneChanges.push({
+                        ctaEventId,
+                        deviceId,
+                        playerName: event.playerName || device.playerName || null,
+                        payload: event.payload,
+                        occurredAt: event.occurredAt,
+                      });
+                    }
+                    if (
+                      event.type === "player_death_observed" &&
+                      event.payload?.isLethal !== false &&
+                      event.payload?.killer &&
+                      event.payload?.victim &&
+                      shouldEnrichKillFame(event.payload, fameRosterKeys)
+                    ) {
+                      fallbackFameEnrichmentQueue.push({
+                        eventId: event.eventId,
+                        payload: event.payload,
+                        occurredAt: event.occurredAt,
+                      });
+                    }
+                  } else {
+                    fallbackDuplicate++;
+                  }
+
+                  await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+                } catch (eventError) {
+                  await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => {});
+                  await client.query(`RELEASE SAVEPOINT ${savepoint}`).catch(() => {});
+
+                  if (!isRejectableTelemetryError(eventError)) throw eventError;
+
+                  rejected++;
+                  addTelemetryRejectSummary(
+                    rejectSummary,
+                    event,
+                    telemetryRejectReason(eventError)
+                  );
+                }
+              }
+
+              await client.query("COMMIT");
+              inserted = fallbackInserted;
+              duplicate = fallbackDuplicate;
+              zoneChanges = fallbackZoneChanges;
+              fameEnrichmentQueue = fallbackFameEnrichmentQueue;
+            } catch (fallbackError) {
+              await client.query("ROLLBACK").catch(() => {});
+              throw fallbackError;
             }
           }
-
-          // Dois observers podem receber o mesmo burst de GuildPlayerUpdated em ordens
-          // diferentes. Ordenar as chaves antes dos UPSERTs garante a mesma ordem de locks
-          // entre transacoes concorrentes e evita o ciclo de deadlock visto em producao.
-          presenceProbes.sort((a, b) => {
-            const aName = normName(a.payload?.parameters?.["1"]);
-            const bName = normName(b.payload?.parameters?.["1"]);
-            return aName.localeCompare(bName);
-          });
-          for (const probe of presenceProbes) {
-            await applyGuildPresenceProbe({ ...probe, dbClient: client });
-          }
-
-          await client.query("COMMIT");
-
-          if (zoneChangeHandler && zoneChanges.length) {
-            for (const change of zoneChanges) {
-              Promise.resolve(zoneChangeHandler(change)).catch((e) =>
-                console.error("zone_change handler:", e)
-              );
-            }
-          }
-        } catch (e) {
-          await client.query("ROLLBACK").catch(() => {});
-          throw e;
+        } finally {
+          client.release();
         }
-      } finally {
-        client.release();
       }
 
+      if (zoneChangeHandler && zoneChanges.length) {
+        for (const change of zoneChanges) {
+          Promise.resolve(zoneChangeHandler(change)).catch((e) =>
+            console.error("zone_change handler:", e)
+          );
+        }
+      }
+
+      logTelemetryRejectSummary(rejected, rejectSummary);
       if (ctaEventId) notifyTelemetry(ctaEventId, { inserted, deviceId });
-      res.json({ ok: true, inserted, duplicate, ctaEventId });
+      res.json({ ok: true, inserted, duplicate, rejected, ctaEventId });
 
       if (fameEnrichmentQueue?.length) {
         const timer = setTimeout(() => {
