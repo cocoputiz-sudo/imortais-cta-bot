@@ -1146,7 +1146,24 @@ const PAGE = `<!doctype html>
   function openStats(){
     var b=document.getElementById('stats-body'); b.innerHTML='carregando…'; mopen('m-stats');
     fetch('/api/me/stats').then(function(r){return r.json();}).then(function(s){
-      if(s.season===false){ b.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa.'; return; }
+      if(s.season===false){
+        if(!s.offSeason){ b.innerHTML='<h2>📊 Meu desempenho</h2>Nenhuma temporada ativa.'; return; }
+        var o=s.offSeason, ended=o.endedAt?new Date(o.endedAt).toLocaleDateString('pt-BR'):'';
+        if(o.found===false){
+          b.innerHTML='<h2>📊 OFF-SEASON · Temporada '+o.number+'</h2>'
+            +(ended?'<div class="srow">Encerrada em '+ended+'</div>':'')
+            +'<div class="srow">Você não pontuou no resultado final desta temporada.</div>';
+          return;
+        }
+        var came=(o.integral||0)+(o.parcial||0)+(o.rapida||0);
+        b.innerHTML='<h2>📊 OFF-SEASON · Temporada '+o.number+'</h2>'
+          +(ended?'<div class="srow">Resultado final · encerrada em '+ended+'</div>':'<div class="srow">Resultado final</div>')
+          +'<div class="big">#'+o.position+' <small>de '+o.total+'</small></div>'
+          +'<div class="srow"><b>'+o.score+'</b> pontos · '+esc(o.cat)+'</div>'
+          +'<div class="srow">✅ Veio: <b>'+came+'</b> de '+o.ctaCount+' CTAs <span style="color:var(--faint)">('+(o.integral||0)+' integrais · '+(o.parcial||0)+' parciais · '+(o.rapida||0)+' rápidas)</span></div>'
+          +'<div class="srow">🔴 Faltou (pingou e não veio): <b>'+(o.fantasma||0)+'</b></div>';
+        return;
+      }
       if(!s.found){ b.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>Você ainda não pontuou nesta temporada.'; return; }
       b.innerHTML='<h2>📊 Meu desempenho — Temporada '+s.season+'</h2>'
         +'<div class="big">#'+s.rank+' <small>de '+s.total+'</small></div>'

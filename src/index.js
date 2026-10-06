@@ -3514,7 +3514,45 @@ const webActions = {
   },
   myStats: async (userId, guildId) => {
     const season = await db.getCurrentSeason(guildId);
-    if (!season) return { season: false };
+    if (!season) {
+      const snap = await db.getLastSeasonResults(guildId).catch(() => null);
+      if (!snap) return { season: false };
+
+      const standings = Array.isArray(snap.standings) ? snap.standings : [];
+      const idx = standings.findIndex((r) => String(r.user_id) === String(userId));
+      if (idx < 0) {
+        return {
+          season: false,
+          offSeason: {
+            found: false,
+            number: snap.number,
+            endedAt: snap.ended_at,
+            total: standings.length,
+            ctaCount: Number(snap.cta_count || 0),
+          }
+        };
+      }
+
+      const r = standings[idx];
+      return {
+        season: false,
+        offSeason: {
+          found: true,
+          number: snap.number,
+          endedAt: snap.ended_at,
+          position: idx + 1,
+          total: standings.length,
+          score: Number(r.score || 0),
+          integral: Number(r.integral || 0),
+          parcial: Number(r.parcial || 0),
+          rapida: Number(r.rapida || 0),
+          fantasma: Number(r.fantasma || 0),
+          cat: r.cat || "Sem categoria",
+          ctaCount: Number(snap.cta_count || 0),
+        }
+      };
+    }
+
     const report = await attendance.buildReport(guildId, new Date(season.started_at), new Date());
     const rows = report.rows;
     const idx = rows.findIndex((r) => r.user_id === userId);
