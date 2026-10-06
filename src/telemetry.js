@@ -3685,13 +3685,13 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       `, [deviceId, device.playerName || null, device.version || null]);
 
       let inserted = 0, duplicate = 0;
+      const fameEnrichmentQueue = [];
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
         try {
           const presenceProbes = [];
           const zoneChanges = [];
-          const fameEnrichmentQueue = [];
           for (const e of events) {
             const eventId = String(e.eventId || e.EventId || "").trim();
             const type = String(e.type || e.Type || "").trim();
