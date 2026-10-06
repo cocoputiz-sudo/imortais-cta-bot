@@ -48,10 +48,15 @@ async function postIngest(base, events, deviceId = "ingest-route-device") {
 
 async function withPoolQueryObserver(observer, fn) {
   const originalConnect = db.pool.connect;
-  db.pool.connect = async function (...args) {
-    const client = await originalConnect.apply(this, args);
-    const originalQuery = client.query;
-    const originalRelease = client.release;
+  db.pool.connect = function (...args) {
+    // pool.query() usa connect(callback) internamente; não interceptamos esse caminho.
+    // O ingest usa await pool.connect(), que é o caminho que queremos observar.
+    if (typeof args[0] === "function") {
+      return originalConnect.apply(this, args);
+    }
+    return originalConnect.apply(this, args).then((client) => {
+      const originalQuery = client.query;
+      const originalRelease = client.release;
 
     client.query = function (...queryArgs) {
       const first = queryArgs[0];
@@ -67,7 +72,8 @@ async function withPoolQueryObserver(observer, fn) {
       return originalRelease.apply(client, releaseArgs);
     };
 
-    return client;
+      return client;
+    });
   };
 
   try {
