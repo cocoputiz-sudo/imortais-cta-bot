@@ -258,6 +258,8 @@ async function init() {
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS ignored BOOLEAN NOT NULL DEFAULT false;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS realloc_lock_parties TEXT NOT NULL DEFAULT '';`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;`);
+  await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS consolid_warned TEXT NOT NULL DEFAULT '';`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_departure TEXT;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_tier TEXT;`);
   await pool.query(`ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS cta_gear_count INT;`);
@@ -375,6 +377,36 @@ async function getDueReminders(now) {
 async function markReminderSent(eventId, which) {
   const col = which === 30 ? "sent_30" : "sent_10";
   await pool.query(`UPDATE cta_events SET ${col}=true WHERE id=$1`, [eventId]);
+}
+
+async function markCtaFrozen(eventId) {
+  const { rows } = await pool.query(
+    `UPDATE cta_events
+        SET frozen_at=COALESCE(frozen_at, now())
+      WHERE id=$1
+      RETURNING frozen_at`,
+    [eventId]
+  );
+  return rows[0]?.frozen_at || null;
+}
+
+async function markConsolidationWarned(eventId, step) {
+  const value = Number(step);
+  if (![25, 20, 15, 10].includes(value)) {
+    throw new Error("invalid consolidation warning step");
+  }
+  const token = String(value);
+  const { rowCount } = await pool.query(
+    `UPDATE cta_events
+        SET consolid_warned=CASE
+          WHEN COALESCE(consolid_warned, '')='' THEN $2
+          ELSE consolid_warned || ',' || $2
+        END
+      WHERE id=$1
+        AND POSITION(',' || $2 || ',' IN ',' || COALESCE(consolid_warned, '') || ',')=0`,
+    [eventId, token]
+  );
+  return rowCount > 0;
 }
 
 async function setThread(eventId, threadId) {
@@ -1231,7 +1263,7 @@ module.exports = {
   saveSeasonResults, getLastSeasonResults, getLastEndedSeason,
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignupsForEvents, getSignup, getSecondCaller, upsertSignup, deleteSignup, setStatus, setTimeLabel,
-  getDueReminders, markReminderSent,
+  getDueReminders, markReminderSent, markCtaFrozen, markConsolidationWarned,
   addNavigationObjective, setNavigationObjective, getNavigationObjective, getNavigationObjectives,
   removeNavigationObjective, startNavigationCarry, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
   compactNavigationPositions, getNavigationSession, setNavigationObjectiveMessage,
