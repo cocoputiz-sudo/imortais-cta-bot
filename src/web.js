@@ -13,6 +13,7 @@ const { isSecondCaller } = require("./roster");
 const crypto = require("crypto");
 const telemetry = require("./telemetry");
 const scout = require("./scout");
+const guildroster = require("./guildroster");
 const path = require("path");
 
 // ---- config do login (OAuth2 Discord) ----
@@ -198,6 +199,26 @@ function startWebServer(client, opts) {
   app.get("/api/events", async (req, res) => {
     if (!requireMember(req, res)) return;
     res.json(await openEventsAll().catch(() => []));
+  });
+
+  app.post("/api/guild-roster/analyze", async (req, res) => {
+    const sess = requireEditor(req, res);
+    if (!sess) return;
+    try {
+      const body = req.body || {};
+      const result = await guildroster.analyze(db, { text: body.text, eventId: body.eventId });
+      if (result && result.ok) return res.json(result);
+
+      const error = result && result.error ? String(result.error) : "server";
+      if (["empty", "unknown_format", "too_large", "too_many_lines", "no_members"].includes(error)) {
+        return res.status(400).json({ error });
+      }
+      if (error === "event_not_found") return res.status(404).json({ error });
+      return res.status(500).json({ error });
+    } catch (e) {
+      console.error("/api/guild-roster/analyze:", e?.message || e);
+      return res.status(500).json({ error: "server" });
+    }
   });
 
   app.get("/api/roster", async (req, res) => {
@@ -1085,6 +1106,7 @@ const PAGE = `<!doctype html>
     canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,name:''
   };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
+  var openEventsCache=[];
   var lootSelectedEvent=null;
   var _viewCache={};
   function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
@@ -1384,6 +1406,7 @@ const PAGE = `<!doctype html>
 
   function loadEvents(){
     fetch('/api/events').then(function(r){return r.json();}).then(function(list){
+      openEventsCache=Array.isArray(list)?list.slice():[];
       var bar=document.getElementById('ctas'); bar.innerHTML='';
       if(!list.length){ bar.innerHTML='<span style="color:var(--muted)">Nenhum CTA aberto.</span>'; document.getElementById('board').innerHTML='<div class="empty-note">Nenhum CTA aberto agora.</div>'; document.getElementById('reserves').innerHTML=''; document.getElementById('status').innerHTML='<h2>Sem CTA</h2><p>Abra um CTA pra começar.</p>'; current=null; streamLive=false; if(es){es.close();es=null;} if(tes){tes.close();tes=null;} checkConnection(); renderCaller(); return; }
       var stillOpen=false;
@@ -2717,6 +2740,155 @@ const PAGE = `<!doctype html>
 
 
   var guildRefreshTimer=null;
+  function guildRosterCtaOptions(){
+    var list=openEventsCache||[];
+    if(!list.length) return '<option value="">Nenhum CTA aberto</option>';
+    return list.map(function(e){
+      var selected=String(e.id)===String(current)?' selected':'';
+      return '<option value="'+esc(e.id)+'"'+selected+'>CTA '+esc(e.time)+' UTC</option>';
+    }).join('');
+  }
+  function guildRosterCardHtml(){
+    if(!authState.canEdit) return '';
+    return '<details class="panel" id="guild-roster-card" style="border-color:#40536f">'
+      +'<summary style="cursor:pointer;font-weight:800;font-size:16px">📋 Cruzar lista da guilda (jogo) × pings × call</summary>'
+      +'<div style="margin-top:14px">'
+      +'<div class="note">No jogo: G &gt; Guild &gt; copiar a lista &gt; colar aqui</div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-top:12px">'
+      +'<label style="min-width:190px"><span class="note">CTA</span><select id="guild-roster-event" class="brief-select" style="width:100%">'+guildRosterCtaOptions()+'</select></label>'
+      +'<button type="button" class="btn primary" id="guild-roster-analyze">Analisar</button>'
+      +'<span id="guild-roster-status" class="note"></span></div>'
+      +'<textarea id="guild-roster-text" class="brief-input" rows="9" autocomplete="off" spellcheck="false" placeholder="Cole aqui a lista exportada da Guild..." style="width:100%;margin-top:10px;resize:vertical"></textarea>'
+      +'<div id="guild-roster-result" style="margin-top:14px"></div>'
+      +'</div></details>';
+  }
+  function guildRosterOfflineAge(mins){
+    if(mins==null || !isFinite(Number(mins))) return 'tempo desconhecido';
+    var n=Math.max(0,Math.floor(Number(mins)));
+    if(n<60) return n+' min';
+    if(n<1440) return Math.floor(n/60)+'h '+(n%60)+'min';
+    return Math.floor(n/1440)+'d '+Math.floor((n%1440)/60)+'h';
+  }
+  function guildRosterItemHtml(x){
+    x=x||{};
+    var roles=(Array.isArray(x.roles)&&x.roles.length)?x.roles.join(', '):'—';
+    var weapon=x.pinged?(x.weapon||'—'):'—';
+    var offline=(!x.online && x.offlineMinutes!=null)?' · visto há '+guildRosterOfflineAge(x.offlineMinutes):'';
+    return '<div style="padding:9px 10px;border-top:1px solid #263246">'
+      +'<div><b>'+esc(x.name||'?')+'</b>'+esc(offline)+'</div>'
+      +'<div class="note">Arma: '+esc(weapon)+' · Cargos: '+esc(roles)+'</div>'
+      +'</div>';
+  }
+  function guildRosterResultHtml(d){
+    d=d||{};
+    var totals=d.totals||{};
+    var groups=d.groups||{};
+    var defs=[
+      ['equipando','🔴 Equipando','#e05252'],
+      ['contribuinte','🔵 Contribuinte (autorizado)','#4f91ff'],
+      ['naCallSemPing','🟡 Na call sem ping','#e2b95e'],
+      ['pingouForaDaCall','🟠 Pingou e está fora da call','#f28c28'],
+      ['pronto','✅ Pronto','#35c46a'],
+      ['pingouOffline','⚫ Pingou mas está offline','#8a94a6'],
+      ['soDiscord','💬 Só no Discord','#a979ff'],
+      ['semCorrespondencia','⚠️ Sem correspondência','#d9534f']
+    ];
+    var taken=d.takenAt?new Date(d.takenAt).toLocaleString('pt-BR'):'—';
+    var skipped=d.parse&&Array.isArray(d.parse.skipped)?d.parse.skipped.length:0;
+    var html='<div class="statgrid">'
+      +'<div class="stat b"><div class="k">Membros</div><div class="v">'+fmtS(totals.roster||0)+'</div></div>'
+      +'<div class="stat g"><div class="k">Online</div><div class="v">'+fmtS(totals.online||0)+'</div></div>'
+      +'<div class="stat a"><div class="k">Pingados</div><div class="v">'+fmtS(totals.pinged||0)+'</div></div>'
+      +'<div class="stat p"><div class="k">Na call</div><div class="v">'+fmtS(totals.inCall||0)+'</div></div>'
+      +'</div>'
+      +'<div class="note" style="margin:8px 0 12px">Foto: '+esc(taken)+' · linhas ignoradas: '+fmtS(skipped)
+      +(d.event?(' · CTA '+esc(d.event.timeLabel||d.event.id||'')):'')+'</div>';
+    html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px">';
+    defs.forEach(function(def){
+      var key=def[0], label=def[1], color=def[2], list=Array.isArray(groups[key])?groups[key]:[];
+      html+='<div style="border:1px solid #263246;border-left:4px solid '+color+';border-radius:10px;overflow:hidden;background:#0d141f">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px">'
+        +'<b style="color:'+color+'">'+label+' · '+fmtS(list.length)+'</b>'
+        +(key==='equipando'&&list.length?'<button type="button" class="btn ghost" id="guild-roster-copy-equipando" style="padding:6px 9px">Copiar nomes</button>':'')
+        +'</div>'
+        +(list.length?list.map(guildRosterItemHtml).join(''):'<div class="note" style="padding:0 10px 10px">Nenhum.</div>')
+        +'</div>';
+    });
+    html+='</div>';
+    return html;
+  }
+  function bindGuildRosterResult(d){
+    var copy=document.getElementById('guild-roster-copy-equipando');
+    if(!copy) return;
+    var names=((d.groups||{}).equipando||[]).map(function(x){return String(x.name||'').trim();}).filter(Boolean);
+    copy.onclick=function(){
+      var text=names.join('\n');
+      var done=function(){ flash('● nomes de Equipando copiados','var(--green)'); };
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done).catch(function(){ flash('● não foi possível copiar','var(--red)'); });
+        return;
+      }
+      var ta=document.createElement('textarea');
+      ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); done(); }catch(_){ flash('● não foi possível copiar','var(--red)'); }
+      ta.remove();
+    };
+  }
+  function guildRosterErrorText(code){
+    var m={
+      empty:'Cole a lista da guilda.',
+      unknown_format:'Formato não reconhecido. Copie a lista diretamente da aba Guild.',
+      too_large:'Lista grande demais.',
+      too_many_lines:'A lista tem linhas demais.',
+      no_members:'Nenhum membro válido foi encontrado.',
+      event_not_found:'CTA não encontrado.'
+    };
+    return m[code]||code||'erro';
+  }
+  function bindGuildRosterCard(){
+    if(!authState.canEdit) return;
+    var btn=document.getElementById('guild-roster-analyze');
+    if(!btn) return;
+    btn.onclick=function(){
+      var textEl=document.getElementById('guild-roster-text');
+      var eventEl=document.getElementById('guild-roster-event');
+      var status=document.getElementById('guild-roster-status');
+      var result=document.getElementById('guild-roster-result');
+      var eventId=eventEl?eventEl.value:'';
+      if(!eventId){ status.textContent='Selecione um CTA aberto.'; return; }
+      status.textContent='Analisando…';
+      btn.disabled=true;
+      fetch('/api/guild-roster/analyze',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:textEl?textEl.value:'',eventId:eventId})
+      }).then(function(r){
+        return r.json().catch(function(){return {};}).then(function(j){ return {ok:r.ok,status:r.status,data:j}; });
+      }).then(function(x){
+        if(!x.ok){
+          result.innerHTML='<div class="empty-note">Não foi possível analisar: '+esc(guildRosterErrorText(x.data&&x.data.error))+'</div>';
+          return;
+        }
+        result.innerHTML=guildRosterResultHtml(x.data);
+        bindGuildRosterResult(x.data);
+      }).catch(function(e){
+        result.innerHTML='<div class="empty-note">Erro ao analisar: '+esc(e.message)+'</div>';
+      }).finally(function(){
+        status.textContent='';
+        btn.disabled=false;
+      });
+    };
+  }
+  function scheduleGuildRefresh(){
+    if(guildRefreshTimer) clearTimeout(guildRefreshTimer);
+    guildRefreshTimer=setTimeout(function(){
+      var active=document.querySelector('.nav[data-view].on');
+      if(!active||active.getAttribute('data-view')!=='guild') return;
+      var card=document.getElementById('guild-roster-card');
+      if(card&&card.open){ scheduleGuildRefresh(); return; }
+      renderGuild(true);
+    },20000);
+  }
   function renderGuild(silent){
     if(!silent) loading('view-guild','🟢 Guilda online');
     fetch('/api/telemetry/guild-presence').then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
@@ -2737,11 +2909,12 @@ const PAGE = `<!doctype html>
         var visto=m.online?(m.effectiveStatus==='online'?'agora':'último estado: online'):(m.lastSeenAt?ago(m.lastSeenAt)+' atrás':'—');
         var hb=m.observerHeartbeatAt?(ago(m.observerHeartbeatAt)+' atrás'):'—';
         var hbBadge=m.observerActive?'<span class="pill ok">VIVO</span>':'<span class="pill" style="color:var(--faint);border-color:#2a3550">STALE</span>';
-        return '<tr><td><b>'+esc(m.playerName||'?')+'</b></td><td>'+presenceBadge(m)+'</td><td>'+esc(visto)+'</td><td>'+ago(m.lastEventAt||m.stateAt)+' atrás</td><td style="color:var(--faint)">'+esc(m.observerDevice||'—')+'</td><td>'+hbBadge+' <span style="color:var(--faint)">'+esc(hb)+'</span></td></tr>';
+        return '<tr><td><b>'+esc(m.playerName||'?')+'</b></td><td>'+presenceBadge(m)+'</td><td>'+esc(visto)+'</td><td>'+esc(ago(m.lastEventAt||m.stateAt)+' atrás')+'</td><td style="color:var(--faint)">'+esc(m.observerDevice||'—')+'</td><td>'+hbBadge+' <span style="color:var(--faint)">'+esc(hb)+'</span></td></tr>';
       }).join('');
       var fresh=d.dataFreshAt?ago(d.dataFreshAt)+' atrás':'sem dado';
       var html=liveBadge('último dado Albion '+fresh)
         +'<div class="modhead">🟢 Guilda online</div>'
+        +(authState.canEdit?guildRosterCardHtml():'')
         +'<div class="statgrid"><div class="stat g"><div class="k">Online confirmado</div><div class="v">'+online+'</div></div>'
         +'<div class="stat a"><div class="k">Online não confirmado</div><div class="v">'+staleOnline+'</div></div>'
         +'<div class="stat b"><div class="k">Estados recentes</div><div class="v">'+recent+'</div></div>'
@@ -2753,11 +2926,10 @@ const PAGE = `<!doctype html>
         +'</tbody></table></div>'
         +'<div class="note">Estado e frescor são separados. ONLINE não confirmado continua sendo o último estado conhecido e não vira OFFLINE por timeout. Para entrar em “Online confirmado”, o estado precisa ser recente e o observer precisa ter heartbeat ativo. A cobertura depende da quantidade de Combat Clients observando a guilda.</div>';
       setView('view-guild',html);
+      bindGuildRosterCard();
     }).catch(function(e){
       setView('view-guild','<div class="modhead">🟢 Guilda online</div><div class="empty-note">Erro ao carregar presenca: '+esc(e.message)+'</div>');
-    });
-    if(guildRefreshTimer) clearTimeout(guildRefreshTimer);
-    guildRefreshTimer=setTimeout(function(){ var a=document.querySelector('.nav[data-view].on'); if(a&&a.getAttribute('data-view')==='guild') renderGuild(true); },20000);
+    }).finally(scheduleGuildRefresh);
   }
 
   function renderDevices(){
@@ -2862,5 +3034,5 @@ module.exports = {
   startWebServer,
   notifyRosterChange,
   buildRosterData,
-  __test: { signSession, verifySession }
+  __test: { signSession, verifySession, PAGE }
 };
