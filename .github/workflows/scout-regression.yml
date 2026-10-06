@@ -8,6 +8,7 @@ on:
       - "src/web.js"
       - "src/guildroster.js"
       - "src/telemetry.js"
+      - "src/ctatime.js"
       - "src/killFame.js"
       - "src/season.js"
       - "src/db.js"
@@ -22,6 +23,8 @@ on:
       - "test/guild-roster.js"
       - "test/guild-roster-route.js"
       - "test/kill-fame.js"
+      - "test/ingest-route.js"
+      - "test/cta-time.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -79,3 +82,7 @@ jobs:
         run: node test/guild-roster-route.js
       - name: Kill Fame
         run: node test/kill-fame.js
+      - name: Telemetry ingest route
+        run: node test/ingest-route.js
+      - name: CTA time rollover
+        run: node test/cta-time.js
