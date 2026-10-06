@@ -6,6 +6,7 @@ on:
       - "src/scout.js"
       - "src/index.js"
       - "src/web.js"
+      - "src/guildroster.js"
       - "src/telemetry.js"
       - "src/season.js"
       - "src/db.js"
@@ -17,6 +18,8 @@ on:
       - "test/combat-presence-cache.js"
       - "test/attendance-batch.js"
       - "test/locale-weapons.js"
+      - "test/guild-roster.js"
+      - "test/guild-roster-route.js"
       - ".github/workflows/scout-regression.yml"
   workflow_dispatch:
 
@@ -68,3 +71,7 @@ jobs:
         run: node test/attendance-batch.js
       - name: Locale weapons
         run: node test/locale-weapons.js
+      - name: Guild roster
+        run: node test/guild-roster.js
+      - name: Guild roster route
+        run: node test/guild-roster-route.js
