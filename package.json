@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/scout-regression.js && node test/season-regression.js && node test/presence-forces.js && node test/scout-area-presence.js && node test/combat-presence-cache.js && node test/attendance-batch.js && node test/locale-weapons.js && node test/guild-roster.js && node test/guild-roster-route.js"
+    "test": "node test/scout-regression.js && node test/season-regression.js && node test/presence-forces.js && node test/scout-area-presence.js && node test/combat-presence-cache.js && node test/attendance-batch.js && node test/locale-weapons.js && node test/guild-roster.js && node test/guild-roster-route.js && node test/kill-fame.js"
   },
   "engines": {
     "node": ">=18"

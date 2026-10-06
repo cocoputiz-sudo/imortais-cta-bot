@@ -79,6 +79,8 @@ async function initSchema(dbPool) {
   await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS area_total_buckets INT");
   await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS area_observed BOOLEAN NOT NULL DEFAULT false");
   await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS albion_player_id TEXT");
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS kill_fame BIGINT NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE player_cta_stats ADD COLUMN IF NOT EXISTS death_fame BIGINT NOT NULL DEFAULT 0");
   // Marcador independente da versão do Scout. Ele serve somente para a passada
   // retroativa de presença dos CTAs já resumidos e NÃO participa da retenção.
   await pool.query("ALTER TABLE cta_events ADD COLUMN IF NOT EXISTS scout_area_backfill_at TIMESTAMPTZ");
@@ -329,6 +331,8 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
       healing: n(c?.healing),
       kills: n(c?.kills),
       deaths: n(c?.deaths),
+      killFame: Math.max(n(c?.killFame), n(old?.kill_fame)),
+      deathFame: Math.max(n(c?.deathFame), n(old?.death_fame)),
       fights: fightsByName.get(e.key) || 0,
       combatObserved: !!c,
       itemPower: conf?.itemPower == null ? null : Math.max(0, Math.round(n(conf.itemPower))),
@@ -357,6 +361,8 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
         healing: n(old.healing),
         kills: n(old.kills),
         deaths: n(old.deaths),
+        killFame: n(old.kill_fame),
+        deathFame: n(old.death_fame),
         fights: n(old.fights),
         combatObserved: true,
         itemPower: old.item_power == null ? null : Number(old.item_power),
@@ -380,9 +386,9 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
         "guild_id, cta_event_id, discord_user_id, player_key, player_name, role, weapon, planned_party, actual_party," +
         "attendance_level, voice_minutes, damage, healing, kills, deaths, fights, combat_observed, item_power, equipment," +
         "equipment_observed_at, observer_count, telemetry_events, party_snapshots, death_timeline, core_verified, profile_main_role," +
-        "area_seen_buckets, area_total_buckets, area_observed, albion_player_id, stats_version, calculated_at" +
+        "area_seen_buckets, area_total_buckets, area_observed, albion_player_id, stats_version, kill_fame, death_fame, calculated_at" +
         ") VALUES (" +
-        "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,$28,$29,$30,$31,now()" +
+        "$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,$28,$29,$30,$31,$32,$33,now()" +
         ") ON CONFLICT (cta_event_id, player_key) DO UPDATE SET " +
         "guild_id=EXCLUDED.guild_id, discord_user_id=EXCLUDED.discord_user_id, player_name=EXCLUDED.player_name," +
         "role=EXCLUDED.role, weapon=EXCLUDED.weapon, planned_party=EXCLUDED.planned_party, actual_party=EXCLUDED.actual_party," +
@@ -394,7 +400,9 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
         "core_verified=EXCLUDED.core_verified, profile_main_role=EXCLUDED.profile_main_role," +
         "area_seen_buckets=EXCLUDED.area_seen_buckets, area_total_buckets=EXCLUDED.area_total_buckets," +
         "area_observed=EXCLUDED.area_observed, albion_player_id=EXCLUDED.albion_player_id," +
-        "stats_version=EXCLUDED.stats_version, calculated_at=now()",
+        "stats_version=EXCLUDED.stats_version," +
+        "kill_fame=GREATEST(player_cta_stats.kill_fame, EXCLUDED.kill_fame)," +
+        "death_fame=GREATEST(player_cta_stats.death_fame, EXCLUDED.death_fame), calculated_at=now()",
         [
           r.guildId, r.ctaEventId, r.discordUserId, r.playerKey, r.playerName, r.role, r.weapon,
           r.plannedParty, r.actualParty, r.attendanceLevel, r.voiceMinutes, r.damage, r.healing,
@@ -404,7 +412,7 @@ async function snapshotCta(db, attendance, telemetry, eventId, options = {}) {
           r.deathTimeline == null ? null : JSON.stringify(r.deathTimeline),
           r.coreVerified, r.profileMainRole,
           r.areaSeenBuckets, r.areaTotalBuckets, r.areaObserved, r.albionPlayerId,
-          STATS_VERSION
+          STATS_VERSION, r.killFame, r.deathFame
         ]
       );
     }
@@ -902,7 +910,7 @@ async function overview(db, guildId) {
         discordUserId: s.discord_user_id,
         roles: new Map(),
         ctasRecorded: 0, attendedCtas: 0, integral: 0, parcial: 0, rapida: 0, fantasma: 0,
-        voiceMinutes: 0, damage: 0, healing: 0, kills: 0, deaths: 0, fights: 0,
+        voiceMinutes: 0, damage: 0, healing: 0, kills: 0, deaths: 0, killFame: 0, deathFame: 0, fights: 0,
         combatCtas: 0, partyObserved: 0, partyCorrect: 0, equipmentCtas: 0, ipSum: 0,
         observerSum: 0, coreVerified: false,
         areaSeenBuckets: 0, areaTotalBuckets: 0, areaObserved: false, albionPlayerId: null,
@@ -929,6 +937,8 @@ async function overview(db, guildId) {
     o.healing += n(s.healing);
     o.kills += n(s.kills);
     o.deaths += n(s.deaths);
+    o.killFame += n(s.kill_fame);
+    o.deathFame += n(s.death_fame);
     o.fights += n(s.fights);
     if (s.combat_observed) o.combatCtas++;
     if (s.planned_party != null && s.actual_party != null) {
@@ -989,6 +999,8 @@ async function overview(db, guildId) {
       healingPerMinute: Math.round((o.healing / minutes) * 10) / 10,
       kills: o.kills,
       deaths: o.deaths,
+      kill_fame: o.killFame,
+      death_fame: o.deathFame,
       fights: o.fights,
       combatCtas: o.combatCtas,
       coveragePct,
@@ -1074,6 +1086,8 @@ async function playerDetail(db, guildId, playerName) {
     healing: n(r.healing),
     kills: n(r.kills),
     deaths: n(r.deaths),
+    kill_fame: n(r.kill_fame),
+    death_fame: n(r.death_fame),
     fights: n(r.fights),
     combatObserved: !!r.combat_observed,
     itemPower: r.item_power == null ? null : n(r.item_power),

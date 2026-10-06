@@ -3,6 +3,7 @@
 // ============================================================================
 const crypto = require("crypto");
 const navigation = require("./navigation");
+const killFame = require("./killFame");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -50,6 +51,16 @@ function normGuild(v) {
 function isImortaisFamilyGuildName(value) {
   const g = normGuild(value);
   return g === "imortais" || g === "imortais2" || g === "imortaisacademy";
+}
+
+function shouldEnrichKillFame(payload, rosterKeysInput) {
+  const rosterKeys = rosterKeysInput instanceof Set
+    ? rosterKeysInput
+    : new Set((rosterKeysInput || []).map(normName).filter(Boolean));
+  return isImortaisFamilyGuildName(payload?.killerGuild) ||
+    isImortaisFamilyGuildName(payload?.victimGuild) ||
+    rosterKeys.has(normName(payload?.killer)) ||
+    rosterKeys.has(normName(payload?.victim));
 }
 
 function presenceMapName(value) {
@@ -2320,6 +2331,10 @@ async function getCombat(db, eventId, options = {}) {
         killerObjectIds: new Set(),
         rawEvents: 0,
         observedDeathEvents: 0,
+        killFame: 0,
+        killFameResolved: false,
+        albionEventIds: new Set(),
+        albionBattleIds: new Set(),
         killerInRoster: rosterKeys.has(normName(killer)),
         victimInRoster: rosterKeys.has(victimKey),
         killerInFamily: false,
@@ -2471,6 +2486,14 @@ async function getCombat(db, eventId, options = {}) {
         k.victimInRoster = k.victimInRoster || rosterKeys.has(normName(victim));
         k.killerInFamily = k.killerInFamily || isImortaisFamilyGuild(p.killerGuild);
         k.victimInFamily = k.victimInFamily || isImortaisFamilyGuild(p.victimGuild);
+        const fameRaw = p.killFame ?? p.totalVictimKillFame ?? p.TotalVictimKillFame ?? null;
+        const fame = Number(fameRaw);
+        if (fameRaw != null && Number.isFinite(fame) && fame >= 0) {
+          k.killFame = Math.max(k.killFame, fame);
+          k.killFameResolved = true;
+        }
+        if (p.albionEventId) k.albionEventIds.add(String(p.albionEventId));
+        if (p.albionBattleId) k.albionBattleIds.add(String(p.albionBattleId));
       }
     }
   }
@@ -2585,12 +2608,20 @@ async function getCombat(db, eventId, options = {}) {
     const kd = new Map();
     function kdFor(name) {
       const key = normName(name);
-      if (!kd.has(key)) kd.set(key, { n: String(name || "?"), kills: 0, deaths: 0 });
+      if (!kd.has(key)) kd.set(key, { n: String(name || "?"), kills: 0, deaths: 0, killFame: 0, deathFame: 0 });
       return kd.get(key);
     }
     for (const k of kills) {
-      if (k.killerIsOurs && !k.victimIsOurs) kdFor(k.killer).kills++;
-      if (k.victimIsOurs && !k.killerIsOurs) kdFor(k.victim).deaths++;
+      if (k.killerIsOurs && !k.victimIsOurs) {
+        const row = kdFor(k.killer);
+        row.kills++;
+        row.killFame += num(k.killFame);
+      }
+      if (k.victimIsOurs && !k.killerIsOurs) {
+        const row = kdFor(k.victim);
+        row.deaths++;
+        row.deathFame += num(k.killFame);
+      }
     }
 
     const keys = new Set([...rawStore.keys(), ...canonicalStore.keys(), ...kd.keys()]);
@@ -2607,10 +2638,15 @@ async function getCombat(db, eventId, options = {}) {
         rawDamage: num(raw.dmg),
         rawHealing: num(raw.heal),
         kills: num(combat.kills),
-        deaths: num(combat.deaths)
+        deaths: num(combat.deaths),
+        killFame: num(combat.killFame),
+        deathFame: num(combat.deathFame)
       };
     })
-      .filter(x => x.damage > 0 || x.healing > 0 || x.rawDamage > 0 || x.rawHealing > 0 || x.kills > 0 || x.deaths > 0)
+      .filter(x =>
+        x.damage > 0 || x.healing > 0 || x.rawDamage > 0 || x.rawHealing > 0 ||
+        x.kills > 0 || x.deaths > 0 || x.killFame > 0 || x.deathFame > 0
+      )
       .sort((a, b) =>
         b.damage - a.damage ||
         b.kills - a.kills ||
@@ -2629,6 +2665,24 @@ async function getCombat(db, eventId, options = {}) {
       byPlayer.set(key, cur);
     }
     return [...byPlayer.values()].sort((a, b) => b.v - a.v || a.n.localeCompare(b.n)).slice(0, limit);
+  }
+
+  function fameRanking(kills, side = "kill", limit = 20) {
+    const byPlayer = new Map();
+    for (const k of kills) {
+      const ours = side === "kill"
+        ? (k.killerIsOurs && !k.victimIsOurs)
+        : (k.victimIsOurs && !k.killerIsOurs);
+      if (!ours || num(k.killFame) <= 0) continue;
+      const name = side === "kill" ? k.killer : k.victim;
+      const key = normName(name);
+      const cur = byPlayer.get(key) || { n: name, v: 0 };
+      cur.v += num(k.killFame);
+      byPlayer.set(key, cur);
+    }
+    return [...byPlayer.values()]
+      .sort((a, b) => b.v - a.v || a.n.localeCompare(b.n))
+      .slice(0, limit);
   }
 
   function enemyGuildName(guilds) {
@@ -2701,7 +2755,9 @@ async function getCombat(db, eventId, options = {}) {
         healing: list.reduce((a, x) => a + x.heal, 0),
         mortes: bucket.deaths,
         killsCandidate: ourKills.length,
-        deathsCandidate: ourDeaths.length
+        deathsCandidate: ourDeaths.length,
+        killFame: ourKills.reduce((sum, k) => sum + num(k.killFame), 0),
+        deathFame: ourDeaths.reduce((sum, k) => sum + num(k.killFame), 0)
       },
       resumoDedup: {
         damage: canonicalList.reduce((a, x) => a + x.dmg, 0),
@@ -2713,6 +2769,8 @@ async function getCombat(db, eventId, options = {}) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 10).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 10).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills, 10),
+      topKillFame: fameRanking(kills, "kill", 10),
+      topDeathFame: fameRanking(kills, "death", 10),
       killScore: killScoreFor(kills),
       audit: {
         rawCombatDeltaEvents: bucket.rawCombatDeltaEvents,
@@ -2722,7 +2780,11 @@ async function getCombat(db, eventId, options = {}) {
         rawKillLikeEvents: bucket.rawKillLikeEvents,
         uniqueKillCandidates: kills.length,
         duplicateKillLikeEvents: Math.max(0, bucket.rawKillLikeEvents - kills.length),
-        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length
+        multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+        fameResolvedCandidates: kills.filter(k => k.killFameResolved).length,
+        fameUnresolvedCandidates: kills.filter(k => !k.killFameResolved).length,
+        fameResolvedCandidates: kills.filter(k => k.killFameResolved).length,
+        fameUnresolvedCandidates: kills.filter(k => !k.killFameResolved).length
       }
     };
   }
@@ -2745,7 +2807,9 @@ async function getCombat(db, eventId, options = {}) {
         healing: list.reduce((a, x) => a + x.heal, 0),
         mortes: bucket.deaths,
         killsCandidate: ourKills.length,
-        deathsCandidate: ourDeaths.length
+        deathsCandidate: ourDeaths.length,
+        killFame: ourKills.reduce((sum, k) => sum + num(k.killFame), 0),
+        deathFame: ourDeaths.reduce((sum, k) => sum + num(k.killFame), 0)
       },
       resumoDedup: {
         damage: canonicalList.reduce((a, x) => a + x.dmg, 0),
@@ -2758,6 +2822,8 @@ async function getCombat(db, eventId, options = {}) {
       topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
       topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
       topKillsCandidate: killRanking(kills),
+      topKillFame: fameRanking(kills, "kill"),
+      topDeathFame: fameRanking(kills, "death"),
       killScore: killScoreFor(kills),
       fights: reportableFights,
       audit: {
@@ -2837,6 +2903,8 @@ async function getCombat(db, eventId, options = {}) {
         sincePreviousDeathSeconds: gapMs == null ? null : Math.round(gapMs / 1000),
         combatActivityBetween: activityBetween,
         rapidReturn: !!(activityBetween && gapMs > 0 && gapMs <= RAPID_REDEATH_MS),
+        deathFame: num(k.killFame),
+        fameResolved: !!k.killFameResolved,
         observers: k.devices.size
       });
       prev = k;
@@ -2868,6 +2936,8 @@ async function getCombat(db, eventId, options = {}) {
       mortes: deaths,
       killsCandidate: ourKills.length,
       deathsCandidate: ourDeaths.length,
+      killFame: ourKills.reduce((sum, k) => sum + num(k.killFame), 0),
+      deathFame: ourDeaths.reduce((sum, k) => sum + num(k.killFame), 0),
       fights: null
     },
     resumoDedup: {
@@ -2884,6 +2954,8 @@ async function getCombat(db, eventId, options = {}) {
     topDmgDedup: canonicalList.filter(x => x.dmg > 0).sort((a, b) => b.dmg - a.dmg).slice(0, 20).map(x => ({ n: x.n, v: x.dmg })),
     topHealDedup: canonicalList.filter(x => x.heal > 0).sort((a, b) => b.heal - a.heal).slice(0, 20).map(x => ({ n: x.n, v: x.heal })),
     topKillsCandidate: killRanking(kills),
+    topKillFame: fameRanking(kills, "kill"),
+    topDeathFame: fameRanking(kills, "death"),
     killScore: killScoreFor(kills),
     audit: {
       rosterPlayers: rosterKeys.size,
@@ -2908,6 +2980,10 @@ async function getCombat(db, eventId, options = {}) {
       unclassifiedCanonicalSample: unclassifiedCanonicalKills.slice(-20).reverse().map(serializeUnclassifiedKill),
       duplicateKillLikeEvents: Math.max(0, rawKillLikeEvents - kills.length),
       multiObserverKillCandidates: kills.filter(k => k.devices.size > 1).length,
+      fameResolvedCandidates: kills.filter(k => k.killFameResolved).length,
+      fameUnresolvedCandidates: kills.filter(k => !k.killFameResolved).length,
+      totalKillFame: ourKills.reduce((sum, k) => sum + num(k.killFame), 0),
+      totalDeathFame: ourDeaths.reduce((sum, k) => sum + num(k.killFame), 0),
       multiObserverObservedDeaths: canonicalObservedDeaths.filter(k => k.observedDeathDevices.size > 1).length,
       deathDedupWindowMs: COMBAT_DEATH_DEDUP_MS,
       combatDeltaFingerprints: deltaFingerprints.size,
@@ -2942,7 +3018,11 @@ async function getCombat(db, eventId, options = {}) {
         killerInRoster: k.killerInRoster,
         victimInRoster: k.victimInRoster,
         killerInFamily: k.killerInFamily,
-        victimInFamily: k.victimInFamily
+        victimInFamily: k.victimInFamily,
+        killFame: num(k.killFame),
+        killFameResolved: !!k.killFameResolved,
+        albionEventIds: [...k.albionEventIds],
+        albionBattleIds: [...k.albionBattleIds]
       }))
     },
     meta: {
@@ -2952,6 +3032,8 @@ async function getCombat(db, eventId, options = {}) {
       fightGapMs: COMBAT_FIGHT_GAP_MS,
       zergDeathObserver: rawObservedDeaths > 0,
       damageFusionMode: "exact-fingerprint-conservative",
+      killFameSource: "albion-gameinfo-background",
+      killFameMatchWindowMs: killFame.__test.config().matchWindowMs,
       note: rawObservedDeaths > 0
         ? "Kills e mortes da zerg usam DiedEvent fundido entre observers. Dano/cura agora também expõem uma visão deduplicada conservadora: deltas exatamente iguais do mesmo jogador/mapa/janela de 1s são fundidos entre devices, preservando a maior multiplicidade vista por um único observer. O bruto continua disponível para auditoria."
         : "Este CTA ainda não possui player_death_observed (requer Combat Client v0.5.5+). Dano/cura expõem deduplicação conservadora por fingerprint exato; kills/mortes usam apenas os eventos locais legados."
@@ -3024,6 +3106,12 @@ async function getCombatCached(db, eventId, options = {}) {
     const current = _combatCache.get(id);
     if (current?.promise === promise) _combatInFlight.delete(id);
   }
+}
+
+function invalidateCombatCache(eventId) {
+  const key = String(eventId || "");
+  _combatCache.delete(key);
+  _combatInFlight.delete(key);
 }
 
 function resetCombatCache() {
@@ -3573,6 +3661,23 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         if (!ev || ev.status !== "open") ctaEventId = null;
       }
 
+      // O roster só é carregado quando o lote contém uma morte candidata a Kill Fame.
+      // Assim, mortes puramente inimigas são descartadas antes da fila/API sem custo
+      // permanente para batches que não carregam DiedEvent letal.
+      const hasFameCandidates = events.some(e => {
+        const type = String(e?.type || e?.Type || "").trim();
+        const payload = e?.payload ?? e?.Payload ?? {};
+        return type === "player_death_observed" &&
+          payload?.isLethal !== false &&
+          payload?.killer &&
+          payload?.victim;
+      });
+      let fameRosterKeys = new Set();
+      if (ctaEventId && hasFameCandidates) {
+        const roster = await db.getSignups(ctaEventId).catch(() => []);
+        fameRosterKeys = new Set((roster || []).map(row => normName(row?.username)).filter(Boolean));
+      }
+
       await pool.query(`
         INSERT INTO albion_telemetry_devices(device_id, player_name, version)
         VALUES($1,$2,$3)
@@ -3586,6 +3691,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         try {
           const presenceProbes = [];
           const zoneChanges = [];
+          const fameEnrichmentQueue = [];
           for (const e of events) {
             const eventId = String(e.eventId || e.EventId || "").trim();
             const type = String(e.type || e.Type || "").trim();
@@ -3611,6 +3717,15 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
                   payload,
                   occurredAt
                 });
+              }
+              if (
+                type === "player_death_observed" &&
+                payload?.isLethal !== false &&
+                payload?.killer &&
+                payload?.victim &&
+                shouldEnrichKillFame(payload, fameRosterKeys)
+              ) {
+                fameEnrichmentQueue.push({ eventId, payload, occurredAt });
               }
             } else {
               duplicate++;
@@ -3648,6 +3763,24 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
 
       if (ctaEventId) notifyTelemetry(ctaEventId, { inserted, deviceId });
       res.json({ ok: true, inserted, duplicate, ctaEventId });
+
+      if (fameEnrichmentQueue?.length) {
+        const timer = setTimeout(() => {
+          for (const item of fameEnrichmentQueue) {
+            killFame.queueEnrichment({
+              pool,
+              eventId: item.eventId,
+              payload: item.payload,
+              occurredAt: item.occurredAt,
+              onResolved: (resolvedCtaId) => {
+                invalidateCombatCache(resolvedCtaId);
+                notifyTelemetry(resolvedCtaId, { kind: "kill_fame_resolved" });
+              }
+            });
+          }
+        }, 0);
+        timer.unref?.();
+      }
     } catch (e) {
       console.error("/api/telemetry/ingest:", e);
       res.status(500).json({ error: "server" });
@@ -3863,7 +3996,10 @@ module.exports = {
     presenceAreaSummary,
     getCombatCached,
     resetCombatCache,
-    combatCacheTtl
+    invalidateCombatCache,
+    combatCacheTtl,
+    shouldEnrichKillFame,
+    isImortaisFamilyGuildName
   },
   getGuildPresenceProbeDiagnostics
 };
