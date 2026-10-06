@@ -63,15 +63,71 @@ function classify(pingou, pres, win) {
   return "RAPIDA";
 }
 
+function groupRowsByEvent(rows, field) {
+  const out = new Map();
+  for (const row of rows || []) {
+    const key = String(row?.[field] ?? "");
+    if (!key) continue;
+    if (!out.has(key)) out.set(key, []);
+    out.get(key).push(row);
+  }
+  return out;
+}
+
+async function loadEventsContext(guildId, events) {
+  const valid = [];
+  for (const event of events || []) {
+    const win = windowFor(event);
+    if (win) valid.push({ event, win });
+  }
+  if (!valid.length) {
+    return {
+      signupsByEvent: new Map(),
+      bombConfirmsByEvent: new Map(),
+      presenceByEvent: new Map()
+    };
+  }
+
+  const ids = valid.map(x => x.event.id);
+  const windows = valid.map(x => ({ eventId: x.event.id, start: x.win.start, end: x.win.end }));
+  const [signups, bombConfirms, presence] = await Promise.all([
+    db.getSignupsForEvents(ids),
+    db.getBombConfirmsForEvents(ids),
+    db.getPresenceForEventWindows(guildId, windows, ["prep", "bomb"])
+  ]);
+
+  return {
+    signupsByEvent: groupRowsByEvent(signups, "event_id"),
+    bombConfirmsByEvent: groupRowsByEvent(bombConfirms, "event_id"),
+    presenceByEvent: groupRowsByEvent(presence, "attendance_event_id")
+  };
+}
+
 // processa UM evento -> Map(user_id -> {username, level, minutes, pingou, bomb})
-async function processEvent(event) {
+// ctx é opcional. Sem ctx preserva exatamente as quatro leituras legadas.
+// Com ctx usa os lotes carregados por loadEventsContext.
+async function processEvent(event, ctx) {
   const win = windowFor(event);
   if (!win) return new Map();
 
-  const signups = await db.getSignups(event.id);        // quem pingou (com vaga ou reserva)
-  const bombConfirms = await db.getBombConfirms(event.id);
-  const presPrep = await db.getPresenceInWindow(event.guild_id, "prep", win.start, win.end);
-  const presBomb = await db.getPresenceInWindow(event.guild_id, "bomb", win.start, win.end);
+  const eventKey = String(event.id);
+  const hasCtx = !!ctx;
+  const signups = hasCtx
+    ? (ctx.signupsByEvent?.get(eventKey) || [])
+    : await db.getSignups(event.id);        // quem pingou (com vaga ou reserva)
+  const bombConfirms = hasCtx
+    ? (ctx.bombConfirmsByEvent?.get(eventKey) || [])
+    : await db.getBombConfirms(event.id);
+
+  let presPrep, presBomb;
+  if (hasCtx) {
+    const presence = ctx.presenceByEvent?.get(eventKey) || [];
+    presPrep = presence.filter(p => p.channel_kind === "prep");
+    presBomb = presence.filter(p => p.channel_kind === "bomb");
+  } else {
+    presPrep = await db.getPresenceInWindow(event.guild_id, "prep", win.start, win.end);
+    presBomb = await db.getPresenceInWindow(event.guild_id, "bomb", win.start, win.end);
+  }
 
   // agrupa presença por user
   const byUser = new Map();
@@ -116,6 +172,7 @@ async function buildReport(guildId, startUTC, endUTC) {
     if (!prev || new Date(ev.created_at) > new Date(prev.created_at)) byKey.set(key, ev);
   }
   const events = [...byKey.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const ctx = await loadEventsContext(guildId, events);
   const perUser = new Map(); // uid -> stats acumulados
 
   const ensure = (uid, uname) => {
@@ -128,7 +185,7 @@ async function buildReport(guildId, startUTC, endUTC) {
   for (const ev of events) {
     ctaCount++;
     const dateKey = new Date(ev.created_at).toISOString().slice(0, 10);
-    const res = await processEvent(ev);
+    const res = await processEvent(ev, ctx);
     for (const [uid, r] of res) {
       const o = ensure(uid, r.username);
       if (r.level === "INTEGRAL") o.integral++;
@@ -168,7 +225,10 @@ async function buildReport(guildId, startUTC, endUTC) {
   return { ctaCount, rows, events };
 }
 
-module.exports = { windowFor, presenceInWindow, classify, processEvent, buildReport };
+module.exports = {
+  windowFor, presenceInWindow, classify, processEvent, buildReport,
+  __test: { loadEventsContext }
+};
 
 // ============================================================================
 // AUDITORIA — lista os CTAs contados no período, com contagem de presentes e
@@ -183,9 +243,10 @@ async function auditEvents(guildId, startUTC, endUTC) {
     if (!prev || new Date(ev.created_at) > new Date(prev.created_at)) byKey.set(key, ev);
   }
   const events = [...byKey.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const ctx = await loadEventsContext(guildId, events);
   const counted = [];
   for (const ev of events) {
-    const res = await processEvent(ev);
+    const res = await processEvent(ev, ctx);
     let present = 0, pinged = 0, fantasma = 0, integral = 0;
     for (const [, r] of res) {
       if (r.pingou) pinged++;
