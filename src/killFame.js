@@ -15,6 +15,19 @@ const API_CONCURRENCY = Math.max(
   1,
   Math.min(6, Number(process.env.ALBION_API_CONCURRENCY) || 2)
 );
+const API_RATE_PER_SECOND = Math.max(
+  1,
+  Math.min(10, Number(process.env.ALBION_API_RATE_PER_SECOND) || 2)
+);
+const API_MIN_INTERVAL_MS = Math.ceil(1000 / API_RATE_PER_SECOND);
+const SEMANTIC_DEDUP_MS = Math.max(
+  1_000,
+  Number(process.env.ALBION_FAME_DEDUP_WINDOW_MS) || 15_000
+);
+const DEFAULT_RESOLVED_COALESCE_MS = Math.max(
+  15_000,
+  Number(process.env.ALBION_FAME_RESOLVED_COALESCE_MS) || 15_000
+);
 const PLAYER_ID_CACHE_MS = 6 * 60 * 60 * 1000;
 const EVENTS_CACHE_MS = 4_000;
 const DEFAULT_RETRY_MS = [4_000, 15_000, 45_000, 120_000];
@@ -23,8 +36,13 @@ const playerIdCache = new Map();
 const eventsCache = new Map();
 const requestFlights = new Map();
 const enrichmentFlights = new Map();
+const semanticEnrichments = new Map(); // killer|victim -> { occurredMs, promise }
+const resolvedByCta = new Map(); // cta -> timer/callback
 const requestQueue = [];
 let activeRequests = 0;
+let nextRequestAt = 0;
+let rateGate = Promise.resolve();
+let resolvedCoalesceMs = DEFAULT_RESOLVED_COALESCE_MS;
 
 let fetchImpl = (...args) => fetch(...args);
 let sleepImpl = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -68,11 +86,37 @@ function runLimited(task) {
   });
 }
 
+async function waitForRateSlot() {
+  let release;
+  const previous = rateGate;
+  rateGate = new Promise(resolve => { release = resolve; });
+  await previous;
+  try {
+    const now = Date.now();
+    const waitMs = Math.max(0, nextRequestAt - now);
+    if (waitMs > 0) await sleepImpl(waitMs);
+    const startedAt = Math.max(Date.now(), nextRequestAt);
+    nextRequestAt = startedAt + API_MIN_INTERVAL_MS;
+  } finally {
+    release();
+  }
+}
+
+function retryAfterMs(response) {
+  const raw = response?.headers?.get?.("retry-after");
+  if (!raw) return 0;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.ceil(seconds * 1000));
+  const at = new Date(raw).getTime();
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : 0;
+}
+
 async function requestOnce(path) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   timer.unref?.();
   try {
+    await waitForRateSlot();
     const response = await fetchImpl(GAMEINFO_BASE + path, {
       signal: controller.signal,
       headers: { "User-Agent": "IMORTAIS-War-Room/kill-fame-enrichment" }
@@ -80,6 +124,7 @@ async function requestOnce(path) {
     if (response.status === 429) {
       const err = new Error("Albion GameInfo HTTP 429");
       err.status = 429;
+      err.retryAfterMs = retryAfterMs(response);
       throw err;
     }
     if (!response.ok) {
@@ -105,7 +150,8 @@ async function albionJson(path) {
         return await runLimited(() => requestOnce(key));
       } catch (err) {
         if (err?.status !== 429 || attempt >= retryMs.length) throw err;
-        await sleepImpl(retryMs[attempt++]);
+        const backoffMs = retryMs[attempt++] || 0;
+        await sleepImpl(Math.max(backoffMs, Number(err?.retryAfterMs) || 0));
       }
     }
   })().finally(() => {
@@ -301,18 +347,49 @@ async function runEnrichment(args) {
   return null;
 }
 
+function semanticPairKey(payload) {
+  const killer = normName(payload?.killer);
+  const victim = normName(payload?.victim);
+  return killer && victim ? killer + "|" + victim : "";
+}
+
+function scheduleResolved(ctaEventId, callback, patch) {
+  const key = String(ctaEventId || "");
+  if (!key || typeof callback !== "function") return;
+  const current = resolvedByCta.get(key);
+  if (current) {
+    current.patch = patch || current.patch;
+    return;
+  }
+
+  const entry = { callback, patch, timer: null };
+  entry.timer = setTimeout(() => {
+    resolvedByCta.delete(key);
+    try { entry.callback(key, entry.patch); } catch (_) {}
+  }, resolvedCoalesceMs);
+  entry.timer.unref?.();
+  resolvedByCta.set(key, entry);
+}
+
 function queueEnrichment(args) {
   const key = String(args?.eventId || "");
   if (!key || !args?.pool || !args?.payload?.killer || !args?.payload?.victim) return null;
   if (enrichmentFlights.has(key)) return enrichmentFlights.get(key);
 
+  const pairKey = semanticPairKey(args.payload);
+  const occurredMs = new Date(args?.occurredAt).getTime();
+  if (pairKey && Number.isFinite(occurredMs)) {
+    const recent = semanticEnrichments.get(pairKey);
+    if (recent && Math.abs(occurredMs - recent.occurredMs) <= SEMANTIC_DEDUP_MS) {
+      return recent.promise;
+    }
+  }
+
   let promise;
   promise = Promise.resolve()
     .then(() => runEnrichment(args))
     .then(result => {
-      if (result?.ctaEventId && typeof args.onResolved === "function") {
-        try { args.onResolved(result.ctaEventId, result.patch); } catch (_) {}
-      }
+      if (result?.ctaEventId) scheduleResolved(result.ctaEventId, args.onResolved, result.patch);
       return result;
     })
     .catch(err => {
@@ -324,6 +401,9 @@ function queueEnrichment(args) {
     });
 
   enrichmentFlights.set(key, promise);
+  if (pairKey && Number.isFinite(occurredMs)) {
+    semanticEnrichments.set(pairKey, { occurredMs, promise });
+  }
   return promise;
 }
 
@@ -332,8 +412,14 @@ function resetForTests() {
   eventsCache.clear();
   requestFlights.clear();
   enrichmentFlights.clear();
+  semanticEnrichments.clear();
+  for (const entry of resolvedByCta.values()) clearTimeout(entry.timer);
+  resolvedByCta.clear();
   requestQueue.splice(0);
   activeRequests = 0;
+  nextRequestAt = 0;
+  rateGate = Promise.resolve();
+  resolvedCoalesceMs = DEFAULT_RESOLVED_COALESCE_MS;
   fetchImpl = (...args) => fetch(...args);
   sleepImpl = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   retryMs = [...DEFAULT_RETRY_MS];
@@ -352,12 +438,18 @@ module.exports = {
     setFetch: fn => { fetchImpl = fn; },
     setSleep: fn => { sleepImpl = fn; },
     setRetryMs: values => { retryMs = Array.isArray(values) ? values.map(Number) : [...DEFAULT_RETRY_MS]; },
+    setResolvedCoalesceMs: value => { resolvedCoalesceMs = Math.max(1, Number(value) || DEFAULT_RESOLVED_COALESCE_MS); },
     concurrency: () => ({ active: activeRequests, queued: requestQueue.length, max: API_CONCURRENCY }),
+    pendingResolved: () => resolvedByCta.size,
     config: () => ({
       base: GAMEINFO_BASE,
       matchWindowMs: MATCH_WINDOW_MS,
       timeoutMs: API_TIMEOUT_MS,
-      concurrency: API_CONCURRENCY
+      concurrency: API_CONCURRENCY,
+      ratePerSecond: API_RATE_PER_SECOND,
+      minRequestIntervalMs: API_MIN_INTERVAL_MS,
+      semanticDedupMs: SEMANTIC_DEDUP_MS,
+      resolvedCoalesceMs
     })
   }
 };
