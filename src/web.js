@@ -2986,12 +2986,21 @@ const PAGE = `<!doctype html>
           +'<div class="stat g"><div class="k">Categorias detectadas</div><div class="v">'+fmtS(meta.categoryCount||0)+'</div></div>'
           +'<div class="stat a"><div class="k">Categorias mapeadas</div><div class="v">'+fmtS(meta.mappedCategoryCount||0)+'</div></div>'
           +'<div class="stat p"><div class="k">Jogadores no último estado</div><div class="v">'+fmtS(meta.playerCount||0)+'</div></div>'
+          +'</div>'
+          +'<div class="statgrid">'
+          +'<div class="stat"><div class="k">Probes brutos · 3 dias</div><div class="v">'+fmtS(meta.rawProbes3d||0)+'</div></div>'
+          +'<div class="stat"><div class="k">Requests capturados</div><div class="v">'+fmtS(meta.rawRequests3d||0)+'</div></div>'
+          +'<div class="stat"><div class="k">Responses capturadas</div><div class="v">'+fmtS(meta.rawResponses3d||0)+'</div></div>'
+          +'<div class="stat"><div class="k">Candidatos no backfill</div><div class="v">'+fmtS(meta.backfillCandidateSnapshots||0)+'</div></div>'
           +'</div>';
 
         if(!categories.length){
           html+='<div class="panel"><h3>Aguardando os primeiros dados</h3>'
-            +'<div class="empty-note">Nenhum snapshot de Guild Might foi materializado ainda. A coleta é passiva: quando um Combat Client v0.6.0 abrir Guilda → Might → Overview/Contribuição, os requests/responses observados entram aqui automaticamente.</div>'
-            +'<div class="note">O client não envia comandos ao Albion. Esta tela será preenchida conforme a guilda usar naturalmente as telas de Might.</div></div>';
+            +'<div class="empty-note">Nenhum snapshot de Guild Might foi materializado ainda.</div>'
+            +(Number(meta.rawProbes3d||0)>0
+              ?'<div class="note">O Combat Client JÁ está enviando probes: '+fmtS(meta.rawProbes3d||0)+' bruto(s) nos últimos 3 dias ('+fmtS(meta.rawRequests3d||0)+' request(s) / '+fmtS(meta.rawResponses3d||0)+' response(s)). Se continuar em 0 snapshots, o problema está no reconhecimento do layout, não na captura.</div>'
+              :'<div class="note">Ainda não há guild_might_probe bruto no servidor nos últimos 3 dias. Nesse caso o próximo diagnóstico é o handler/opcode do Combat Client.</div>')
+            +'<div class="note">Overview e Contribution agora são ambos aceitos e o backend reprocessa automaticamente até 3 dias de probes antigos, sem exigir que você reabra tudo.</div></div>';
           setView('view-might',html);
           return;
         }
