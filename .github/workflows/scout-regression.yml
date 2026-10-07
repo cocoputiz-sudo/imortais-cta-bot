@@ -25,6 +25,7 @@ on:
       - "test/guild-roster-route.js"
       - "test/kill-fame.js"
       - "test/ingest-route.js"
+      - "test/pair-route.js"
       - "test/cta-time.js"
       - "test/cta-freeze.js"
       - ".github/workflows/scout-regression.yml"
@@ -86,10 +87,171 @@ jobs:
         run: node test/kill-fame.js
       - name: Telemetry ingest route
         run: node test/ingest-route.js
+      - name: Telemetry pair security
+        run: node test/pair-route.js
       - name: CTA time rollover
         run: node test/cta-time.js
       - name: CTA freeze persistence
         run: node test/cta-freeze.js
+      - name: Prova negativa - pair sem consumo atômico emite vários tokens
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src/telemetry.js";
+          let src = fs.readFileSync(path, "utf8");
+          const old = `UPDATE albion_telemetry_pairing_codes
+              SET used_at=now()
+            WHERE code_hash=$1
+              AND used_at IS NULL
+              AND expires_at > now()
+            RETURNING *`;
+          const replacement = `SELECT * FROM albion_telemetry_pairing_codes
+            WHERE code_hash=$1
+              AND used_at IS NULL
+              AND expires_at > now()
+            LIMIT 1`;
+          if (!src.includes(old)) throw new Error("UPDATE atômico não encontrado");
+          src = src.replace(old, replacement);
+          fs.writeFileSync(path, src);
+          NODE
+          set +e
+          node test/pair-route.js > mutation-pair-atomic.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-pair-atomic.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: pair-route não detectou consumo não atômico"
+            exit 1
+          fi
+          grep -q "8 requisições simultâneas" mutation-pair-atomic.log
+          echo "✅ prova negativa: corrida do /pair falha sem UPDATE atômico"
+
+      - name: Prova negativa - pair perde limite por IP
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          sed -i 's/const PAIR_FAILURE_IP_LIMIT = 8;/const PAIR_FAILURE_IP_LIMIT = 100000;/' src/telemetry.js
+          set +e
+          node test/pair-route.js > mutation-pair-ip-limit.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-pair-ip-limit.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: pair-route não detectou ausência do limite por IP"
+            exit 1
+          fi
+          grep -q "8ª falha do mesmo IP" mutation-pair-ip-limit.log
+          echo "✅ prova negativa: /pair falha ao remover limite por IP"
+
+      - name: Prova negativa - pair perde limite global
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          sed -i 's/const PAIR_FAILURE_GLOBAL_LIMIT = 300;/const PAIR_FAILURE_GLOBAL_LIMIT = 100000;/' src/telemetry.js
+          set +e
+          node test/pair-route.js > mutation-pair-global-limit.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-pair-global-limit.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: pair-route não detectou ausência do limite global"
+            exit 1
+          fi
+          grep -q "limite global precisa bloquear" mutation-pair-global-limit.log
+          echo "✅ prova negativa: /pair falha ao remover limite global"
+
+      - name: Prova negativa - pair deixa client sobrescrever staff
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          sed -i 's/const boundPlayer = staffPlayer || playerName || null;/const boundPlayer = playerName || staffPlayer || null;/' src/telemetry.js
+          set +e
+          node test/pair-route.js > mutation-pair-binding.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-pair-binding.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: pair-route não detectou override do vínculo da staff"
+            exit 1
+          fi
+          grep -q "nome vinculado pela staff precisa prevalecer" mutation-pair-binding.log
+          echo "✅ prova negativa: /pair falha quando o client sobrescreve a staff"
+
+      - name: Prova negativa - Railway trust proxy removido
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          sed -i '/app.set("trust proxy", 1);/d' src/web.js
+          set +e
+          node test/pair-route.js > mutation-trust-proxy.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-trust-proxy.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: pair-route não detectou perda do IP real atrás do Railway"
+            exit 1
+          fi
+          echo "✅ prova negativa: rate limit falha sem trust proxy"
+
+      - name: Prova negativa - ingest volta a aceitar NUL cru em device
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src/telemetry.js";
+          let src = fs.readFileSync(path, "utf8");
+          src = src.replace(
+            '      const deviceId = stripTelemetryNul(device.deviceId).trim();\n      const detectedPlayer = stripTelemetryNul(device.playerName).trim();\n      const deviceVersion = stripTelemetryNul(device.version).trim();',
+            '      const deviceId = String(device.deviceId || "").trim();\n      const detectedPlayer = String(device.playerName || "").trim();\n      const deviceVersion = String(device.version || "").trim();'
+          );
+          fs.writeFileSync(path, src);
+          NODE
+          set +e
+          node test/pair-route.js > mutation-device-nul.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-device-nul.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: pair-route não detectou NUL cru em device.*"
+            exit 1
+          fi
+          grep -q "NUL em device" mutation-device-nul.log
+          echo "✅ prova negativa: ingest-route falha sem saneamento de device.*"
+
+      - name: Prova negativa - applyReallocation ignora freeze
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          cp -a . "$tmp/repo"
+          cd "$tmp/repo"
+          sed -i 's/if (isCtaFrozen(fresh)) {/if (false) {/' src/index.js
+          set +e
+          node test/cta-freeze.js > mutation-freeze-usage.log 2>&1
+          rc=$?
+          set -e
+          cat mutation-freeze-usage.log
+          if [ "$rc" -eq 0 ]; then
+            echo "ERRO: cta-freeze não detectou applyReallocation com checagem desligada"
+            exit 1
+          fi
+          grep -q "applyReallocation precisa usar" mutation-freeze-usage.log
+          echo "✅ prova negativa: cta-freeze falha quando applyReallocation usa if(false)"
+
       - name: Prova negativa - Kill Fame falha com escopo pós-resposta quebrado
         shell: bash
         run: |
