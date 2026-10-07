@@ -3592,6 +3592,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 
   app.post("/api/telemetry/pair", async (req, res) => {
+    let reservation = null;
     try {
       const body = req.body || {};
       const code = String(body.code || "").trim();
@@ -3603,7 +3604,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const requesterIp = String(req.ip || req.socket?.remoteAddress || "unknown");
       const attempt = reservePairAttempt(requesterIp);
       if (attempt.blocked) return respondPairRateLimited(res, attempt);
-      const reservation = attempt.reservation;
+      reservation = attempt.reservation;
 
       const hash = tokenHash("pair:" + code);
       const client = await pool.connect();
@@ -3660,6 +3661,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         client.release();
       }
     } catch (e) {
+      releasePairReservation(reservation);
       console.error("/api/telemetry/pair:", e);
       res.status(500).json({ error: "server" });
     }
