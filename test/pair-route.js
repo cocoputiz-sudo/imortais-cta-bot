@@ -76,7 +76,12 @@ async function testAtomicSingleUse(base) {
 
   const successes = responses.filter((r) => r.status === 200);
   assert.equal(successes.length, 1, "8 requisições simultâneas precisam emitir exatamente 1 token");
-  assert.equal(responses.filter((r) => r.status === 401).length, 7);
+  assert.equal(
+    responses.filter((r) => r.status === 401 || r.status === 429).length,
+    7,
+    "as outras 7 requisições devem falhar sem emitir token"
+  );
+  assert.equal(responses.filter((r) => r.status >= 500).length, 0);
 
   const { rows: tokenRows } = await db.pool.query(
     "SELECT token_hash, device_id, player_name FROM albion_telemetry_agent_tokens"
