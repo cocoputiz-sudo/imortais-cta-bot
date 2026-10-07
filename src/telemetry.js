@@ -4,6 +4,7 @@
 const crypto = require("crypto");
 const navigation = require("./navigation");
 const killFame = require("./killFame");
+const guildMight = require("./guildMight");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -3580,38 +3581,55 @@ async function getGuildMightProbeDiagnostics({ minutes = 60, limit = 200 } = {})
   for (const row of rows) {
     const payload = row.payload || {};
     const operationName = String(payload.operationName || "unknown");
+    const direction = String(payload.direction || "response").toLowerCase();
     if (!byOperation.has(operationName)) {
       byOperation.set(operationName, {
         operationName,
         operationCode: payload.operationCode ?? null,
         count: 0,
-        parameterKeys: {}
+        requestCount: 0,
+        responseCount: 0,
+        parameterKeys: { request: {}, response: {} }
       });
     }
 
     const group = byOperation.get(operationName);
     group.count++;
+    if (direction === "request") group.requestCount++;
+    else group.responseCount++;
+
     const parameters = payload.parameters && typeof payload.parameters === "object"
       ? payload.parameters
       : {};
+    const bucket = direction === "request" ? group.parameterKeys.request : group.parameterKeys.response;
 
     for (const [key, value] of Object.entries(parameters)) {
-      if (!group.parameterKeys[key]) {
-        group.parameterKeys[key] = { types: [], sample: previewValue(value) };
-      }
+      if (!bucket[key]) bucket[key] = { types: [], sample: previewValue(value) };
       const shape = jsonShape(value);
-      if (!group.parameterKeys[key].types.includes(shape)) group.parameterKeys[key].types.push(shape);
+      if (!bucket[key].types.includes(shape)) bucket[key].types.push(shape);
     }
   }
+
+  const correlation = guildMight.correlateProbeRows(rows, { windowMs: 10000 });
 
   return {
     windowMinutes: safeMinutes,
     total: rows.length,
+    requestCount: rows.filter(r => String(r.payload?.direction || "").toLowerCase() === "request").length,
+    responseCount: rows.filter(r => String(r.payload?.direction || "response").toLowerCase() === "response").length,
     operations: [...byOperation.values()].sort((a, b) => b.count - a.count),
+    discovery: {
+      correlatedPairs: correlation.pairs.slice(0, 100),
+      pendingRequestCount: correlation.pendingRequests.length,
+      unpairedResponseCount: correlation.unpairedResponses.length,
+      referenceWeightsPerMillion: guildMight.referenceWeightsPerMillion(),
+      referenceDate: "2026-10-07"
+    },
     recent: rows.map(row => ({
       eventId: row.event_id,
       deviceId: row.device_id,
       observer: row.player_name,
+      direction: row.payload?.direction || "response",
       operationName: row.payload?.operationName || null,
       operationCode: row.payload?.operationCode ?? null,
       probeVersion: row.payload?.probeVersion ?? null,
@@ -4358,7 +4376,9 @@ module.exports = {
     invalidateCombatCache,
     combatCacheTtl,
     shouldEnrichKillFame,
-    isImortaisFamilyGuildName
+    isImortaisFamilyGuildName,
+    guildMight
   },
-  getGuildPresenceProbeDiagnostics
+  getGuildPresenceProbeDiagnostics,
+  getGuildMightProbeDiagnostics
 };
