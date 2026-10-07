@@ -1079,6 +1079,7 @@ const PAGE = `<!doctype html>
   <div class="nav" data-view="confirm">🎯 Validação</div>
   <div class="nav" data-view="loot">📦 Loot</div>
   <div class="nav" data-view="combat">⚔️ Combate</div>
+  <div class="nav" data-view="might">🏅 Guild Might</div>
   <div class="nav" data-view="guild">🟢 Guilda</div>
   <div class="nav" data-view="devices">🖥️ Dispositivos</div>
 </nav>
@@ -1094,8 +1095,9 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="confirm">🎯 Validação do CTA</div>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
+    <div class="nav" data-view="might">🏅 Guild Might</div>
     <div class="nav" data-view="guild">🟢 Guilda online</div>
-      <div class="nav" data-view="devices">🖥️ Dispositivos</div>
+    <div class="nav" data-view="devices">🖥️ Dispositivos</div>
     <div class="navtitle">EM BREVE</div>
     <div class="nav soon" id="nav-bomb">💥 Bomb <span class="tagsoon">EM BREVE</span></div>
     <div class="nav soon" id="nav-castelo">🏰 Castelo <span class="tagsoon">EM BREVE</span></div>
@@ -1132,6 +1134,7 @@ const PAGE = `<!doctype html>
     <div id="view-confirm" style="display:none"></div>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
+    <div id="view-might" style="display:none"></div>
     <div id="view-devices" style="display:none"></div>
     <div id="view-guild" style="display:none"></div>
   </main>
@@ -1224,7 +1227,7 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',devices:'view-devices',guild:'view-guild'};
+    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',might:'view-might',devices:'view-devices',guild:'view-guild'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='navigation') renderNavigation();
@@ -1232,6 +1235,7 @@ const PAGE = `<!doctype html>
     if(v==='confirm') renderConfirm();
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
+    if(v==='might') renderGuildMight();
     if(v==='devices') renderDevices();
     if(v==='guild') renderGuild();
   }
@@ -1311,6 +1315,7 @@ const PAGE = `<!doctype html>
           +'<div class="mural-feature"><b>⚔️ Combate</b><span>Dano, cura, kills, mortes, Kill Fame, Death Fame, Battle Reports, mapas e placar contra guildas inimigas.</span></div>'
           +'<div class="mural-feature"><b>📊 Scout</b><span>Perfis dos jogadores, histórico, destaques, alertas, presença por área e indicadores de desempenho.</span></div>'
           +'<div class="mural-feature"><b>🟢 Guilda online</b><span>Jogadores observados online, cruzamento da lista do jogo com pings e call, contribuinte e quem ainda está equipando.</span></div>'
+          +'<div class="mural-feature"><b>🏅 Guild Might</b><span>Snapshots passivos de contribuição, ranking por Might e SP estimado conforme as categorias são mapeadas.</span></div>'
           +'<div class="mural-feature"><b>🖥️ Dispositivos</b><span>Heartbeat e saúde dos Combat Clients conectados à telemetria do War Room.</span></div>'
           +'<div class="mural-feature"><b>📣 Mural</b><span>Comunicados importantes da guilda e atualizações do próprio sistema.</span></div>'
           +'</div>'
@@ -2872,13 +2877,31 @@ const PAGE = `<!doctype html>
             +'<div class="stat a"><div class="k">'+esc(deathObserver?'Mortes da zerg':'Mortes candidatas · legado')+'</div><div class="v">'+fmtS(r.mortes)+'</div></div>'
             +'<div class="stat b"><div class="k">'+esc(deathObserver?'Kills da zerg':'Kills candidatas · legado')+'</div><div class="v">'+fmtS(a.ourKillCandidates||0)+'</div></div>'
             +'<div class="stat b"><div class="k">Kill Fame total</div><div class="v">'+fmtS(r.killFame||a.totalKillFame||0)+'</div></div>'
-            +'<div class="stat a"><div class="k">Death Fame total</div><div class="v">'+fmtS(r.deathFame||a.totalDeathFame||0)+'</div></div></div>'            +(function(){              var ks=d.killScore||{byGuild:[],totals:{}};              var rows=ks.byGuild||[]; var t=ks.totals||{};              var we=t.weKilled||0, they=t.wereKilled||0;              var saldo=we-they; var saldoTxt=(saldo>0?'+':'')+saldo;              var saldoCor=saldo>0?'#35c46a':(saldo<0?'#d9534f':'#e2b95e');              var head='<div class="panel"><h3>\u2694\uFE0F Placar de kills \u00b7 guilda vs guilda</h3>'                +'<div class="statgrid">'                +'<div class="stat g"><div class="k">N\u00f3s matamos</div><div class="v">'+fmtS(we)+'</div></div>'                +'<div class="stat r"><div class="k">Perdemos</div><div class="v">'+fmtS(they)+'</div></div>'                +'<div class="stat b"><div class="k">Saldo</div><div class="v" style="color:'+saldoCor+'">'+saldoTxt+'</div></div></div>';              if(!rows.length){ return head+'<div class="empty-note">Ainda n\u00e3o h\u00e1 abates registrados entre n\u00f3s e inimigos neste CTA.</div></div>'; }              var body='<table class="dtable"><thead><tr><th>Guilda inimiga</th><th>Matamos</th><th>Perdemos</th><th>Saldo</th></tr></thead><tbody>';              body+=rows.map(function(x){                var sd=(x.weKilledThem||0)-(x.theyKilledUs||0);                var cor=sd>0?'#35c46a':(sd<0?'#d9534f':'var(--faint)');                return '<tr><td><b>'+esc(x.guild||'Sem guilda')+'</b></td>'                  +'<td style="color:#35c46a">'+fmtS(x.weKilledThem||0)+'</td>'                  +'<td style="color:#d9534f">'+fmtS(x.theyKilledUs||0)+'</td>'                  +'<td style="color:'+cor+';font-weight:700">'+(sd>0?'+':'')+sd+'</td></tr>';              }).join('');              body+='</tbody></table>';              return head+body+'<div class="note">Confronto direto: abates entre a nossa fam\u00edlia (IMORTAIS / Academy / IMORTAIS 2) e cada guilda inimiga. Fogo amigo e mortes entre inimigos n\u00e3o entram.</div></div>';            })()            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e uma nova luta é segmentada após mais de 2 minutos sem eventos de combate. Para evitar histórico fantasma, só é exibido Battle Report quando kills da nossa zerg + mortes da nossa zerg somam pelo menos '+fmtS(battleMin)+'. Eventos anteriores ao Combat Client v0.5.4 podem aparecer em “Mapa desconhecido”.</div></div>'
+            +'<div class="stat a"><div class="k">Death Fame total</div><div class="v">'+fmtS(r.deathFame||a.totalDeathFame||0)+'</div></div></div>'
+            +(function(){
+              var fc=d.fameCoverage||{}, fk=fc.kills||{}, fd=fc.deaths||{};
+              function fameCoverageCard(label,x,cls){
+                var total=Number(x.total||0), resolved=Number(x.resolved||0), pending=Number(x.unresolved||0);
+                var pct=Number(x.percent==null?(total?resolved*100/total:100):x.percent);
+                return '<div class="stat '+cls+'"><div class="k">'+esc(label)+'</div><div class="v">'+resolved+'/'+total+'</div>'
+                  +'<div style="margin-top:4px;color:var(--muted);font-size:11px">'+pct.toFixed(1)+'% resolvido · '+pending+' pendente(s)</div></div>';
+              }
+              return '<div class="panel" style="margin-top:12px"><h3>🏷️ Fame oficial Albion</h3>'
+                +'<div class="statgrid">'
+                +fameCoverageCard('Abates com Kill Fame oficial',fk,'b')
+                +fameCoverageCard('Mortes com Death Fame oficial',fd,'a')
+                +'</div>'
+                +'<div class="note">Fonte: '+esc(fc.source||'albion-gameinfo')+' · campo oficial '+esc(fc.field||'TotalVictimKillFame')+'. '
+                +'Kill Fame é o valor do inimigo abatido por nós; Death Fame é esse mesmo valor quando um jogador nosso é a vítima. '
+                +'Pendentes não são tratados como fame zero.</div></div>';
+            })()            +(function(){              var ks=d.killScore||{byGuild:[],totals:{}};              var rows=ks.byGuild||[]; var t=ks.totals||{};              var we=t.weKilled||0, they=t.wereKilled||0;              var saldo=we-they; var saldoTxt=(saldo>0?'+':'')+saldo;              var saldoCor=saldo>0?'#35c46a':(saldo<0?'#d9534f':'#e2b95e');              var head='<div class="panel"><h3>\u2694\uFE0F Placar de kills \u00b7 guilda vs guilda</h3>'                +'<div class="statgrid">'                +'<div class="stat g"><div class="k">N\u00f3s matamos</div><div class="v">'+fmtS(we)+'</div></div>'                +'<div class="stat r"><div class="k">Perdemos</div><div class="v">'+fmtS(they)+'</div></div>'                +'<div class="stat b"><div class="k">Saldo</div><div class="v" style="color:'+saldoCor+'">'+saldoTxt+'</div></div></div>';              if(!rows.length){ return head+'<div class="empty-note">Ainda n\u00e3o h\u00e1 abates registrados entre n\u00f3s e inimigos neste CTA.</div></div>'; }              var body='<table class="dtable"><thead><tr><th>Guilda inimiga</th><th>Matamos</th><th>Perdemos</th><th>Saldo</th></tr></thead><tbody>';              body+=rows.map(function(x){                var sd=(x.weKilledThem||0)-(x.theyKilledUs||0);                var cor=sd>0?'#35c46a':(sd<0?'#d9534f':'var(--faint)');                return '<tr><td><b>'+esc(x.guild||'Sem guilda')+'</b></td>'                  +'<td style="color:#35c46a">'+fmtS(x.weKilledThem||0)+'</td>'                  +'<td style="color:#d9534f">'+fmtS(x.theyKilledUs||0)+'</td>'                  +'<td style="color:'+cor+';font-weight:700">'+(sd>0?'+':'')+sd+'</td></tr>';              }).join('');              body+='</tbody></table>';              return head+body+'<div class="note">Confronto direto: abates entre a nossa fam\u00edlia (IMORTAIS / Academy / IMORTAIS 2) e cada guilda inimiga. Fogo amigo e mortes entre inimigos n\u00e3o entram.</div></div>';            })()            +'<div class="panel"><h3>🗺️ Batalhas por mapa</h3><div class="note">Cada mapa é tratado separadamente e uma nova luta é segmentada após mais de 2 minutos sem eventos de combate. Para evitar histórico fantasma, só é exibido Battle Report quando kills da nossa zerg + mortes da nossa zerg somam pelo menos '+fmtS(battleMin)+'. Eventos anteriores ao Combat Client v0.5.4 podem aparecer em “Mapa desconhecido”.</div></div>'
             +(maps.length?maps.map(renderMapBlock).join(''):'<div class="panel"><div class="empty-note">Ainda não há eventos de combate com mapa neste CTA.</div></div>')
             +'<div class="panel"><h3>Resumo por PT · bruto</h3><table class="dtable"><thead><tr><th>PT</th><th>Dano</th><th>Cura</th><th>Mortes</th></tr></thead><tbody>'
             +(d.porPt||[]).map(function(x){ return '<tr><td><b>'+esc(x.pt)+'</b></td><td>'+fmtS(x.dmg)+'</td><td>'+fmtS(x.heal)+'</td><td>'+fmtS(x.mortes)+'</td></tr>'; }).join('')
             +'</tbody></table></div>'
             +'<div class="split"><div class="panel"><h3>🏆 Top DPS · dedup. conservador</h3>'+topList(d.topDmgDedup||d.topDmg||[],fmtS)+'</div>'
-            +'<div class="panel"><h3>💚 Top Heal · dedup. conservador</h3>'+topList(d.topHealDedup||d.topHeal||[],fmtS)+'</div></div>'
+            +'<div class="panel"><h3>💚 Top Heal · dedup. conservador</h3>'+topList(d.topHealDedup||d.topHeal||[],fmtS)+'</div></div>'            +'<div class="split"><div class="panel"><h3>💀 Top Kill Fame · oficial</h3>'+topList(d.topKillFame||[],fmtS)+'</div>'
+            +'<div class="panel"><h3>🪦 Top Death Fame · oficial</h3>'+topList(d.topDeathFame||[],fmtS)+'</div></div>'
             +'<div class="split"><div class="panel"><h3>☠️ Top Kills · candidato</h3>'+topList(d.topKillsCandidate||[],fmtS)+'</div>'
             +'<div class="panel"><h3>🧪 Auditoria de mortes/abates</h3>'
             +'<div class="srow">DiedEvent observados brutos: <b>'+(a.rawObservedDeaths||0)+'</b></div>'
@@ -2941,6 +2964,76 @@ const PAGE = `<!doctype html>
       });
   }
 
+
+  function renderGuildMight(silent){
+    if(!silent) loading('view-might','🏅 Guild Might');
+    fetch('/api/telemetry/guild-might?days=90',{cache:'no-store'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        d=d||{};
+        var meta=d.meta||{}, categories=d.categories||[], ranking=d.ranking||[];
+        function when(ts){ return ts?fmtUtcDateTime(ts,true):'—'; }
+        function mappedBadge(c){
+          return c&&c.mapped
+            ? '<span class="pill ok">MAPEADA</span>'
+            : '<span class="pill" style="color:#e2b95e;border-color:#6f5a2b">A MAPEAR</span>';
+        }
+        function fmtSp(v){ return v==null?'—':fmtS(Math.round(Number(v)||0)); }
+
+        var html='<div class="modhead">🏅 Guild Might · contribuição da guilda</div>'
+          +'<div class="statgrid">'
+          +'<div class="stat b"><div class="k">Snapshots armazenados</div><div class="v">'+fmtS(meta.storedSnapshots||0)+'</div></div>'
+          +'<div class="stat g"><div class="k">Categorias detectadas</div><div class="v">'+fmtS(meta.categoryCount||0)+'</div></div>'
+          +'<div class="stat a"><div class="k">Categorias mapeadas</div><div class="v">'+fmtS(meta.mappedCategoryCount||0)+'</div></div>'
+          +'<div class="stat p"><div class="k">Jogadores no último estado</div><div class="v">'+fmtS(meta.playerCount||0)+'</div></div>'
+          +'</div>';
+
+        if(!categories.length){
+          html+='<div class="panel"><h3>Aguardando os primeiros dados</h3>'
+            +'<div class="empty-note">Nenhum snapshot de Guild Might foi materializado ainda. A coleta é passiva: quando um Combat Client v0.6.0 abrir Guilda → Might → Overview/Contribuição, os requests/responses observados entram aqui automaticamente.</div>'
+            +'<div class="note">O client não envia comandos ao Albion. Esta tela será preenchida conforme a guilda usar naturalmente as telas de Might.</div></div>';
+          setView('view-might',html);
+          return;
+        }
+
+        html+='<div class="panel"><h3>🏆 Ranking por Might observado</h3>'
+          +'<div class="note" style="margin-bottom:10px">Soma dos últimos snapshots de cada categoria detectada. SP estimado só usa categorias cuja identidade já foi mapeada para a referência vigente; não inventamos SP para categorias ainda desconhecidas.</div>'
+          +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>Might observado</th><th>SP estimado</th><th>Categorias</th><th>Mapeadas</th></tr></thead><tbody>'
+          +(ranking.length?ranking.slice(0,100).map(function(x,i){
+            return '<tr><td>'+(i+1)+'</td><td><b>'+esc(x.player||'?')+'</b></td>'
+              +'<td><b>'+fmtS(x.might||0)+'</b></td><td>'+fmtSp(x.estimatedSp)+'</td>'
+              +'<td>'+fmtS(x.categories||0)+'</td><td>'+fmtS(x.mappedCategories||0)+'</td></tr>';
+          }).join(''):'<tr><td colspan="6" style="color:var(--faint)">Nenhum jogador extraído ainda.</td></tr>')
+          +'</tbody></table></div></div>';
+
+        html+='<div class="panel"><h3>📚 Último snapshot por categoria</h3>'
+          +'<div class="note">Referência de SP: 07/10/2026, usada apenas quando a categoria é reconhecida. O histórico vivo substituirá progressivamente essa referência estática.</div></div>';
+
+        categories.forEach(function(c){
+          var cat=c.category||{}, ref=c.reference||null, members=c.members||[];
+          html+='<div class="panel">'
+            +'<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">'
+            +'<h3 style="margin:0">'+esc(cat.name||'Categoria não mapeada')+'</h3>'+mappedBadge(cat)+'</div>'
+            +'<div class="note" style="margin-top:6px">capturado '+esc(when(c.capturedAt))+' · confiança '+(Number(c.confidence||0)*100).toFixed(1)+'% · observer '+esc(c.observer||'—')+' · chave '+esc(cat.key||'—')+'</div>'
+            +(ref?'<div class="statgrid" style="margin-top:10px">'
+              +'<div class="stat"><div class="k">Nível de referência</div><div class="v">'+fmtS(ref.level||0)+'</div></div>'
+              +'<div class="stat"><div class="k">Meta referência</div><div class="v">'+fmtS(ref.targetMight||0)+'</div></div>'
+              +'<div class="stat"><div class="k">SP referência</div><div class="v">'+fmtS(ref.seasonPoints||0)+'</div></div>'
+              +'</div>':'<div class="note" style="margin-top:10px">Categoria ainda não ligada a um nome/nível/meta conhecido. O Might é mostrado normalmente; SP permanece em branco até o mapeamento ficar seguro.</div>')
+            +'<div style="overflow-x:auto;margin-top:12px"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>Might</th><th>SP estimado</th></tr></thead><tbody>'
+            +(members.length?members.slice(0,100).map(function(m,i){
+              return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td>'+fmtS(m.might||0)+'</td><td>'+fmtSp(m.estimatedSp)+'</td></tr>';
+            }).join(''):'<tr><td colspan="4" style="color:var(--faint)">Sem membros extraídos neste snapshot.</td></tr>')
+            +'</tbody></table></div></div>';
+        });
+
+        html+='<div class="note">'+esc(meta.note||'GuildMight experimental; dados derivados de probes Photon passivos.')+'</div>';
+        setView('view-might',html);
+      })
+      .catch(function(e){
+        setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao carregar Guild Might: '+esc(e.message)+'</div>');
+      });
+  }
 
   var guildRefreshTimer=null;
   function guildRosterCtaOptions(){

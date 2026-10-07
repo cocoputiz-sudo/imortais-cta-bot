@@ -190,5 +190,193 @@ module.exports = {
   referenceWeightsPerMillion,
   flattenPhoton,
   inferContributionLayout,
-  correlateProbeRows
+  correlateProbeRows,
+  normalizeCategoryLabel,
+  stableJson,
+  getByPath,
+  inferCategoryIdentity,
+  buildContributionSnapshots,
+  buildDashboardFromLatestSnapshots
 };
+
+
+function normalizeCategoryLabel(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
+  if (value && typeof value === "object") {
+    return "{" + Object.keys(value).sort().map(key => JSON.stringify(key) + ":" + stableJson(value[key])).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+
+function getByPath(root, path) {
+  if (!path) return root;
+  let current = root;
+  for (const raw of String(path).split(".")) {
+    if (current == null) return undefined;
+    const key = Array.isArray(current) && /^\d+$/.test(raw) ? Number(raw) : raw;
+    current = current[key];
+  }
+  return current;
+}
+
+function inferCategoryIdentity(pair) {
+  const sources = [
+    ...(flattenPhoton(pair?.requestParameters || {}).scalars || []),
+    ...(flattenPhoton(pair?.responseParameters || {}).scalars || [])
+  ];
+  const refs = Object.keys(REFERENCE_CATEGORIES_2026_10_07);
+  const byNorm = new Map(refs.map(name => [normalizeCategoryLabel(name), name]));
+
+  for (const entry of sources) {
+    if (typeof entry.value !== "string") continue;
+    const norm = normalizeCategoryLabel(entry.value);
+    if (byNorm.has(norm)) {
+      const name = byNorm.get(norm);
+      return {
+        key: "name:" + normalizeCategoryLabel(name),
+        name,
+        mapped: true,
+        source: "payload-string",
+        sourcePath: entry.path || null
+      };
+    }
+  }
+
+  const requestScalars = flattenPhoton(pair?.requestParameters || {}).scalars || [];
+  const numeric = requestScalars.filter(entry =>
+    Number.isInteger(Number(entry.value)) &&
+    Number(entry.value) >= 0 &&
+    Number(entry.value) <= 100000
+  );
+  if (numeric.length === 1) {
+    const value = Number(numeric[0].value);
+    return {
+      key: "id:" + value,
+      name: "Categoria #" + value,
+      mapped: false,
+      source: "request-number",
+      sourcePath: numeric[0].path || null
+    };
+  }
+
+  const fingerprint = stableJson(pair?.requestParameters || {});
+  return {
+    key: "request:" + Buffer.from(fingerprint).toString("base64url").slice(0, 32),
+    name: "Categoria não mapeada",
+    mapped: false,
+    source: "request-fingerprint",
+    sourcePath: null
+  };
+}
+
+function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
+  const correlation = correlateProbeRows(rows, { windowMs: 10000 });
+  const snapshots = [];
+
+  for (const pair of correlation.pairs) {
+    if (!String(pair.operationName || "").includes("GetGuildMightCategoryContribution")) continue;
+    const candidate = (pair.discovery?.candidates || [])[0];
+    if (!candidate || Number(candidate.confidence) < minConfidence) continue;
+
+    const names = getByPath(pair.responseParameters, candidate.namesPath);
+    const might = getByPath(pair.responseParameters, candidate.mightPath);
+    if (!Array.isArray(names) || !Array.isArray(might) || names.length !== might.length || !names.length) continue;
+
+    const members = [];
+    for (let i = 0; i < names.length; i++) {
+      const player = String(names[i] || "").trim();
+      const value = Number(might[i]);
+      if (!isPlayerName(player) || !isMightNumber(value)) continue;
+      members.push({ player, might: value });
+    }
+    if (!members.length) continue;
+
+    const category = inferCategoryIdentity(pair);
+    const reference = category.mapped ? REFERENCE_CATEGORIES_2026_10_07[category.name] || null : null;
+    const perMight = reference ? spPerMight(reference) : 0;
+
+    snapshots.push({
+      responseEventId: pair.responseEventId,
+      requestEventId: pair.requestEventId,
+      deviceId: pair.deviceId,
+      observer: pair.observer,
+      operationName: pair.operationName,
+      category,
+      capturedAt: pair.responseAt,
+      confidence: Number(candidate.confidence),
+      requestParameters: pair.requestParameters || {},
+      layout: {
+        namesPath: candidate.namesPath,
+        mightPath: candidate.mightPath,
+        count: candidate.count
+      },
+      reference: reference ? { ...reference, referenceDate: "2026-10-07" } : null,
+      members: members
+        .map(m => ({
+          ...m,
+          estimatedSp: reference ? m.might * perMight : null
+        }))
+        .sort((a,b) => b.might - a.might || a.player.localeCompare(b.player, "pt-BR"))
+    });
+  }
+
+  return snapshots.sort((a,b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0));
+}
+
+function buildDashboardFromLatestSnapshots(snapshots) {
+  const latestByCategory = new Map();
+  for (const snapshot of snapshots || []) {
+    const key = String(snapshot?.category?.key || "");
+    if (!key) continue;
+    const previous = latestByCategory.get(key);
+    if (!previous || new Date(snapshot.capturedAt || 0) > new Date(previous.capturedAt || 0)) {
+      latestByCategory.set(key, snapshot);
+    }
+  }
+
+  const categories = [...latestByCategory.values()]
+    .sort((a,b) =>
+      Number(b.category?.mapped) - Number(a.category?.mapped) ||
+      new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0)
+    );
+
+  const ranking = new Map();
+  for (const category of categories) {
+    for (const member of category.members || []) {
+      const key = String(member.player || "").trim().toLowerCase();
+      if (!key) continue;
+      if (!ranking.has(key)) {
+        ranking.set(key, { player: member.player, might: 0, estimatedSp: 0, mappedCategories: 0, categories: 0 });
+      }
+      const row = ranking.get(key);
+      row.might += Number(member.might) || 0;
+      row.categories++;
+      if (member.estimatedSp != null && Number.isFinite(Number(member.estimatedSp))) {
+        row.estimatedSp += Number(member.estimatedSp);
+        row.mappedCategories++;
+      }
+    }
+  }
+
+  return {
+    categories,
+    ranking: [...ranking.values()]
+      .sort((a,b) => b.might - a.might || b.estimatedSp - a.estimatedSp || a.player.localeCompare(b.player, "pt-BR")),
+    meta: {
+      categoryCount: categories.length,
+      mappedCategoryCount: categories.filter(x => x.category?.mapped).length,
+      playerCount: ranking.size,
+      newestAt: categories.reduce((latest, x) =>
+        !latest || new Date(x.capturedAt || 0) > new Date(latest) ? x.capturedAt : latest, null),
+      referenceDate: "2026-10-07"
+    }
+  };
+}

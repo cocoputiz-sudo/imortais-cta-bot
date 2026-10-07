@@ -237,6 +237,13 @@ async function testPersistenceAndNoRegression() {
   assert.equal(alice.deathFame, 54321);
   assert.equal(combat.resumo.killFame, 12345);
   assert.equal(combat.resumo.deathFame, 54321);
+  assert.equal(combat.fameCoverage.kills.total, 1);
+  assert.equal(combat.fameCoverage.kills.resolved, 1);
+  assert.equal(combat.fameCoverage.kills.percent, 100);
+  assert.equal(combat.fameCoverage.deaths.total, 1);
+  assert.equal(combat.fameCoverage.deaths.resolved, 1);
+  assert.equal(combat.fameCoverage.deaths.percent, 100);
+  assert.equal(combat.fameCoverage.field, "TotalVictimKillFame");
 
   const attendance = {
     processEvent: async () => new Map([
