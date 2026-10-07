@@ -2995,12 +2995,14 @@ const PAGE = `<!doctype html>
           +'</div>';
 
         if(!categories.length){
-          html+='<div class="panel"><h3>Aguardando os primeiros dados</h3>'
-            +'<div class="empty-note">Nenhum snapshot de Guild Might foi materializado ainda.</div>'
+          var inProgress=!!meta.materializationRunning;
+          html+='<div class="panel"><h3>'+(inProgress?'Processando contribuições de Might…':'Aguardando os primeiros snapshots')+'</h3>'
+            +'<div class="empty-note">'+(inProgress?'O processamento do histórico está rodando em segundo plano. A página não fica bloqueada; atualize daqui a pouco para consultar os resultados.':'Nenhum snapshot de Guild Might foi materializado ainda.')+'</div>'
             +(Number(meta.rawProbes3d||0)>0
-              ?'<div class="note">O Combat Client JÁ está enviando probes: '+fmtS(meta.rawProbes3d||0)+' bruto(s) nos últimos 3 dias ('+fmtS(meta.rawRequests3d||0)+' request(s) / '+fmtS(meta.rawResponses3d||0)+' response(s)). Se continuar em 0 snapshots, o problema está no reconhecimento do layout, não na captura.</div>'
-              :'<div class="note">Ainda não há guild_might_probe bruto no servidor nos últimos 3 dias. Nesse caso o próximo diagnóstico é o handler/opcode do Combat Client.</div>')
-            +'<div class="note">Overview e Contribution agora são ambos aceitos e o backend reprocessa automaticamente até 3 dias de probes antigos, sem exigir que você reabra tudo.</div></div>';
+              ?'<div class="note">Probes recebidos pelo servidor: '+fmtS(meta.rawProbes3d||0)+' em 3 dias ('+fmtS(meta.rawRequests3d||0)+' requests e '+fmtS(meta.rawResponses3d||0)+' responses). A captura já está funcionando.</div>'
+              :'<div class="note">O servidor ainda não registra probes brutos de Might nesses últimos 3 dias. Confira a última comunicação do client e atualize novamente.</div>')
+            +(meta.materializationError?'<div class="note">Erro de materialização: '+esc(meta.materializationError)+'</div>':'')
+            +'<div class="note">Última execução: '+esc(meta.materializationLastRunAt?fmtUtcDateTime(meta.materializationLastRunAt,true):'ainda não concluída')+'. Candidatos extraídos: '+fmtS(meta.backfillCandidateSnapshots||0)+'.</div></div>';
           setView('view-might',html);
           return;
         }
