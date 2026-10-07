@@ -668,6 +668,39 @@ async function initSchema(dbPool) {
 
     CREATE INDEX IF NOT EXISTS idx_albion_guild_presence_online
       ON albion_guild_presence(online, state_at DESC);
+
+    CREATE TABLE IF NOT EXISTS guild_might_snapshots (
+      id                  BIGSERIAL PRIMARY KEY,
+      response_event_id   TEXT UNIQUE NOT NULL,
+      request_event_id    TEXT,
+      device_id           TEXT,
+      observer            TEXT,
+      operation_name      TEXT NOT NULL,
+      category_key        TEXT NOT NULL,
+      category_name       TEXT NOT NULL,
+      category_mapped     BOOLEAN NOT NULL DEFAULT false,
+      confidence          DOUBLE PRECISION NOT NULL DEFAULT 0,
+      captured_at         TIMESTAMPTZ NOT NULL,
+      request_parameters  JSONB NOT NULL DEFAULT '{}'::jsonb,
+      layout              JSONB NOT NULL DEFAULT '{}'::jsonb,
+      reference_data      JSONB,
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_guild_might_category_time
+      ON guild_might_snapshots(category_key, captured_at DESC);
+
+    CREATE TABLE IF NOT EXISTS guild_might_snapshot_members (
+      snapshot_id   BIGINT NOT NULL REFERENCES guild_might_snapshots(id) ON DELETE CASCADE,
+      player_key    TEXT NOT NULL,
+      player_name   TEXT NOT NULL,
+      might         BIGINT NOT NULL,
+      estimated_sp  DOUBLE PRECISION,
+      PRIMARY KEY(snapshot_id, player_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_guild_might_member_player
+      ON guild_might_snapshot_members(player_key);
   `);
 }
 
@@ -2976,6 +3009,25 @@ async function getCombat(db, eventId, options = {}) {
       prev = k;
     }
   }
+  function fameCoverageFor(sideKills) {
+    const total = sideKills.length;
+    const resolved = sideKills.filter(k => k.killFameResolved && num(k.killFame) >= 0).length;
+    return {
+      total,
+      resolved,
+      unresolved: Math.max(0, total - resolved),
+      percent: total ? Math.round((resolved / total) * 1000) / 10 : 100
+    };
+  }
+
+  const fameCoverage = {
+    kills: fameCoverageFor(ourKills),
+    deaths: fameCoverageFor(ourDeaths),
+    source: "albion-gameinfo",
+    field: "TotalVictimKillFame",
+    note: "Kill Fame soma o TotalVictimKillFame dos inimigos abatidos por nós. Death Fame soma o mesmo campo quando um jogador nosso é a vítima."
+  };
+
   const overlappingDeltaFingerprints = [...deltaFingerprints.values()].filter(set => set.size > 1).length;
   const devices = [...deviceAgg.values()].sort((a, b) => b.eventos - a.eventos);
   const maps = [...mapAgg.values()]
@@ -3023,6 +3075,7 @@ async function getCombat(db, eventId, options = {}) {
     topKillFame: fameRanking(kills, "kill"),
     topDeathFame: fameRanking(kills, "death"),
     killScore: killScoreFor(kills),
+    fameCoverage,
     audit: {
       rosterPlayers: rosterKeys.size,
       presenceSnapshots: presenceRows.length,
@@ -3640,6 +3693,163 @@ async function getGuildMightProbeDiagnostics({ minutes = 60, limit = 200 } = {})
   };
 }
 
+async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
+  const safeMinutes = Math.max(1, Math.min(60, Number(minutes) || 5));
+  const safeLimit = Math.max(20, Math.min(2000, Number(limit) || 1000));
+  const { rows } = await pool.query(`
+    SELECT event_id, device_id, player_name, payload, occurred_at, received_at
+      FROM albion_telemetry_events
+     WHERE type='guild_might_probe'
+       AND occurred_at >= now() - ($1::text || ' minutes')::interval
+     ORDER BY occurred_at ASC, received_at ASC
+     LIMIT $2
+  `, [safeMinutes, safeLimit]);
+
+  const snapshots = guildMight.buildContributionSnapshots(rows, { minConfidence: 0.85 });
+  let stored = 0;
+
+  for (const snapshot of snapshots) {
+    if (!snapshot.responseEventId) continue;
+    const { rows: savedRows } = await pool.query(`
+      INSERT INTO guild_might_snapshots(
+        response_event_id, request_event_id, device_id, observer, operation_name,
+        category_key, category_name, category_mapped, confidence, captured_at,
+        request_parameters, layout, reference_data
+      )
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb)
+      ON CONFLICT(response_event_id) DO UPDATE SET
+        request_event_id=EXCLUDED.request_event_id,
+        category_key=EXCLUDED.category_key,
+        category_name=EXCLUDED.category_name,
+        category_mapped=EXCLUDED.category_mapped,
+        confidence=GREATEST(guild_might_snapshots.confidence, EXCLUDED.confidence),
+        request_parameters=EXCLUDED.request_parameters,
+        layout=EXCLUDED.layout,
+        reference_data=COALESCE(EXCLUDED.reference_data,guild_might_snapshots.reference_data)
+      RETURNING id
+    `, [
+      snapshot.responseEventId,
+      snapshot.requestEventId,
+      snapshot.deviceId,
+      snapshot.observer,
+      snapshot.operationName,
+      snapshot.category.key,
+      snapshot.category.name,
+      !!snapshot.category.mapped,
+      snapshot.confidence,
+      snapshot.capturedAt,
+      JSON.stringify(snapshot.requestParameters || {}),
+      JSON.stringify(snapshot.layout || {}),
+      snapshot.reference ? JSON.stringify(snapshot.reference) : null
+    ]);
+    const id = savedRows[0]?.id;
+    if (!id) continue;
+
+    await pool.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1", [id]);
+    for (const member of snapshot.members || []) {
+      await pool.query(`
+        INSERT INTO guild_might_snapshot_members(snapshot_id,player_key,player_name,might,estimated_sp)
+        VALUES($1,$2,$3,$4,$5)
+        ON CONFLICT(snapshot_id,player_key) DO UPDATE SET
+          player_name=EXCLUDED.player_name,
+          might=EXCLUDED.might,
+          estimated_sp=EXCLUDED.estimated_sp
+      `, [
+        id,
+        normName(member.player),
+        member.player,
+        Math.max(0, Math.trunc(Number(member.might) || 0)),
+        member.estimatedSp == null ? null : Number(member.estimatedSp)
+      ]);
+    }
+    stored++;
+  }
+  return { probes: rows.length, snapshots: snapshots.length, stored };
+}
+
+async function getGuildMightDashboard({ days = 90 } = {}) {
+  const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
+  await materializeGuildMightRecent({ minutes: 10, limit: 2000 }).catch(e =>
+    console.warn("guild might materialize:", e?.message || e)
+  );
+
+  const { rows: snapshotRows } = await pool.query(`
+    WITH latest AS (
+      SELECT DISTINCT ON(category_key)
+             id,response_event_id,request_event_id,device_id,observer,operation_name,
+             category_key,category_name,category_mapped,confidence,captured_at,
+             request_parameters,layout,reference_data
+        FROM guild_might_snapshots
+       WHERE captured_at >= now() - ($1::text || ' days')::interval
+       ORDER BY category_key,captured_at DESC,id DESC
+    )
+    SELECT *
+      FROM latest
+     ORDER BY captured_at DESC,id DESC
+  `, [safeDays]);
+
+  const ids = snapshotRows.map(x => Number(x.id)).filter(Number.isFinite);
+  let members = [];
+  if (ids.length) {
+    const memberRows = await pool.query(`
+      SELECT snapshot_id,player_key,player_name,might,estimated_sp
+        FROM guild_might_snapshot_members
+       WHERE snapshot_id = ANY($1::bigint[])
+       ORDER BY snapshot_id,might DESC,player_name
+    `, [ids]);
+    members = memberRows.rows || [];
+  }
+
+  const membersBySnapshot = new Map();
+  for (const row of members) {
+    const key = String(row.snapshot_id);
+    if (!membersBySnapshot.has(key)) membersBySnapshot.set(key, []);
+    membersBySnapshot.get(key).push({
+      player: row.player_name,
+      might: Number(row.might) || 0,
+      estimatedSp: row.estimated_sp == null ? null : Number(row.estimated_sp)
+    });
+  }
+
+  const snapshots = snapshotRows.map(row => ({
+    responseEventId: row.response_event_id,
+    requestEventId: row.request_event_id,
+    deviceId: row.device_id,
+    observer: row.observer,
+    operationName: row.operation_name,
+    category: {
+      key: row.category_key,
+      name: row.category_name,
+      mapped: !!row.category_mapped
+    },
+    capturedAt: row.captured_at,
+    confidence: Number(row.confidence) || 0,
+    requestParameters: row.request_parameters || {},
+    layout: row.layout || {},
+    reference: row.reference_data || null,
+    members: membersBySnapshot.get(String(row.id)) || []
+  }));
+
+  const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots);
+  const countResult = await pool.query(
+    "SELECT COUNT(*)::int AS n, MIN(captured_at) AS oldest, MAX(captured_at) AS newest FROM guild_might_snapshots"
+  );
+  const stats = countResult.rows[0] || {};
+
+  return {
+    ...dashboard,
+    meta: {
+      ...dashboard.meta,
+      days: safeDays,
+      storedSnapshots: Number(stats.n) || 0,
+      oldestStoredAt: stats.oldest || null,
+      newestStoredAt: stats.newest || dashboard.meta.newestAt || null,
+      note: "GuildMight é experimental. Might vem do tráfego Photon observado; SP só é estimado quando a categoria foi mapeada para a referência de 07/10/2026."
+    }
+  };
+}
+
+
 function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
@@ -4145,6 +4355,15 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         }, 0);
         timer.unref?.();
       }
+
+      if (normalizedEvents.some(event => event.type === "guild_might_probe")) {
+        const mightTimer = setTimeout(() => {
+          materializeGuildMightRecent({ minutes: 5, limit: 1000 }).catch(e =>
+            console.warn("guild might materialize:", e?.message || e)
+          );
+        }, 0);
+        mightTimer.unref?.();
+      }
     } catch (e) {
       console.error("/api/telemetry/ingest:", e);
       res.status(500).json({ error: "server" });
@@ -4185,6 +4404,16 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       }));
     } catch (e) {
       console.error("/api/telemetry/guild-might-probes:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/telemetry/guild-might", async (req, res) => {
+    try {
+      if (!requireMember || !requireMember(req, res)) return;
+      res.json(await getGuildMightDashboard({ days: req.query.days }));
+    } catch (e) {
+      console.error("/api/telemetry/guild-might:", e);
       res.status(500).json({ error: "server" });
     }
   });
@@ -4380,5 +4609,7 @@ module.exports = {
     guildMight
   },
   getGuildPresenceProbeDiagnostics,
-  getGuildMightProbeDiagnostics
+  getGuildMightProbeDiagnostics,
+  getGuildMightDashboard,
+  materializeGuildMightRecent
 };
