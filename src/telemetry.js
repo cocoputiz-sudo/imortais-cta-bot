@@ -28,12 +28,13 @@ const PAIR_FAILURE_IP_LIMIT = 8;
 const PAIR_FAILURE_GLOBAL_LIMIT = 300;
 const pairFailuresByIp = new Map();
 let pairFailuresGlobal = [];
+let pairAttemptSequence = 0;
 
 function prunePairFailures(now = Date.now()) {
   const cutoff = now - PAIR_FAILURE_WINDOW_MS;
-  pairFailuresGlobal = pairFailuresGlobal.filter((at) => at > cutoff);
+  pairFailuresGlobal = pairFailuresGlobal.filter((entry) => entry.at > cutoff);
   for (const [ip, entries] of pairFailuresByIp) {
-    const fresh = entries.filter((at) => at > cutoff);
+    const fresh = entries.filter((entry) => entry.at > cutoff);
     if (fresh.length) pairFailuresByIp.set(ip, fresh);
     else pairFailuresByIp.delete(ip);
   }
@@ -41,7 +42,7 @@ function prunePairFailures(now = Date.now()) {
 
 function pairRetryAfterSeconds(entries, now = Date.now()) {
   if (!entries.length) return Math.ceil(PAIR_FAILURE_WINDOW_MS / 1000);
-  return Math.max(1, Math.ceil((entries[0] + PAIR_FAILURE_WINDOW_MS - now) / 1000));
+  return Math.max(1, Math.ceil((entries[0].at + PAIR_FAILURE_WINDOW_MS - now) / 1000));
 }
 
 function pairRateLimitState(ip, now = Date.now()) {
@@ -59,14 +60,26 @@ function pairRateLimitState(ip, now = Date.now()) {
   return { blocked: true, retryAfter };
 }
 
-function recordPairFailure(ip, now = Date.now()) {
-  prunePairFailures(now);
+function reservePairAttempt(ip, now = Date.now()) {
   const key = String(ip || "unknown");
+  const beforeAttempt = pairRateLimitState(key, now);
+  if (beforeAttempt.blocked) return { ...beforeAttempt, reservation: null };
+
+  const reservation = { id: ++pairAttemptSequence, ip: key, at: now };
   const ipEntries = pairFailuresByIp.get(key) || [];
-  ipEntries.push(now);
+  ipEntries.push(reservation);
   pairFailuresByIp.set(key, ipEntries);
-  pairFailuresGlobal.push(now);
-  return pairRateLimitState(key, now);
+  pairFailuresGlobal.push(reservation);
+  return { blocked: false, retryAfter: 0, reservation };
+}
+
+function releasePairReservation(reservation) {
+  if (!reservation) return;
+  const ipEntries = pairFailuresByIp.get(reservation.ip) || [];
+  const filteredIp = ipEntries.filter((entry) => entry.id !== reservation.id);
+  if (filteredIp.length) pairFailuresByIp.set(reservation.ip, filteredIp);
+  else pairFailuresByIp.delete(reservation.ip);
+  pairFailuresGlobal = pairFailuresGlobal.filter((entry) => entry.id !== reservation.id);
 }
 
 function respondPairRateLimited(res, state) {
@@ -3588,8 +3601,9 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       if (!deviceId) return res.status(400).json({ error: "device_id" });
 
       const requesterIp = String(req.ip || req.socket?.remoteAddress || "unknown");
-      const beforeAttempt = pairRateLimitState(requesterIp);
-      if (beforeAttempt.blocked) return respondPairRateLimited(res, beforeAttempt);
+      const attempt = reservePairAttempt(requesterIp);
+      if (attempt.blocked) return respondPairRateLimited(res, attempt);
+      const reservation = attempt.reservation;
 
       const hash = tokenHash("pair:" + code);
       const client = await pool.connect();
@@ -3612,7 +3626,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         if (!pairing) {
           await client.query("ROLLBACK");
           transactionOpen = false;
-          const afterFailure = recordPairFailure(requesterIp);
+          const afterFailure = pairRateLimitState(requesterIp);
           if (afterFailure.blocked) return respondPairRateLimited(res, afterFailure);
           return res.status(401).json({ error: "invalid_or_expired_code" });
         }
@@ -3635,10 +3649,12 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         );
         await client.query("COMMIT");
         transactionOpen = false;
+        releasePairReservation(reservation);
 
         return res.json({ ok: true, token, label, deviceId, playerName: boundPlayer });
       } catch (e) {
         if (transactionOpen) await client.query("ROLLBACK").catch(() => {});
+        releasePairReservation(reservation);
         throw e;
       } finally {
         client.release();
