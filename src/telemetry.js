@@ -3563,6 +3563,65 @@ async function getGuildPresenceProbeDiagnostics({ minutes = 30, limit = 200, pla
   };
 }
 
+async function getGuildMightProbeDiagnostics({ minutes = 60, limit = 200 } = {}) {
+  const safeMinutes = Math.max(1, Math.min(24 * 60, Number(minutes) || 60));
+  const safeLimit = Math.max(1, Math.min(1000, Number(limit) || 200));
+
+  const { rows } = await pool.query(`
+    SELECT event_id, device_id, player_name, payload, occurred_at, received_at
+      FROM albion_telemetry_events
+     WHERE type='guild_might_probe'
+       AND occurred_at >= now() - ($1::text || ' minutes')::interval
+     ORDER BY occurred_at DESC
+     LIMIT $2
+  `, [safeMinutes, safeLimit]);
+
+  const byOperation = new Map();
+  for (const row of rows) {
+    const payload = row.payload || {};
+    const operationName = String(payload.operationName || "unknown");
+    if (!byOperation.has(operationName)) {
+      byOperation.set(operationName, {
+        operationName,
+        operationCode: payload.operationCode ?? null,
+        count: 0,
+        parameterKeys: {}
+      });
+    }
+
+    const group = byOperation.get(operationName);
+    group.count++;
+    const parameters = payload.parameters && typeof payload.parameters === "object"
+      ? payload.parameters
+      : {};
+
+    for (const [key, value] of Object.entries(parameters)) {
+      if (!group.parameterKeys[key]) {
+        group.parameterKeys[key] = { types: [], sample: previewValue(value) };
+      }
+      const shape = jsonShape(value);
+      if (!group.parameterKeys[key].types.includes(shape)) group.parameterKeys[key].types.push(shape);
+    }
+  }
+
+  return {
+    windowMinutes: safeMinutes,
+    total: rows.length,
+    operations: [...byOperation.values()].sort((a, b) => b.count - a.count),
+    recent: rows.map(row => ({
+      eventId: row.event_id,
+      deviceId: row.device_id,
+      observer: row.player_name,
+      operationName: row.payload?.operationName || null,
+      operationCode: row.payload?.operationCode ?? null,
+      probeVersion: row.payload?.probeVersion ?? null,
+      parameters: row.payload?.parameters || {},
+      occurredAt: row.occurred_at,
+      receivedAt: row.received_at
+    }))
+  };
+}
+
 function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
@@ -4095,6 +4154,19 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       res.json(data);
     } catch (e) {
       console.error("/api/telemetry/guild-presence-probes:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/telemetry/guild-might-probes", async (req, res) => {
+    try {
+      if (!requireEditor || !requireEditor(req, res)) return;
+      res.json(await getGuildMightProbeDiagnostics({
+        minutes: req.query.minutes,
+        limit: req.query.limit
+      }));
+    } catch (e) {
+      console.error("/api/telemetry/guild-might-probes:", e);
       res.status(500).json({ error: "server" });
     }
   });
