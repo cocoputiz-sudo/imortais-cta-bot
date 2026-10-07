@@ -8,6 +8,18 @@ const guildMight = require("./guildMight");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
+let guildMightWorkerTimer = null;
+let guildMightWorkerPromise = null;
+let guildMightBackfillPending = false;
+let guildMightRecentPending = false;
+const guildMightWorkerState = {
+  running: false,
+  lastRunAt: null,
+  lastError: null,
+  lastScanned: 0,
+  lastCandidates: 0,
+  lastStored: 0
+};
 const _confirmCache = new Map(); // eventId -> { at, payload }
 const CONFIRM_TTL_MS = 2000;
 const _combatCache = new Map(); // eventId -> { at, promise }
@@ -687,6 +699,9 @@ async function initSchema(dbPool) {
       created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE guild_might_snapshots
+      ADD COLUMN IF NOT EXISTS members_complete BOOLEAN NOT NULL DEFAULT false;
+
     CREATE INDEX IF NOT EXISTS idx_guild_might_category_time
       ON guild_might_snapshots(category_key, captured_at DESC);
 
@@ -702,6 +717,10 @@ async function initSchema(dbPool) {
     CREATE INDEX IF NOT EXISTS idx_guild_might_member_player
       ON guild_might_snapshot_members(player_key);
   `);
+
+  // O histórico é reprocessado em background na inicialização; a primeira
+  // visita à aba de Might nunca aguarda milhares de INSERTs.
+  scheduleGuildMightMaterialization({ backfill: true });
 }
 
 function notifyTelemetry(eventId, info = {}) {
@@ -3693,86 +3712,160 @@ async function getGuildMightProbeDiagnostics({ minutes = 60, limit = 200 } = {})
   };
 }
 
+function scheduleGuildMightMaterialization({ backfill = false } = {}) {
+  if (backfill) guildMightBackfillPending = true;
+  else guildMightRecentPending = true;
+
+  // Um único worker por processo, independentemente do número de clientes,
+  // lotes de ingestão ou visitantes da página.
+  if (guildMightWorkerTimer || guildMightWorkerPromise) return;
+  guildMightWorkerTimer = setTimeout(() => {
+    guildMightWorkerTimer = null;
+    const full = guildMightBackfillPending;
+    guildMightBackfillPending = false;
+    guildMightRecentPending = false;
+    guildMightWorkerState.running = true;
+
+    guildMightWorkerPromise = materializeGuildMightRecent({
+      minutes: full ? 3 * 24 * 60 : 15,
+      limit: full ? 20000 : 3000
+    }).then(result => {
+      guildMightWorkerState.lastScanned = result.probes;
+      guildMightWorkerState.lastCandidates = result.snapshots;
+      guildMightWorkerState.lastStored = result.stored;
+      guildMightWorkerState.lastError = null;
+      guildMightWorkerState.lastRunAt = new Date().toISOString();
+      if (result.stored > 0) {
+        console.info("[guild might] materializados " + result.stored + " snapshots de " + result.probes + " probes");
+      }
+    }).catch(error => {
+      guildMightWorkerState.lastError = String(error?.message || error).slice(0, 240);
+      guildMightWorkerState.lastRunAt = new Date().toISOString();
+      console.warn("[guild might] materialização:", guildMightWorkerState.lastError);
+    }).finally(() => {
+      guildMightWorkerState.running = false;
+      guildMightWorkerPromise = null;
+      if (guildMightBackfillPending || guildMightRecentPending) {
+        scheduleGuildMightMaterialization({ backfill: guildMightBackfillPending });
+      }
+    });
+  }, 1500);
+  guildMightWorkerTimer.unref?.();
+}
+
 async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
   const safeMinutes = Math.max(1, Math.min(3 * 24 * 60, Number(minutes) || 5));
   const safeLimit = Math.max(20, Math.min(20000, Number(limit) || 1000));
   const { rows } = await pool.query(`
     SELECT event_id, device_id, player_name, payload, occurred_at, received_at
-      FROM albion_telemetry_events
-     WHERE type='guild_might_probe'
-       AND occurred_at >= now() - ($1::text || ' minutes')::interval
+      FROM (
+        SELECT event_id, device_id, player_name, payload, occurred_at, received_at
+          FROM albion_telemetry_events
+         WHERE type='guild_might_probe'
+           AND occurred_at >= now() - ($1::text || ' minutes')::interval
+         ORDER BY occurred_at DESC, received_at DESC
+         LIMIT $2
+      ) AS recent
      ORDER BY occurred_at ASC, received_at ASC
-     LIMIT $2
   `, [safeMinutes, safeLimit]);
 
   const snapshots = guildMight.buildContributionSnapshots(rows, { minConfidence: 0.85 });
+  if (!snapshots.length) {
+    return { probes: rows.length, snapshots: 0, stored: 0 };
+  }
+
+  // Evita reescrever os mesmos snapshots a cada batch ou restart.
+  // members_complete também recupera gravações parciais feitas pelo materializador antigo.
+  const candidateIds = snapshots.map(x => x.responseEventId).filter(Boolean);
+  const { rows: existingRows } = await pool.query(`
+    SELECT response_event_id
+      FROM guild_might_snapshots
+     WHERE response_event_id = ANY($1::text[])
+       AND members_complete = true
+  `, [candidateIds]);
+  const complete = new Set(existingRows.map(x => x.response_event_id));
   let stored = 0;
 
   for (const snapshot of snapshots) {
-    if (!snapshot.responseEventId) continue;
-    const { rows: savedRows } = await pool.query(`
-      INSERT INTO guild_might_snapshots(
-        response_event_id, request_event_id, device_id, observer, operation_name,
-        category_key, category_name, category_mapped, confidence, captured_at,
-        request_parameters, layout, reference_data
-      )
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb)
-      ON CONFLICT(response_event_id) DO UPDATE SET
-        request_event_id=EXCLUDED.request_event_id,
-        category_key=EXCLUDED.category_key,
-        category_name=EXCLUDED.category_name,
-        category_mapped=EXCLUDED.category_mapped,
-        confidence=GREATEST(guild_might_snapshots.confidence, EXCLUDED.confidence),
-        request_parameters=EXCLUDED.request_parameters,
-        layout=EXCLUDED.layout,
-        reference_data=COALESCE(EXCLUDED.reference_data,guild_might_snapshots.reference_data)
-      RETURNING id
-    `, [
-      snapshot.responseEventId,
-      snapshot.requestEventId,
-      snapshot.deviceId,
-      snapshot.observer,
-      snapshot.operationName,
-      snapshot.category.key,
-      snapshot.category.name,
-      !!snapshot.category.mapped,
-      snapshot.confidence,
-      snapshot.capturedAt,
-      JSON.stringify(snapshot.requestParameters || {}),
-      JSON.stringify(snapshot.layout || {}),
-      snapshot.reference ? JSON.stringify(snapshot.reference) : null
-    ]);
-    const id = savedRows[0]?.id;
-    if (!id) continue;
-
-    await pool.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1", [id]);
+    if (!snapshot.responseEventId || complete.has(snapshot.responseEventId)) continue;
+    const memberMap = new Map();
     for (const member of snapshot.members || []) {
-      await pool.query(`
-        INSERT INTO guild_might_snapshot_members(snapshot_id,player_key,player_name,might,estimated_sp)
-        VALUES($1,$2,$3,$4,$5)
-        ON CONFLICT(snapshot_id,player_key) DO UPDATE SET
-          player_name=EXCLUDED.player_name,
-          might=EXCLUDED.might,
-          estimated_sp=EXCLUDED.estimated_sp
-      `, [
-        id,
-        normName(member.player),
-        member.player,
-        Math.max(0, Math.trunc(Number(member.might) || 0)),
-        member.estimatedSp == null ? null : Number(member.estimatedSp)
-      ]);
+      const playerKey = normName(member.player);
+      if (!playerKey) continue;
+      memberMap.set(playerKey, {
+        player_key: playerKey,
+        player_name: String(member.player),
+        might: Math.max(0, Math.trunc(Number(member.might) || 0)),
+        estimated_sp: member.estimatedSp == null ? null : Number(member.estimatedSp)
+      });
     }
-    stored++;
+    if (!memberMap.size) continue;
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: savedRows } = await client.query(`
+        INSERT INTO guild_might_snapshots(
+          response_event_id, request_event_id, device_id, observer, operation_name,
+          category_key, category_name, category_mapped, confidence, captured_at,
+          request_parameters, layout, reference_data, members_complete
+        )
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,false)
+        ON CONFLICT(response_event_id) DO UPDATE SET
+          request_event_id=EXCLUDED.request_event_id,
+          category_key=EXCLUDED.category_key,
+          category_name=EXCLUDED.category_name,
+          category_mapped=EXCLUDED.category_mapped,
+          confidence=GREATEST(guild_might_snapshots.confidence, EXCLUDED.confidence),
+          request_parameters=EXCLUDED.request_parameters,
+          layout=EXCLUDED.layout,
+          reference_data=COALESCE(EXCLUDED.reference_data,guild_might_snapshots.reference_data),
+          members_complete=false
+        RETURNING id
+      `, [
+        snapshot.responseEventId, snapshot.requestEventId, snapshot.deviceId,
+        snapshot.observer, snapshot.operationName, snapshot.category.key,
+        snapshot.category.name, !!snapshot.category.mapped, snapshot.confidence,
+        snapshot.capturedAt, JSON.stringify(snapshot.requestParameters || {}),
+        JSON.stringify(snapshot.layout || {}),
+        snapshot.reference ? JSON.stringify(snapshot.reference) : null
+      ]);
+      const id = savedRows[0]?.id;
+      if (!id) throw new Error("Guild Might snapshot sem id");
+
+      await client.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1", [id]);
+      await client.query(`
+        INSERT INTO guild_might_snapshot_members(
+          snapshot_id, player_key, player_name, might, estimated_sp
+        )
+        SELECT $1::bigint, x.player_key, x.player_name, x.might, x.estimated_sp
+          FROM jsonb_to_recordset($2::jsonb) AS x(
+            player_key text, player_name text, might bigint, estimated_sp double precision
+          )
+      `, [id, JSON.stringify([...memberMap.values()])]);
+      await client.query(
+        "UPDATE guild_might_snapshots SET members_complete=true WHERE id=$1",
+        [id]
+      );
+      await client.query("COMMIT");
+      stored++;
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
   }
   return { probes: rows.length, snapshots: snapshots.length, stored };
 }
 
 async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
-  const materializeResult = await materializeGuildMightRecent({ minutes: 3 * 24 * 60, limit: 20000 }).catch(e => {
-    console.warn("guild might materialize:", e?.message || e);
-    return { probes: 0, snapshots: 0, stored: 0 };
-  });
+  // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
+  // A rotina de background cuida do backfill e dos novos lotes.
+  if (!guildMightWorkerPromise && !guildMightWorkerTimer && !guildMightWorkerState.lastRunAt) {
+    scheduleGuildMightMaterialization({ backfill: true });
+  }
 
   const { rows: snapshotRows } = await pool.query(`
     WITH latest AS (
@@ -3860,8 +3953,12 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
       rawResponses3d: Number(raw.responses) || 0,
       rawOldestAt: raw.oldest || null,
       rawNewestAt: raw.newest || null,
-      backfillCandidateSnapshots: Number(materializeResult.snapshots) || 0,
-      backfillStored: Number(materializeResult.stored) || 0,
+      backfillCandidateSnapshots: Number(guildMightWorkerState.lastCandidates) || 0,
+      backfillStored: Number(guildMightWorkerState.lastStored) || 0,
+      materializationRunning: guildMightWorkerState.running || !!guildMightWorkerTimer,
+      materializationLastRunAt: guildMightWorkerState.lastRunAt,
+      materializationLastScanned: guildMightWorkerState.lastScanned,
+      materializationError: guildMightWorkerState.lastError,
       note: "GuildMight é experimental. Might vem do tráfego Photon observado; SP só é estimado quando a categoria foi mapeada para a referência de 07/10/2026."
     }
   };
@@ -4375,12 +4472,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       }
 
       if (normalizedEvents.some(event => event.type === "guild_might_probe")) {
-        const mightTimer = setTimeout(() => {
-          materializeGuildMightRecent({ minutes: 5, limit: 1000 }).catch(e =>
-            console.warn("guild might materialize:", e?.message || e)
-          );
-        }, 0);
-        mightTimer.unref?.();
+        scheduleGuildMightMaterialization();
       }
     } catch (e) {
       console.error("/api/telemetry/ingest:", e);
