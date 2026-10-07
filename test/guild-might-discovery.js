@@ -147,3 +147,67 @@ assert.strictEqual(mapped[0].category.mapped, true);
 near(mapped[0].members[0].estimatedSp, 9660, 0.1, "SP estimado usa referência mapeada");
 
 console.log("✅ GuildMight snapshots/dashboard: extração utilizável e categoria mapeada/não mapeada OK");
+
+
+const overviewRows = [
+  {
+    event_id: "req-overview",
+    device_id: "d4",
+    player_name: "BadMack",
+    occurred_at: new Date(base + 2000).toISOString(),
+    payload: {
+      direction: "request",
+      operationName: "GetGuildMightCategoryOverview",
+      parameters: { "0": "PvE (Outlands and Roads)" }
+    }
+  },
+  {
+    event_id: "res-overview",
+    device_id: "d4",
+    player_name: "BadMack",
+    occurred_at: new Date(base + 2250).toISOString(),
+    payload: {
+      direction: "response",
+      operationName: "GetGuildMightCategoryOverview",
+      parameters: {
+        "1": ["ESTHER9950", "GiganteCarrara", "BadMack"],
+        "2": [1086795, 943429, 777777]
+      }
+    }
+  }
+];
+const overviewSnapshots = buildContributionSnapshots(overviewRows);
+assert.strictEqual(overviewSnapshots.length, 1, "Overview também deve materializar quando contém nomes/Might");
+assert.strictEqual(overviewSnapshots[0].category.name, "PvE");
+assert.strictEqual(overviewSnapshots[0].category.mapped, true);
+assert.strictEqual(overviewSnapshots[0].category.source, "payload-alias");
+assert.strictEqual(overviewSnapshots[0].members[0].player, "ESTHER9950");
+assert.strictEqual(overviewSnapshots[0].members[0].might, 1086795);
+
+const smugglersRows = [
+  {
+    event_id: "req-smug",
+    device_id: "d5",
+    player_name: "BadMack",
+    occurred_at: new Date(base + 3000).toISOString(),
+    payload: {
+      direction: "request",
+      operationName: "GetGuildMightCategoryContribution",
+      parameters: { "0": "Smugglers" }
+    }
+  },
+  {
+    event_id: "res-smug",
+    device_id: "d5",
+    player_name: "BadMack",
+    occurred_at: new Date(base + 3200).toISOString(),
+    payload: {
+      direction: "response",
+      operationName: "GetGuildMightCategoryContribution",
+      parameters: { "0": ["BadMack", "RagnaldoKun"], "1": [120000, 90000] }
+    }
+  }
+];
+const smugglersSnapshots = buildContributionSnapshots(smugglersRows);
+assert.strictEqual(smugglersSnapshots[0].category.name, "Contrabandistas");
+assert.strictEqual(smugglersSnapshots[0].category.mapped, true);
