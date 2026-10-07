@@ -182,6 +182,7 @@ function startWebServer(client, opts) {
   _client = client;
   _act = opts || {};
   const app = express();
+  app.set("trust proxy", 1); // Railway edge/proxy: req.ip passa a refletir o cliente real.
   app.use(express.json({ limit: "12mb" }));
   telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager });
 
