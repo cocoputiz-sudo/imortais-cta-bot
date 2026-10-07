@@ -17,6 +17,10 @@ function parseConsolidationSteps(value) {
   );
 }
 
+function isCtaFrozen(event) {
+  return Boolean(event?.frozen_at);
+}
+
 function consolidationStepsToRun(minAteSaida, alreadyDone, status = "open") {
   if (status !== "open") return [];
   const minutes = Number(minAteSaida);
@@ -33,5 +37,6 @@ function consolidationStepsToRun(minAteSaida, alreadyDone, status = "open") {
 module.exports = {
   CONSOLIDATION_STEPS,
   parseConsolidationSteps,
+  isCtaFrozen,
   consolidationStepsToRun,
 };
