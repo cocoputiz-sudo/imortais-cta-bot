@@ -1322,9 +1322,9 @@ const PAGE = `<!doctype html>
         time:'2026-10-06T05:10:00.000Z',
         html:'<h2>🖥️ Download do IMORTAIS Combat Client</h2>'
           +'<p>O Combat Client envia ao War Room a telemetria que alimenta presença, party, combate, mortes, loot, mapa e diagnóstico dos dispositivos.</p>'
-          +'<p><strong>Windows:</strong> versão estável atual <strong>v0.5.9</strong>. Use preferencialmente o instalador oficial.</p>'
+          +'<p><strong>Windows:</strong> versão estável atual <strong>v0.6.0</strong>. Use preferencialmente o instalador oficial.</p>'
           +'<div class="mural-actions">'
-          +'<a class="mural-link primary-link" href="https://github.com/cocoputiz-sudo/imortais-combat-client/releases/download/v0.5.9/IMORTAIS-Combat-Client-Setup-v0.5.9.exe" target="_blank" rel="noopener noreferrer">⬇️ Baixar Windows v0.5.9</a>'
+          +'<a class="mural-link primary-link" href="https://github.com/cocoputiz-sudo/imortais-combat-client/releases/download/v0.6.0/IMORTAIS-Combat-Client-Setup-v0.6.0.exe" target="_blank" rel="noopener noreferrer">⬇️ Baixar Windows v0.6.0</a>'
           +'<a class="mural-link" href="https://github.com/cocoputiz-sudo/imortais-combat-client/releases" target="_blank" rel="noopener noreferrer">📦 Ver todas as releases</a>'
           +'</div>'
           +'<p style="margin-top:11px"><strong>Linux:</strong> o cliente nativo continua em validação real no Ubuntu antes de virar release estável para uso geral.</p>'
