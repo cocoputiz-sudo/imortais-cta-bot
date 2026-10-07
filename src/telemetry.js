@@ -3694,8 +3694,8 @@ async function getGuildMightProbeDiagnostics({ minutes = 60, limit = 200 } = {})
 }
 
 async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
-  const safeMinutes = Math.max(1, Math.min(60, Number(minutes) || 5));
-  const safeLimit = Math.max(20, Math.min(2000, Number(limit) || 1000));
+  const safeMinutes = Math.max(1, Math.min(3 * 24 * 60, Number(minutes) || 5));
+  const safeLimit = Math.max(20, Math.min(20000, Number(limit) || 1000));
   const { rows } = await pool.query(`
     SELECT event_id, device_id, player_name, payload, occurred_at, received_at
       FROM albion_telemetry_events
@@ -3769,9 +3769,10 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
 
 async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
-  await materializeGuildMightRecent({ minutes: 10, limit: 2000 }).catch(e =>
-    console.warn("guild might materialize:", e?.message || e)
-  );
+  const materializeResult = await materializeGuildMightRecent({ minutes: 3 * 24 * 60, limit: 20000 }).catch(e => {
+    console.warn("guild might materialize:", e?.message || e);
+    return { probes: 0, snapshots: 0, stored: 0 };
+  });
 
   const { rows: snapshotRows } = await pool.query(`
     WITH latest AS (
@@ -3831,10 +3832,20 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   }));
 
   const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots);
-  const countResult = await pool.query(
-    "SELECT COUNT(*)::int AS n, MIN(captured_at) AS oldest, MAX(captured_at) AS newest FROM guild_might_snapshots"
-  );
+  const [countResult, rawResult] = await Promise.all([
+    pool.query(
+      "SELECT COUNT(*)::int AS n, MIN(captured_at) AS oldest, MAX(captured_at) AS newest FROM guild_might_snapshots"
+    ),
+    pool.query(
+      "SELECT COUNT(*)::int AS total, " +
+      "COUNT(*) FILTER (WHERE lower(COALESCE(payload->>'direction','response'))='request')::int AS requests, " +
+      "COUNT(*) FILTER (WHERE lower(COALESCE(payload->>'direction','response'))='response')::int AS responses, " +
+      "MIN(occurred_at) AS oldest, MAX(occurred_at) AS newest " +
+      "FROM albion_telemetry_events WHERE type='guild_might_probe' AND occurred_at >= now() - interval '3 days'"
+    )
+  ]);
   const stats = countResult.rows[0] || {};
+  const raw = rawResult.rows[0] || {};
 
   return {
     ...dashboard,
@@ -3844,6 +3855,13 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
       storedSnapshots: Number(stats.n) || 0,
       oldestStoredAt: stats.oldest || null,
       newestStoredAt: stats.newest || dashboard.meta.newestAt || null,
+      rawProbes3d: Number(raw.total) || 0,
+      rawRequests3d: Number(raw.requests) || 0,
+      rawResponses3d: Number(raw.responses) || 0,
+      rawOldestAt: raw.oldest || null,
+      rawNewestAt: raw.newest || null,
+      backfillCandidateSnapshots: Number(materializeResult.snapshots) || 0,
+      backfillStored: Number(materializeResult.stored) || 0,
       note: "GuildMight é experimental. Might vem do tráfego Photon observado; SP só é estimado quando a categoria foi mapeada para a referência de 07/10/2026."
     }
   };

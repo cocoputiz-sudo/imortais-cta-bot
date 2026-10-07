@@ -1,5 +1,10 @@
 "use strict";
 
+const CATEGORY_ALIASES = Object.freeze({
+  "pveoutlandsandroads": "PvE",
+  "smugglers": "Contrabandistas"
+});
+
 const REFERENCE_CATEGORIES_2026_10_07 = Object.freeze({
   "PvE": { level: 49, targetMight: 26000000, seasonPoints: 200 },
   "Coleta": { level: 39, targetMight: 2000000, seasonPoints: 200 },
@@ -186,6 +191,7 @@ function correlateProbeRows(rows, { windowMs = 10000 } = {}) {
 
 module.exports = {
   REFERENCE_CATEGORIES_2026_10_07,
+  CATEGORY_ALIASES,
   spPerMight,
   referenceWeightsPerMillion,
   flattenPhoton,
@@ -238,14 +244,17 @@ function inferCategoryIdentity(pair) {
   for (const entry of sources) {
     if (typeof entry.value !== "string") continue;
     const norm = normalizeCategoryLabel(entry.value);
-    if (byNorm.has(norm)) {
-      const name = byNorm.get(norm);
+    const direct = byNorm.get(norm);
+    const aliased = CATEGORY_ALIASES[norm];
+    const name = direct || aliased || null;
+    if (name) {
       return {
         key: "name:" + normalizeCategoryLabel(name),
         name,
         mapped: true,
-        source: "payload-string",
-        sourcePath: entry.path || null
+        source: direct ? "payload-string" : "payload-alias",
+        sourcePath: entry.path || null,
+        rawLabel: direct ? null : entry.value
       };
     }
   }
@@ -282,7 +291,7 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
   const snapshots = [];
 
   for (const pair of correlation.pairs) {
-    if (!String(pair.operationName || "").includes("GetGuildMightCategoryContribution")) continue;
+    if (!/^GetGuildMightCategory(?:Contribution|Overview)$/.test(String(pair.operationName || ""))) continue;
     const candidate = (pair.discovery?.candidates || [])[0];
     if (!candidate || Number(candidate.confidence) < minConfidence) continue;
 
