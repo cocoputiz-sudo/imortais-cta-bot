@@ -1,0 +1,53 @@
+"use strict";
+const assert = require("assert/strict");
+process.env.PGSSL="disable";
+process.env.GUILD_ID="guild-test";
+const db=require("../src/db");
+const telemetry=require("../src/telemetry");
+async function main(){
+ if(!process.env.DATABASE_URL||!/127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL))throw Error("Recusado fora do Postgres local");
+ await db.init();
+ await telemetry.initSchema(db.pool);
+ await db.pool.query("TRUNCATE TABLE guild_might_snapshots, albion_telemetry_events RESTART IDENTITY CASCADE");
+ const ms=Date.now()-5000;
+ for(const [id,direction,at,parameters] of [
+   ["req-async","request",new Date(ms).toISOString(),{"0":"PvE (Outlands and Roads)"}],
+   ["res-async","response",new Date(ms+250).toISOString(),{"0":["BadMack","RagnaldoKun","ESTHER9950"],"1":[550000,450000,1086795]}]
+ ]){
+   await db.pool.query(
+     "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) VALUES($1,'might-test','guild_might_probe',$2,'BadMack',$3::jsonb)",
+     [id,at,JSON.stringify({direction,operationName:"GetGuildMightCategoryOverview",operationCode:333,parameters})]
+   );
+ }
+ const first=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(first.snapshots,1);
+ assert.equal(first.stored,1);
+ const {rows}=await db.pool.query("SELECT id,members_complete,category_name FROM guild_might_snapshots WHERE response_event_id='res-async'");
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].members_complete,true);
+ assert.equal(rows[0].category_name,"PvE");
+ const sid=rows[0].id;
+ const members=await db.pool.query("SELECT player_name FROM guild_might_snapshot_members WHERE snapshot_id=$1 ORDER BY might DESC",[sid]);
+ assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]);
+ const repeat=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(repeat.stored,0,"idempotência");
+ await db.pool.query("UPDATE guild_might_snapshots SET members_complete=false WHERE id=$1",[sid]);
+ await db.pool.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1 AND player_key='badmack'",[sid]);
+ const repaired=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(repaired.stored,1);
+ const count=await db.pool.query("SELECT count(*)::int AS n FROM guild_might_snapshot_members WHERE snapshot_id=$1",[sid]);
+ assert.equal(count.rows[0].n,3);
+ const now=Date.now();
+ const dashboard=await telemetry.getGuildMightDashboard({days:1});
+ assert(Date.now()-now<4000,"painel não pode aguardar backfill");
+ assert.equal(dashboard.meta.rawProbes3d,2);
+ assert.equal(dashboard.meta.categoryCount,1);
+ assert.equal(dashboard.meta.playerCount,3);
+ assert.equal(dashboard.ranking[0].player,"ESTHER9950");
+ console.log("✅ Guild Might: lote atômico, recuperação, idempotência e painel responsivo");
+}
+main().then(()=>db.pool.end()).catch(async e=>{
+ console.error("❌ Guild Might:",e);
+ try{await db.pool.end();}catch(_){}
+ process.exitCode=1;
+});

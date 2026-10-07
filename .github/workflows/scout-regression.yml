@@ -27,6 +27,7 @@ on:
       - "test/kill-fame.js"
       - "test/ingest-route.js"
       - "test/guild-might-discovery.js"
+      - "test/guild-might-worker.js"
       - "test/pair-route.js"
       - "test/cta-time.js"
       - "test/cta-freeze.js"
@@ -91,6 +92,8 @@ jobs:
         run: node test/ingest-route.js
       - name: Guild Might discovery
         run: node test/guild-might-discovery.js
+      - name: Guild Might worker e snapshots em Postgres
+        run: node test/guild-might-worker.js
       - name: Telemetry pair security
         run: node test/pair-route.js
       - name: CTA time rollover
