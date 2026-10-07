@@ -23,6 +23,71 @@ const COMBAT_BATTLE_MIN_EVENTS = Math.max(1, Number(process.env.COMBAT_BATTLE_MI
 // client já é deduplicado pelo event_id; esta janela serve apenas para fundir cópias
 // semânticas vindas de observers diferentes, preservando loots repetidos reais.
 const LOOT_DEDUP_MS = Math.max(250, Number(process.env.LOOT_DEDUP_MS) || 2500);
+const PAIR_FAILURE_WINDOW_MS = 10 * 60 * 1000;
+const PAIR_FAILURE_IP_LIMIT = 8;
+const PAIR_FAILURE_GLOBAL_LIMIT = 300;
+const pairFailuresByIp = new Map();
+let pairFailuresGlobal = [];
+let pairAttemptSequence = 0;
+
+function prunePairFailures(now = Date.now()) {
+  const cutoff = now - PAIR_FAILURE_WINDOW_MS;
+  pairFailuresGlobal = pairFailuresGlobal.filter((entry) => entry.at > cutoff);
+  for (const [ip, entries] of pairFailuresByIp) {
+    const fresh = entries.filter((entry) => entry.at > cutoff);
+    if (fresh.length) pairFailuresByIp.set(ip, fresh);
+    else pairFailuresByIp.delete(ip);
+  }
+}
+
+function pairRetryAfterSeconds(entries, now = Date.now()) {
+  if (!entries.length) return Math.ceil(PAIR_FAILURE_WINDOW_MS / 1000);
+  return Math.max(1, Math.ceil((entries[0].at + PAIR_FAILURE_WINDOW_MS - now) / 1000));
+}
+
+function pairRateLimitState(ip, now = Date.now()) {
+  prunePairFailures(now);
+  const key = String(ip || "unknown");
+  const ipEntries = pairFailuresByIp.get(key) || [];
+  const globalBlocked = pairFailuresGlobal.length >= PAIR_FAILURE_GLOBAL_LIMIT;
+  const ipBlocked = ipEntries.length >= PAIR_FAILURE_IP_LIMIT;
+  if (!globalBlocked && !ipBlocked) return { blocked: false, retryAfter: 0 };
+
+  const retryAfter = Math.max(
+    globalBlocked ? pairRetryAfterSeconds(pairFailuresGlobal, now) : 0,
+    ipBlocked ? pairRetryAfterSeconds(ipEntries, now) : 0
+  );
+  return { blocked: true, retryAfter };
+}
+
+function reservePairAttempt(ip, now = Date.now()) {
+  const key = String(ip || "unknown");
+  const beforeAttempt = pairRateLimitState(key, now);
+  if (beforeAttempt.blocked) return { ...beforeAttempt, reservation: null };
+
+  const reservation = { id: ++pairAttemptSequence, ip: key, at: now };
+  const ipEntries = pairFailuresByIp.get(key) || [];
+  ipEntries.push(reservation);
+  pairFailuresByIp.set(key, ipEntries);
+  pairFailuresGlobal.push(reservation);
+  return { blocked: false, retryAfter: 0, reservation };
+}
+
+function releasePairReservation(reservation) {
+  if (!reservation) return;
+  const ipEntries = pairFailuresByIp.get(reservation.ip) || [];
+  const filteredIp = ipEntries.filter((entry) => entry.id !== reservation.id);
+  if (filteredIp.length) pairFailuresByIp.set(reservation.ip, filteredIp);
+  else pairFailuresByIp.delete(reservation.ip);
+  pairFailuresGlobal = pairFailuresGlobal.filter((entry) => entry.id !== reservation.id);
+}
+
+function respondPairRateLimited(res, state) {
+  const retryAfter = Math.max(1, Number(state?.retryAfter) || 1);
+  res.set("Retry-After", String(retryAfter));
+  return res.status(429).json({ error: "pair_rate_limited", retryAfter });
+}
+
 let zoneChangeHandler = null;
 
 function setZoneChangeHandler(handler) {
@@ -3527,48 +3592,76 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 
   app.post("/api/telemetry/pair", async (req, res) => {
+    let reservation = null;
     try {
       const body = req.body || {};
       const code = String(body.code || "").trim();
-      const deviceId = String(body.deviceId || "").trim();
-      const playerName = String(body.playerName || "").trim();
+      const deviceId = stripTelemetryNul(body.deviceId).trim();
+      const playerName = stripTelemetryNul(body.playerName).trim();
       if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: "code" });
       if (!deviceId) return res.status(400).json({ error: "device_id" });
 
+      const requesterIp = String(req.ip || req.socket?.remoteAddress || "unknown");
+      const attempt = reservePairAttempt(requesterIp);
+      if (attempt.blocked) return respondPairRateLimited(res, attempt);
+      reservation = attempt.reservation;
+
       const hash = tokenHash("pair:" + code);
-      const { rows } = await pool.query(
-        `SELECT * FROM albion_telemetry_pairing_codes
-          WHERE code_hash=$1 AND used_at IS NULL AND expires_at > now()
-          LIMIT 1`,
-        [hash]
-      );
-      const pairing = rows[0];
-      if (!pairing) return res.status(401).json({ error: "invalid_or_expired_code" });
-
-      const token = createAgentToken();
-      const agentHash = tokenHash(token);
-      const boundPlayer = playerName || pairing.player_name || null;
-      const label = pairing.label || (boundPlayer ? boundPlayer + "-PC" : deviceId);
-
-      await pool.query("BEGIN");
+      const client = await pool.connect();
+      let transactionOpen = false;
       try {
-        await pool.query(
+        await client.query("BEGIN");
+        transactionOpen = true;
+
+        const { rows } = await client.query(
+          `UPDATE albion_telemetry_pairing_codes
+              SET used_at=now()
+            WHERE code_hash=$1
+              AND used_at IS NULL
+              AND expires_at > now()
+            RETURNING *`,
+          [hash]
+        );
+        const pairing = rows[0];
+
+        if (!pairing) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          const afterFailure = pairRateLimitState(requesterIp);
+          if (afterFailure.blocked) return respondPairRateLimited(res, afterFailure);
+          return res.status(401).json({ error: "invalid_or_expired_code" });
+        }
+
+        const token = createAgentToken();
+        const agentHash = tokenHash(token);
+        const staffPlayer = stripTelemetryNul(pairing.player_name).trim();
+        const boundPlayer = staffPlayer || playerName || null;
+        if (staffPlayer && playerName && normName(staffPlayer) !== normName(playerName)) {
+          console.warn(
+            `[telemetry pair] nome do client ignorado; vínculo da staff prevalece · staff=${staffPlayer} · client=${playerName}`
+          );
+        }
+        const label = pairing.label || (boundPlayer ? boundPlayer + "-PC" : deviceId);
+
+        await client.query(
           `INSERT INTO albion_telemetry_agent_tokens(token_hash, label, device_id, player_name, last_seen)
            VALUES($1,$2,$3,$4,now())`,
           [agentHash, label, deviceId, boundPlayer]
         );
-        await pool.query(
-          `UPDATE albion_telemetry_pairing_codes SET used_at=now() WHERE code_hash=$1`,
-          [hash]
-        );
-        await pool.query("COMMIT");
-      } catch (e) {
-        await pool.query("ROLLBACK");
-        throw e;
-      }
+        await client.query("COMMIT");
+        transactionOpen = false;
+        releasePairReservation(reservation);
 
-      res.json({ ok: true, token, label, deviceId, playerName: boundPlayer });
+        return res.json({ ok: true, token, label, deviceId, playerName: boundPlayer });
+      } catch (e) {
+        if (transactionOpen) await client.query("ROLLBACK").catch(() => {});
+        releasePairReservation(reservation);
+        throw e;
+      } finally {
+        client.release();
+      }
     } catch (e) {
+      releasePairReservation(reservation);
       console.error("/api/telemetry/pair:", e);
       res.status(500).json({ error: "server" });
     }
@@ -3686,10 +3779,11 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     try {
       const body = req.body || {};
       const device = body.device || {};
-      const deviceId = String(device.deviceId || "").trim();
+      const deviceId = stripTelemetryNul(device.deviceId).trim();
+      const detectedPlayer = stripTelemetryNul(device.playerName).trim();
+      const deviceVersion = stripTelemetryNul(device.version).trim();
       if (!deviceId) return res.status(400).json({ error: "device_id" });
 
-      const detectedPlayer = String(device.playerName || "").trim();
       const auth = await authenticateTelemetry(req, { deviceId, playerName: detectedPlayer, allowMaster: true });
       if (!auth) return res.status(401).json({ error: "unauthorized" });
 
@@ -3758,7 +3852,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
         INSERT INTO albion_telemetry_devices(device_id, player_name, version)
         VALUES($1,$2,$3)
         ON CONFLICT(device_id) DO UPDATE SET player_name=EXCLUDED.player_name, version=EXCLUDED.version, last_seen=now()
-      `, [deviceId, device.playerName || null, device.version || null]);
+      `, [deviceId, detectedPlayer || null, deviceVersion || null]);
 
       let inserted = 0, duplicate = 0;
       let fameEnrichmentQueue = [];
@@ -3807,7 +3901,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
                 fastZoneChanges.push({
                   ctaEventId,
                   deviceId,
-                  playerName: event.playerName || device.playerName || null,
+                  playerName: event.playerName || detectedPlayer || null,
                   payload: event.payload,
                   occurredAt: event.occurredAt,
                 });
@@ -3892,7 +3986,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
                       fallbackZoneChanges.push({
                         ctaEventId,
                         deviceId,
-                        playerName: event.playerName || device.playerName || null,
+                        playerName: event.playerName || detectedPlayer || null,
                         payload: event.payload,
                         occurredAt: event.occurredAt,
                       });

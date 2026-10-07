@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 
 process.env.PGSSL = "disable";
 process.env.GUILD_ID = "guild-test";
@@ -8,6 +10,7 @@ process.env.GUILD_ID = "guild-test";
 const db = require("../src/db");
 const {
   parseConsolidationSteps,
+  isCtaFrozen,
   consolidationStepsToRun,
 } = require("../src/consolidation-state");
 
@@ -28,6 +31,24 @@ async function createTestEvent(label = "19:20") {
     remind30: null,
     remind10: null,
   });
+}
+
+function testFrozenDecisionAndUsage() {
+  assert.equal(isCtaFrozen(null), false);
+  assert.equal(isCtaFrozen({}), false);
+  assert.equal(isCtaFrozen({ frozen_at: null }), false);
+  assert.equal(isCtaFrozen({ frozen_at: "" }), false);
+  assert.equal(isCtaFrozen({ frozen_at: "2026-10-07T05:00:00.000Z" }), true);
+  assert.equal(isCtaFrozen({ frozen_at: new Date("2026-10-07T05:00:00.000Z") }), true);
+
+  const indexSource = fs.readFileSync(path.join(__dirname, "..", "src", "index.js"), "utf8");
+  assert.match(
+    indexSource,
+    /if\s*\(\s*isCtaFrozen\(fresh\)\s*\)\s*\{/,
+    "applyReallocation precisa usar a decisão pura isCtaFrozen(fresh)"
+  );
+
+  ok("freeze: decisão pura é usada por applyReallocation");
 }
 
 function testPureWindows() {
@@ -116,6 +137,7 @@ async function main() {
   }
 
   await db.init();
+  testFrozenDecisionAndUsage();
   testPureWindows();
   await testPersistenceSurvivesRestart();
   await testLegacyDefaults();
