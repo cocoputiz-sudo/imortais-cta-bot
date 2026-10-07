@@ -23,7 +23,7 @@ const roaming = require("./roaming");
 const castelo = require("./castelo");
 const locale = require("./locale");
 const { ctaPingTime } = require("./ctatime");
-const { parseConsolidationSteps, consolidationStepsToRun } = require("./consolidation-state");
+const { parseConsolidationSteps, isCtaFrozen, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
 const CALLER_WEAPONS = Object.freeze(["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA", "HAND OF JUSTICE"]);
@@ -1091,7 +1091,7 @@ async function applyReallocation(ev, guild, focusUserId) {
   const pl = db.parsePartyList(fresh);
   const signups = await db.getSignups(fresh.id);
 
-  if (fresh.frozen_at) {
+  if (isCtaFrozen(fresh)) {
     // CTA travado: ninguém que já tem vaga é movido. Só encaixamos quem está
     // sem vaga (reservas / "Aguardando PT") nas vagas abertas das PTs abertas.
     // Cobre tanto uma inscrição nova (focusUserId) quanto abrir PT nova via /cta_show.
