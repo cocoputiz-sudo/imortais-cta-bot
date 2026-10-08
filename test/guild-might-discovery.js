@@ -211,3 +211,7 @@ const smugglersRows = [
 const smugglersSnapshots = buildContributionSnapshots(smugglersRows);
 assert.strictEqual(smugglersSnapshots[0].category.name, "Contrabandistas");
 assert.strictEqual(smugglersSnapshots[0].category.mapped, true);
+
+// Exercise Challenge extraction and generated Guild Might page in the CI discovery step.
+require("./guild-challenge");
+require("./guild-might-page");
