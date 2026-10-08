@@ -34,6 +34,14 @@ assert.strictEqual(simple.candidates[0].mightPath, "1");
 assert.strictEqual(simple.candidates[0].count, 3);
 assert(simple.candidates[0].confidence >= 0.9, "confidence alta esperada");
 
+// The IMORTAIS guild can exceed 400 members; arrays must not be silently discarded.
+const fullGuild = inferContributionLayout({
+  "0": Array.from({length:777}, (_,i) => "Player" + i),
+  "1": Array.from({length:777}, (_,i) => 1000000 - i)
+});
+assert(fullGuild.candidates.length >= 1, "must support a complete 777-player leaderboard");
+assert.strictEqual(fullGuild.candidates[0].count, 777);
+
 const nested = inferContributionLayout({
   "5": {
     "2": ["RagnaldoKun", "GoldVex"],
