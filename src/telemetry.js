@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const navigation = require("./navigation");
 const killFame = require("./killFame");
 const guildMight = require("./guildMight");
+const guildChallengeStore = require("./guildChallengeStore");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -717,6 +718,8 @@ async function initSchema(dbPool) {
     CREATE INDEX IF NOT EXISTS idx_guild_might_member_player
       ON guild_might_snapshot_members(player_key);
   `);
+
+  await guildChallengeStore.initSchema(pool);
 
   // O histórico é reprocessado em background na inicialização; a primeira
   // visita à aba de Might nunca aguarda milhares de INSERTs.
@@ -3769,9 +3772,11 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
      ORDER BY occurred_at ASC, received_at ASC
   `, [safeMinutes, safeLimit]);
 
+  // Guild Challenge é um ranking independente; persistir mesmo sem snapshots de Might.
+  const challenge = await guildChallengeStore.materialize(pool, rows);
   const snapshots = guildMight.buildContributionSnapshots(rows, { minConfidence: 0.85 });
   if (!snapshots.length) {
-    return { probes: rows.length, snapshots: 0, stored: 0 };
+    return { probes: rows.length, snapshots: 0, stored: 0, challengeStored: challenge.stored };
   }
 
   // Evita reescrever os mesmos snapshots a cada batch ou restart.
@@ -3856,7 +3861,7 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
       client.release();
     }
   }
-  return { probes: rows.length, snapshots: snapshots.length, stored };
+  return { probes: rows.length, snapshots: snapshots.length, stored, challengeStored: challenge.stored };
 }
 
 async function getGuildMightDashboard({ days = 90 } = {}) {
@@ -3934,7 +3939,7 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
       "COUNT(*) FILTER (WHERE lower(COALESCE(payload->>'direction','response'))='request')::int AS requests, " +
       "COUNT(*) FILTER (WHERE lower(COALESCE(payload->>'direction','response'))='response')::int AS responses, " +
       "MIN(occurred_at) AS oldest, MAX(occurred_at) AS newest " +
-      "FROM albion_telemetry_events WHERE type='guild_might_probe' AND occurred_at >= now() - interval '3 days'"
+      "FROM albion_telemetry_events WHERE type='guild_might_probe' AND COALESCE(payload->>'operationName','') <> 'GetGuildChallengePoints' AND occurred_at >= now() - interval '3 days'"
     )
   ]);
   const stats = countResult.rows[0] || {};
@@ -4524,6 +4529,16 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       res.json(await getGuildMightDashboard({ days: req.query.days }));
     } catch (e) {
       console.error("/api/telemetry/guild-might:", e);
+      res.status(500).json({ error: "server" });
+    }
+  });
+
+  app.get("/api/telemetry/guild-challenge", async (req, res) => {
+    try {
+      if (!requireMember || !requireMember(req, res)) return;
+      res.json(await guildChallengeStore.getDashboard(pool, { days: req.query.days }));
+    } catch(e) {
+      console.error("/api/telemetry/guild-challenge:", e);
       res.status(500).json({ error: "server" });
     }
   });
