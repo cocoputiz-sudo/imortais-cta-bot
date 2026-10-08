@@ -8,7 +8,7 @@ async function main(){
  if(!process.env.DATABASE_URL||!/127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL))throw Error("Recusado fora do Postgres local");
  await db.init();
  await telemetry.initSchema(db.pool);
- await db.pool.query("TRUNCATE TABLE guild_might_snapshots, albion_telemetry_events RESTART IDENTITY CASCADE");
+ await db.pool.query("TRUNCATE TABLE guild_challenge_snapshots, guild_might_snapshots, albion_telemetry_events RESTART IDENTITY CASCADE");
  const ms=Date.now()-5000;
  for(const [id,direction,at,parameters] of [
    ["req-async","request",new Date(ms).toISOString(),{"0":"PvE (Outlands and Roads)"}],
@@ -44,6 +44,28 @@ async function main(){
  assert.equal(dashboard.meta.categoryCount,1);
  assert.equal(dashboard.meta.playerCount,3);
  assert.equal(dashboard.ranking[0].player,"ESTHER9950");
+ // Guild Challenge is a separate points ranking. Its snapshot must survive even
+ // when the batch includes no new Guild Might snapshots.
+ await db.pool.query(
+   "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) " +
+   "VALUES('challenge-res-1','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
+   [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
+     "0":["GiganteCarorra","ESTHER9950","JnK1"],"1":[5817978,5072517,4890194]
+   }})]
+ );
+ const challengeBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(challengeBatch.challengeStored,1,"Challenge must store independently of Might");
+ const challengeStore=require("../src/guildChallengeStore");
+ const challenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(challenge.available,true);
+ assert.equal(challenge.members.length,3);
+ assert.deepEqual(challenge.members.map(m=>m.player),["GiganteCarorra","ESTHER9950","JnK1"]);
+ assert.equal(challenge.members[0].points,5817978);
+ assert.equal(challenge.verified,false,"values remain experimental until real Photon validation");
+ const challengeReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(challengeReplay.challengeStored,0,"Challenge snapshots idempotent");
+ console.log("✅ Guild Challenge: persistence, separation, rank and idempotency");
+
  console.log("✅ Guild Might: lote atômico, recuperação, idempotência e painel responsivo");
 }
 main().then(()=>db.pool.end()).catch(async e=>{
