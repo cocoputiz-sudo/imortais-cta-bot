@@ -100,12 +100,12 @@ function inferContributionLayout(parameters) {
   const { arrays, scalars } = flattenPhoton(parameters || {});
   const stringArrays = arrays.filter(entry =>
     entry.value.length >= 2 &&
-    entry.value.length <= 500 &&
+    entry.value.length <= 1200 &&
     entry.value.every(v => typeof v === "string")
   );
   const numericArrays = arrays.filter(entry =>
     entry.value.length >= 2 &&
-    entry.value.length <= 500 &&
+    entry.value.length <= 1200 &&
     entry.value.every(isMightNumber)
   );
 
