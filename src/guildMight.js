@@ -2,7 +2,21 @@
 
 const CATEGORY_ALIASES = Object.freeze({
   "pveoutlandsandroads": "PvE",
-  "smugglers": "Contrabandistas"
+  "gatheringoutlandsandroads": "Coleta",
+  "siphoningmages": "Magos Engarrafadores",
+  "hideoutpowercores": "Núcleos de Esconderijo",
+  "territorypowercrystals": "Cristais de Território",
+  "outlandstreasures": "Tesouros",
+  // "Aranhas" é a chave legada do nosso coletor para Crystal Creatures.
+  // Não mudamos a chave para evitar duplicar Might entre snapshots antigos e novos.
+  "crystalcreatures": "Aranhas",
+  "smugglers": "Contrabandistas",
+  "thedepths": "As Profundezas",
+  "corrupteddungeons": "Masmorras Corrompidas",
+  "castlescastleoutposts": "Castelos e Postos",
+  "castlesandcastleoutposts": "Castelos e Postos",
+  "dragonhunt": "Caça aos Dragões",
+  "ancientlands": "Terras Ancestrais"
 });
 
 const REFERENCE_CATEGORIES_2026_10_07 = Object.freeze({
