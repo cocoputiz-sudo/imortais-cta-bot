@@ -788,6 +788,20 @@ const PAGE = `<!doctype html>
   .dtable th{ text-align:left; color:var(--muted); font-weight:700; font-size:11px; letter-spacing:.06em; padding:6px 8px; border-bottom:1px solid var(--line); }
   .dtable td{ padding:7px 8px; border-bottom:1px solid #1a222e; }
   .dtable tr:hover td{ background:#141c26; }
+  /* Guild Might: category selectors and accessible detailed rankings */
+  .gm-controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:12px 0}
+  .gm-action{border:1px solid #40536f;background:#14202e;color:#d5e6f8;border-radius:9px;padding:9px 13px;font:700 12px var(--sans);cursor:pointer}
+  .gm-action:hover,.gm-action:focus-visible{border-color:#d9aa52}
+  .gm-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin:12px 0 18px}
+  .gm-card{min-height:114px;text-align:left;display:flex;flex-direction:column;gap:8px;border:1px solid #2d3b4b;border-radius:12px;padding:13px;background:linear-gradient(155deg,#151f2b,#0f151c);color:var(--text);cursor:pointer}
+  .gm-card:hover,.gm-card:focus-visible{border-color:#d9aa52;outline:none}
+  .gm-card.selected{border-color:#d9aa52;box-shadow:inset 0 0 0 1px #d9aa52}
+  .gm-card .gm-name{font-weight:800;font-size:13px}
+  .gm-card .gm-value{font-size:22px;font-weight:900;color:var(--gold);font-variant-numeric:tabular-nums}
+  .gm-card .gm-sub{color:var(--muted);font-size:11px;line-height:1.4}
+  .gm-panel-title{display:flex;justify-content:space-between;gap:9px;flex-wrap:wrap;align-items:center}
+  @media(max-width:480px){.gm-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gm-card{padding:10px}.gm-card .gm-value{font-size:17px}}
+
   .pill{ display:inline-block; font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; }
   .pill.ok{ color:#8ce5ad; background:#10241a; } .pill.miss{ color:#ffb0b0; background:#2a1315; } .pill.extra{ color:#eccf8a; background:#2a230f; } .pill.div{ color:#d6b8ff; background:#231a30; }
   .pill.capturado{ color:#9bc7ff; background:#102033; } .pill.entregue{ color:#8ce5ad; background:#10241a; } .pill.pendente{ color:#eccf8a; background:#2a230f; } .pill.divergencia{ color:#d6b8ff; background:#231a30; }
@@ -2965,85 +2979,167 @@ const PAGE = `<!doctype html>
   }
 
 
-  function renderGuildMight(silent){
-    if(!silent) loading('view-might','🏅 Guild Might');
-    fetch('/api/telemetry/guild-might?days=90',{cache:'no-store'})
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-      .then(function(d){
-        d=d||{};
-        var meta=d.meta||{}, categories=d.categories||[], ranking=d.ranking||[];
-        function when(ts){ return ts?fmtUtcDateTime(ts,true):'—'; }
-        function mappedBadge(c){
-          return c&&c.mapped
-            ? '<span class="pill ok">MAPEADA</span>'
-            : '<span class="pill" style="color:#e2b95e;border-color:#6f5a2b">A MAPEAR</span>';
-        }
-        function fmtSp(v){ return v==null?'—':fmtS(Math.round(Number(v)||0)); }
 
-        var html='<div class="modhead">🏅 Guild Might · contribuição da guilda</div>'
-          +'<div class="statgrid">'
-          +'<div class="stat b"><div class="k">Snapshots armazenados</div><div class="v">'+fmtS(meta.storedSnapshots||0)+'</div></div>'
-          +'<div class="stat g"><div class="k">Categorias detectadas</div><div class="v">'+fmtS(meta.categoryCount||0)+'</div></div>'
-          +'<div class="stat a"><div class="k">Categorias mapeadas</div><div class="v">'+fmtS(meta.mappedCategoryCount||0)+'</div></div>'
-          +'<div class="stat p"><div class="k">Jogadores no último estado</div><div class="v">'+fmtS(meta.playerCount||0)+'</div></div>'
-          +'</div>'
-          +'<div class="statgrid">'
-          +'<div class="stat"><div class="k">Probes brutos · 3 dias</div><div class="v">'+fmtS(meta.rawProbes3d||0)+'</div></div>'
-          +'<div class="stat"><div class="k">Requests capturados</div><div class="v">'+fmtS(meta.rawRequests3d||0)+'</div></div>'
-          +'<div class="stat"><div class="k">Responses capturadas</div><div class="v">'+fmtS(meta.rawResponses3d||0)+'</div></div>'
-          +'<div class="stat"><div class="k">Candidatos no backfill</div><div class="v">'+fmtS(meta.backfillCandidateSnapshots||0)+'</div></div>'
-          +'</div>';
-
-        if(!categories.length){
-          var inProgress=!!meta.materializationRunning;
-          html+='<div class="panel"><h3>'+(inProgress?'Processando contribuições de Might…':'Aguardando os primeiros snapshots')+'</h3>'
-            +'<div class="empty-note">'+(inProgress?'O processamento do histórico está rodando em segundo plano. A página não fica bloqueada; atualize daqui a pouco para consultar os resultados.':'Nenhum snapshot de Guild Might foi materializado ainda.')+'</div>'
-            +(Number(meta.rawProbes3d||0)>0
-              ?'<div class="note">Probes recebidos pelo servidor: '+fmtS(meta.rawProbes3d||0)+' em 3 dias ('+fmtS(meta.rawRequests3d||0)+' requests e '+fmtS(meta.rawResponses3d||0)+' responses). A captura já está funcionando.</div>'
-              :'<div class="note">O servidor ainda não registra probes brutos de Might nesses últimos 3 dias. Confira a última comunicação do client e atualize novamente.</div>')
-            +(meta.materializationError?'<div class="note">Erro de materialização: '+esc(meta.materializationError)+'</div>':'')
-            +'<div class="note">Última execução: '+esc(meta.materializationLastRunAt?fmtUtcDateTime(meta.materializationLastRunAt,true):'ainda não concluída')+'. Candidatos extraídos: '+fmtS(meta.backfillCandidateSnapshots||0)+'.</div></div>';
-          setView('view-might',html);
-          return;
-        }
-
-        html+='<div class="panel"><h3>🏆 Ranking por Might observado</h3>'
-          +'<div class="note" style="margin-bottom:10px">Soma dos últimos snapshots de cada categoria detectada. SP estimado só usa categorias cuja identidade já foi mapeada para a referência vigente; não inventamos SP para categorias ainda desconhecidas.</div>'
-          +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>Might observado</th><th>SP estimado</th><th>Categorias</th><th>Mapeadas</th></tr></thead><tbody>'
-          +(ranking.length?ranking.slice(0,100).map(function(x,i){
-            return '<tr><td>'+(i+1)+'</td><td><b>'+esc(x.player||'?')+'</b></td>'
-              +'<td><b>'+fmtS(x.might||0)+'</b></td><td>'+fmtSp(x.estimatedSp)+'</td>'
-              +'<td>'+fmtS(x.categories||0)+'</td><td>'+fmtS(x.mappedCategories||0)+'</td></tr>';
-          }).join(''):'<tr><td colspan="6" style="color:var(--faint)">Nenhum jogador extraído ainda.</td></tr>')
-          +'</tbody></table></div></div>';
-
-        html+='<div class="panel"><h3>📚 Último snapshot por categoria</h3>'
-          +'<div class="note">Referência de SP: 07/10/2026, usada apenas quando a categoria é reconhecida. O histórico vivo substituirá progressivamente essa referência estática.</div></div>';
-
-        categories.forEach(function(c){
-          var cat=c.category||{}, ref=c.reference||null, members=c.members||[];
-          html+='<div class="panel">'
-            +'<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">'
-            +'<h3 style="margin:0">'+esc(cat.name||'Categoria não mapeada')+'</h3>'+mappedBadge(cat)+'</div>'
-            +'<div class="note" style="margin-top:6px">capturado '+esc(when(c.capturedAt))+' · confiança '+(Number(c.confidence||0)*100).toFixed(1)+'% · observer '+esc(c.observer||'—')+' · chave '+esc(cat.key||'—')+'</div>'
-            +(ref?'<div class="statgrid" style="margin-top:10px">'
-              +'<div class="stat"><div class="k">Nível de referência</div><div class="v">'+fmtS(ref.level||0)+'</div></div>'
-              +'<div class="stat"><div class="k">Meta referência</div><div class="v">'+fmtS(ref.targetMight||0)+'</div></div>'
-              +'<div class="stat"><div class="k">SP referência</div><div class="v">'+fmtS(ref.seasonPoints||0)+'</div></div>'
-              +'</div>':'<div class="note" style="margin-top:10px">Categoria ainda não ligada a um nome/nível/meta conhecido. O Might é mostrado normalmente; SP permanece em branco até o mapeamento ficar seguro.</div>')
-            +'<div style="overflow-x:auto;margin-top:12px"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>Might</th><th>SP estimado</th></tr></thead><tbody>'
-            +(members.length?members.slice(0,100).map(function(m,i){
-              return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td>'+fmtS(m.might||0)+'</td><td>'+fmtSp(m.estimatedSp)+'</td></tr>';
-            }).join(''):'<tr><td colspan="4" style="color:var(--faint)">Sem membros extraídos neste snapshot.</td></tr>')
-            +'</tbody></table></div></div>';
-        });
-
-        html+='<div class="note">'+esc(meta.note||'GuildMight experimental; dados derivados de probes Photon passivos.')+'</div>';
-        setView('view-might',html);
-      })
-      .catch(function(e){
-        setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao carregar Guild Might: '+esc(e.message)+'</div>');
+  var guildMightDashboard=null, guildChallengeDashboard=null, guildSelectedMightCategory='all', guildMightCards=[];
+  var guildMightCatalog=[
+    {name:'PvE (Outlands e Roads)',aliases:['PvE']},
+    {name:'Coleta',aliases:['Coleta']},
+    {name:'Magos Engarrafadores',aliases:['Magos Engarrafadores']},
+    {name:'Núcleos de Esconderijo',aliases:['Núcleos de Esconderijo']},
+    {name:'Cristais de Território',aliases:['Cristais de Território']},
+    {name:'Tesouros das Outlands',aliases:['Tesouros','Tesouros das Outlands']},
+    {name:'Criaturas de Cristal',aliases:['Aranhas','Criaturas de Cristal']},
+    {name:'Contrabandistas',aliases:['Contrabandistas']},
+    {name:'Hellgates',aliases:['Hellgates']},
+    {name:'As Profundezas',aliases:['As Profundezas']},
+    {name:'Masmorras Corrompidas',aliases:['Masmorras Corrompidas']},
+    {name:'Castelos e Postos Avançados',aliases:['Castelos e Postos','Castelos e Postos Avançados']},
+    {name:'Caça aos Dragões',aliases:['Caça aos Dragões']},
+    {name:'Terras Ancestrais',aliases:['Terras Ancestrais']}
+  ];
+  function gmNorm(x){return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+  function gmDate(x){return x?fmtUtcDateTime(x,true):'não capturado';}
+  function gmSp(x){return x==null?'—':fmtS(Math.round(Number(x)||0));}
+  function gmCards(categories){
+    var found={};
+    var cards=guildMightCatalog.map(function(info,i){
+      var cat=categories.find(function(c){return info.aliases.some(function(alias){return gmNorm(c.category&&c.category.name)===gmNorm(alias);});})||null;
+      if(cat) found[String(cat.category.key)]=true;
+      return {id:'official:'+i,name:info.name,snapshot:cat};
+    });
+    categories.forEach(function(cat,i){
+      if(!found[String(cat.category&&cat.category.key)]){
+        cards.push({id:'unknown:'+i,name:cat.category&&cat.category.name||'Categoria não identificada',snapshot:cat});
+      }
+    });
+    return cards;
+  }
+  function gmRows(members,type){
+    var sum=(members||[]).reduce(function(a,m){return a+Number(type==='challenge'?m.points:m.might)||0;},0);
+    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>'+ (type==='challenge'?'Chavinhas':'Might') +'</th><th>% do total</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+'</tr></thead><tbody>'
+      +(members&&members.length?members.map(function(m,i){
+        var v=Number(type==='challenge'?m.points:m.might)||0;
+        return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
+          +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')+'</tr>';
+      }).join(''):'<tr><td colspan="5" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
+  }
+  function gmCsvValue(v){
+    var q=String.fromCharCode(34);
+    return q+String(v==null?'':v).replaceAll(q,q+q)+q;
+  }
+  function gmDownload(name,source,mime){
+    var blob=new Blob([source],{type:mime}),url=URL.createObjectURL(blob);
+    var link=document.createElement('a'); link.href=url;link.download=name;
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},30000);
+  }
+  function gmExport(format){
+    var d=guildMightDashboard||{}, ch=guildChallengeDashboard||{};
+    var chosen=guildSelectedMightCategory==='all'?guildMightCards:guildMightCards.filter(function(c){return c.id===guildSelectedMightCategory;});
+    var records=[];
+    chosen.forEach(function(c){
+      if(!c.snapshot) return;
+      (c.snapshot.members||[]).forEach(function(m,i){
+        records.push([c.name,i+1,m.player,Number(m.might)||0,m.estimatedSp==null?'':Math.round(Number(m.estimatedSp)||0),c.snapshot.capturedAt||'']);
       });
+    });
+    var stamp=new Date().toLocaleString('pt-BR');
+    if(format==='csv'){
+      var lines=[['Categoria','Posição','Jogador','Might','SP estimado','Snapshot'].map(gmCsvValue).join(';')];
+      records.forEach(function(r){lines.push(r.map(gmCsvValue).join(';'));});
+      lines.push('');
+      lines.push(['GUILD CHALLENGE - pontuação separada','','','','',''].map(gmCsvValue).join(';'));
+      lines.push(['Jogador','Posição','Chavinhas','','','Snapshot'].map(gmCsvValue).join(';'));
+      (ch.members||[]).forEach(function(m,i){lines.push([m.player,i+1,m.points,'','',ch.capturedAt||''].map(gmCsvValue).join(';'));});
+      gmDownload('imortais-might-challenge.csv',String.fromCharCode(65279)+lines.join(String.fromCharCode(13,10)),'text/csv;charset=utf-8');
+      return;
+    }
+    var body='<h1>IMORTAIS · Relatório de Might e Guild Challenge</h1>'
+      +'<p>Gerado em '+esc(stamp)+'. Últimos snapshots observados por categoria, não somatório de atividade ao longo de um intervalo. Não são valores oficiais de Season Points.</p>'
+      +'<p>Categorias capturadas: '+fmtS((d.categories||[]).length)+'. Jogadores no ranking de Might: '+fmtS((d.ranking||[]).length)+'.</p>';
+    chosen.forEach(function(c){
+      body+='<h2>'+esc(c.name)+'</h2>';
+      if(!c.snapshot){body+='<p>Sem dados recebidos desta categoria.</p>';return;}
+      body+='<p>Snapshot: '+esc(gmDate(c.snapshot.capturedAt))+' · mapeamento: '+(c.snapshot.category&&c.snapshot.category.mapped?'identificado':'pendente')+'</p>'
+        +'<table><thead><tr><th>#</th><th>Jogador</th><th>Might</th><th>SP estimado</th></tr></thead><tbody>'
+        +(c.snapshot.members||[]).map(function(m,i){return '<tr><td>'+(i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.might)+'</td><td>'+gmSp(m.estimatedSp)+'</td></tr>';}).join('')
+        +'</tbody></table>';
+    });
+    body+='<h2>Guild Challenge · Chavinhas</h2><p>Este ranking é independente do Might. Extração experimental'+(ch.capturedAt?' · snapshot '+esc(gmDate(ch.capturedAt)):' · ainda sem snapshot')+'.</p>'
+      +'<table><thead><tr><th>#</th><th>Jogador</th><th>Challenge Points</th></tr></thead><tbody>'
+      +(ch.members||[]).map(function(m,i){return '<tr><td>'+(i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.points)+'</td></tr>';}).join('')+'</tbody></table>';
+    var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Relatório</title>'
+      +'<style>body{max-width:1050px;margin:35px auto;padding:0 20px;font:14px Arial,sans-serif;color:#1d2833}h1,h2{color:#8c2731}h2{margin-top:30px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:8px;border:1px solid #ccc;text-align:left}th{background:#eee}@media print{h2{break-before:auto}tr{break-inside:avoid}}</style>'
+      +'</head><body>'+body+'<p>Fonte: telemetria passiva IMORTAIS. Dados sujeitos a validação.</p></body></html>';
+    gmDownload('imortais-might-challenge.html',html,'text/html;charset=utf-8');
+  }
+  function drawGuildMight(){
+    var d=guildMightDashboard||{},ch=guildChallengeDashboard||{};
+    var meta=d.meta||{},categories=d.categories||[],ranking=d.ranking||[];
+    guildMightCards=gmCards(categories);
+    if(!guildMightCards.some(function(c){return c.id===guildSelectedMightCategory;})) guildSelectedMightCategory='all';
+    var selected=guildMightCards.find(function(c){return c.id===guildSelectedMightCategory;})||null;
+    var html='<div class="modhead">🏅 Guild Might · categorias e contribuições</div>'
+      +'<div class="statgrid">'
+      +'<div class="stat b"><div class="k">Categorias observadas</div><div class="v">'+fmtS(meta.categoryCount||0)+'/14</div></div>'
+      +'<div class="stat g"><div class="k">Categorias mapeadas</div><div class="v">'+fmtS(meta.mappedCategoryCount||0)+'</div></div>'
+      +'<div class="stat a"><div class="k">Jogadores observados</div><div class="v">'+fmtS(meta.playerCount||0)+'</div></div>'
+      +'<div class="stat p"><div class="k">Snapshots persistidos</div><div class="v">'+fmtS(meta.storedSnapshots||0)+'</div></div></div>'
+      +'<div class="gm-controls"><button class="gm-action" id="gm-all">Ranking geral</button>'
+      +'<button class="gm-action" id="gm-export-html">📄 Emitir relatório HTML</button>'
+      +'<button class="gm-action" id="gm-export-csv">📥 Exportar CSV</button>'
+      +'<button class="gm-action" id="gm-refresh">↻ Atualizar dados</button></div>'
+      +'<div class="note">Fonte: snapshots passivos Photon, última captura '+esc(gmDate(meta.newestAt))+'. Dados ausentes não significam contribuição zero. SP é estimativa, não pontuação oficial.</div>'
+      +'<h3>Escolha uma fonte de Might</h3><div class="gm-card-grid">'
+      +guildMightCards.map(function(c){
+        var snap=c.snapshot,players=snap&&snap.members||[],total=players.reduce(function(a,m){return a+(Number(m.might)||0);},0);
+        var top=players[0];
+        return '<button class="gm-card'+(selected&&selected.id===c.id?' selected':'')+'" data-gm-card="'+esc(c.id)+'" type="button" aria-pressed="'+(selected&&selected.id===c.id?'true':'false')+'">'
+          +'<span class="gm-name">'+esc(c.name)+'</span>'
+          +'<span class="gm-value">'+(snap?fmtS(total):'—')+'</span>'
+          +'<span class="gm-sub">'+(snap?(players.length+' jogadores · líder: '+esc(top&&top.player||'—')):'Aguardando captura da categoria')+'</span>'
+          +'</button>';
+      }).join('')+'</div>';
+    if(selected){
+      var snap=selected.snapshot,members=snap&&snap.members||[];
+      html+='<div class="panel"><div class="gm-panel-title"><h3>'+esc(selected.name)+' · ranking individual</h3>'
+        +'<span class="pill '+(snap&&snap.category&&snap.category.mapped?'ok':'')+'">'+(snap?'CAPTURADO':'SEM DADOS')+'</span></div>'
+        +'<div class="note">Snapshot: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+' jogadores'+(snap?' · confiança de extração '+(Number(snap.confidence||0)*100).toFixed(0)+'%':'')+'</div>'
+        +(snap?gmRows(members,'might'):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
+        +'</div>';
+    } else {
+      html+='<div class="panel"><h3>🏆 Ranking geral de Might observado</h3>'
+        +'<div class="note">Soma apenas os últimos snapshots disponíveis de cada categoria. Categorias ainda não capturadas ficam fora do total.</div>'
+        +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>Might observado</th><th>SP estimado</th><th>Categorias</th></tr></thead><tbody>'
+        +(ranking.length?ranking.map(function(m,i){return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td>'+fmtS(m.might||0)+'</td><td>'+gmSp(m.estimatedSp)+'</td><td>'+fmtS(m.categories||0)+'</td></tr>';}).join(''):'<tr><td colspan="5">Aguardando snapshots.</td></tr>')
+        +'</tbody></table></div></div>';
+    }
+    html+='<div class="panel"><div class="gm-panel-title"><h3>🔑 Guild Challenge · ranking das chavinhas</h3><span class="pill '+(ch.available?'ok':'')+'">'+(ch.available?'SNAPSHOT CAPTURADO':'AGUARDANDO CAPTURA')+'</span></div>'
+      +'<div class="note">Challenge Points são diferentes de Guild Might e de Season Points. Extração experimental; compare as primeiras posições com o jogo antes de usar para decisões oficiais.</div>'
+      +(ch.available?'<div class="statgrid"><div class="stat"><div class="k">Jogadores</div><div class="v">'+fmtS((ch.members||[]).length)+'</div></div>'
+        +'<div class="stat"><div class="k">Chavinhas observadas</div><div class="v">'+fmtS(ch.totalPoints||0)+'</div></div></div>'
+        +'<div class="note">Capturado em '+esc(gmDate(ch.capturedAt))+' · observador '+esc(ch.observer||'—')+'</div>'+gmRows(ch.members||[],'challenge')
+        :'<div class="empty-note">'+(ch.meta&&ch.meta.rawResponses3d?'Operação detectada, mas ainda sem classificação individual confiável. Conferir diagnostics de Guild Might.':'Aguardando abrir Guild Challenge no Albion com Combat Client conectado.')+'</div>')
+      +(ch.meta&&ch.meta.note?'<div class="note">'+esc(ch.meta.note)+'</div>':'')+'</div>';
+    if(meta.materializationError)html+='<div class="note">Erro ao materializar Might: '+esc(meta.materializationError)+'</div>';
+    if(ch.error)html+='<div class="note">Guild Challenge indisponível: '+esc(ch.error)+'</div>';
+    setView('view-might',html);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-gm-card]'),function(btn){
+      btn.addEventListener('click',function(){guildSelectedMightCategory=btn.getAttribute('data-gm-card');drawGuildMight();});
+    });
+    document.getElementById('gm-all').onclick=function(){guildSelectedMightCategory='all';drawGuildMight();};
+    document.getElementById('gm-refresh').onclick=function(){renderGuildMight();};
+    document.getElementById('gm-export-html').onclick=function(){gmExport('html');};
+    document.getElementById('gm-export-csv').onclick=function(){gmExport('csv');};
+  }
+  function renderGuildMight(silent){
+    if(!silent)loading('view-might','🏅 Guild Might');
+    Promise.all([
+      fetch('/api/telemetry/guild-might?days=90',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Might HTTP '+r.status);return r.json();}),
+      fetch('/api/telemetry/guild-challenge?days=90',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Challenge HTTP '+r.status);return r.json();})
+        .catch(function(e){return {available:false,members:[],error:e.message||String(e)};})
+    ]).then(function(data){guildMightDashboard=data[0];guildChallengeDashboard=data[1];drawGuildMight();})
+      .catch(function(e){setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao consultar Might: '+esc(e.message)+'</div>');});
   }
 
   var guildRefreshTimer=null;
