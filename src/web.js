@@ -3019,7 +3019,7 @@ const PAGE = `<!doctype html>
     return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>'+ (type==='challenge'?'Chavinhas':'Might') +'</th><th>% do total</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+'</tr></thead><tbody>'
       +(members&&members.length?members.map(function(m,i){
         var v=Number(type==='challenge'?m.points:m.might)||0;
-        return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
+        return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
           +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')+'</tr>';
       }).join(''):'<tr><td colspan="5" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
   }
@@ -3040,7 +3040,7 @@ const PAGE = `<!doctype html>
     chosen.forEach(function(c){
       if(!c.snapshot) return;
       (c.snapshot.members||[]).forEach(function(m,i){
-        records.push([c.name,i+1,m.player,Number(m.might)||0,m.estimatedSp==null?'':Math.round(Number(m.estimatedSp)||0),c.snapshot.capturedAt||'']);
+        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,m.estimatedSp==null?'':Math.round(Number(m.estimatedSp)||0),c.snapshot.capturedAt||'']);
       });
     });
     var stamp=new Date().toLocaleString('pt-BR');
@@ -3050,24 +3050,24 @@ const PAGE = `<!doctype html>
       lines.push('');
       lines.push(['GUILD CHALLENGE - pontuação separada','','','','',''].map(gmCsvValue).join(';'));
       lines.push(['Jogador','Posição','Chavinhas','','','Snapshot'].map(gmCsvValue).join(';'));
-      (ch.members||[]).forEach(function(m,i){lines.push([m.player,i+1,m.points,'','',ch.capturedAt||''].map(gmCsvValue).join(';'));});
+      (ch.members||[]).forEach(function(m,i){lines.push([m.player,m.rank||i+1,m.points,'','',ch.capturedAt||''].map(gmCsvValue).join(';'));});
       gmDownload('imortais-might-challenge.csv',String.fromCharCode(65279)+lines.join(String.fromCharCode(13,10)),'text/csv;charset=utf-8');
       return;
     }
     var body='<h1>IMORTAIS · Relatório de Might e Guild Challenge</h1>'
       +'<p>Gerado em '+esc(stamp)+'. Últimos snapshots observados por categoria, não somatório de atividade ao longo de um intervalo. Não são valores oficiais de Season Points.</p>'
-      +'<p>Categorias capturadas: '+fmtS((d.categories||[]).length)+'. Jogadores no ranking de Might: '+fmtS((d.ranking||[]).length)+'.</p>';
+      +'<p>Categorias capturadas: '+fmtS((d.categories||[]).length)+'. Jogadores no ranking de Might: '+fmtS((d.ranking||[]).length)+'. Guild Challenge: '+fmtS(ch.observedMembers||0)+' de '+(ch.expectedMembers==null?'?':fmtS(ch.expectedMembers))+' posições, '+(ch.complete?'completo':'parcial')+'.</p>';
     chosen.forEach(function(c){
       body+='<h2>'+esc(c.name)+'</h2>';
       if(!c.snapshot){body+='<p>Sem dados recebidos desta categoria.</p>';return;}
       body+='<p>Snapshot: '+esc(gmDate(c.snapshot.capturedAt))+' · mapeamento: '+(c.snapshot.category&&c.snapshot.category.mapped?'identificado':'pendente')+'</p>'
         +'<table><thead><tr><th>#</th><th>Jogador</th><th>Might</th><th>SP estimado</th></tr></thead><tbody>'
-        +(c.snapshot.members||[]).map(function(m,i){return '<tr><td>'+(i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.might)+'</td><td>'+gmSp(m.estimatedSp)+'</td></tr>';}).join('')
+        +(c.snapshot.members||[]).map(function(m,i){return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.might)+'</td><td>'+gmSp(m.estimatedSp)+'</td></tr>';}).join('')
         +'</tbody></table>';
     });
     body+='<h2>Guild Challenge · Chavinhas</h2><p>Este ranking é independente do Might. Extração experimental'+(ch.capturedAt?' · snapshot '+esc(gmDate(ch.capturedAt)):' · ainda sem snapshot')+'.</p>'
       +'<table><thead><tr><th>#</th><th>Jogador</th><th>Challenge Points</th></tr></thead><tbody>'
-      +(ch.members||[]).map(function(m,i){return '<tr><td>'+(i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.points)+'</td></tr>';}).join('')+'</tbody></table>';
+      +(ch.members||[]).map(function(m,i){return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.points)+'</td></tr>';}).join('')+'</tbody></table>';
     var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Relatório</title>'
       +'<style>body{max-width:1050px;margin:35px auto;padding:0 20px;font:14px Arial,sans-serif;color:#1d2833}h1,h2{color:#8c2731}h2{margin-top:30px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:8px;border:1px solid #ccc;text-align:left}th{background:#eee}@media print{h2{break-before:auto}tr{break-inside:avoid}}</style>'
       +'</head><body>'+body+'<p>Fonte: telemetria passiva IMORTAIS. Dados sujeitos a validação.</p></body></html>';
@@ -3089,22 +3089,22 @@ const PAGE = `<!doctype html>
       +'<button class="gm-action" id="gm-export-html">📄 Emitir relatório HTML</button>'
       +'<button class="gm-action" id="gm-export-csv">📥 Exportar CSV</button>'
       +'<button class="gm-action" id="gm-refresh">↻ Atualizar dados</button></div>'
-      +'<div class="note">Fonte: snapshots passivos Photon, última captura '+esc(gmDate(meta.newestAt))+'. Dados ausentes não significam contribuição zero. SP é estimativa, não pontuação oficial.</div>'
+      +'<div class="note">Fonte: snapshots passivos Photon, última captura '+esc(gmDate(meta.newestAt))+'. Dados ausentes não significam contribuição zero. Níveis e SP oficiais não foram capturados nessas operações e permanecem indisponíveis.</div>'
       +'<h3>Escolha uma fonte de Might</h3><div class="gm-card-grid">'
       +guildMightCards.map(function(c){
-        var snap=c.snapshot,players=snap&&snap.members||[],total=players.reduce(function(a,m){return a+(Number(m.might)||0);},0);
+        var snap=c.snapshot,players=snap&&snap.members||[],total=players.reduce(function(a,m){return a+(Number(m.might)||0);},0), guildTotal=snap&&snap.guildMight;
         var top=players[0];
         return '<button class="gm-card'+(selected&&selected.id===c.id?' selected':'')+'" data-gm-card="'+esc(c.id)+'" type="button" aria-pressed="'+(selected&&selected.id===c.id?'true':'false')+'">'
           +'<span class="gm-name">'+esc(c.name)+'</span>'
-          +'<span class="gm-value">'+(snap?fmtS(total):'—')+'</span>'
-          +'<span class="gm-sub">'+(snap?(players.length+' jogadores · líder: '+esc(top&&top.player||'—')):'Aguardando captura da categoria')+'</span>'
+          +'<span class="gm-value">'+(snap?fmtS(guildTotal==null?total:guildTotal):'—')+'</span>'
+          +'<span class="gm-sub">'+(snap?(players.length+'/'+(snap.totalMembers||'?')+' posições · '+(snap.complete?'completo':'parcial')+' · líder: '+esc(top&&top.player||'—')):'Aguardando captura da categoria')+'</span>'
           +'</button>';
       }).join('')+'</div>';
     if(selected){
       var snap=selected.snapshot,members=snap&&snap.members||[];
       html+='<div class="panel"><div class="gm-panel-title"><h3>'+esc(selected.name)+' · ranking individual</h3>'
         +'<span class="pill '+(snap&&snap.category&&snap.category.mapped?'ok':'')+'">'+(snap?'CAPTURADO':'SEM DADOS')+'</span></div>'
-        +'<div class="note">Snapshot: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+' jogadores'+(snap?' · confiança de extração '+(Number(snap.confidence||0)*100).toFixed(0)+'%':'')+'</div>'
+        +'<div class="note">Snapshot: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' posições · '+(snap&&snap.complete?'COMPLETO':'PARCIAL')+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
         +(snap?gmRows(members,'might'):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
         +'</div>';
     } else {
@@ -3118,7 +3118,7 @@ const PAGE = `<!doctype html>
       +'<div class="note">Challenge Points são diferentes de Guild Might e de Season Points. Extração experimental; compare as primeiras posições com o jogo antes de usar para decisões oficiais.</div>'
       +(ch.available?'<div class="statgrid"><div class="stat"><div class="k">Jogadores</div><div class="v">'+fmtS((ch.members||[]).length)+'</div></div>'
         +'<div class="stat"><div class="k">Chavinhas observadas</div><div class="v">'+fmtS(ch.totalPoints||0)+'</div></div></div>'
-        +'<div class="note">Capturado em '+esc(gmDate(ch.capturedAt))+' · observador '+esc(ch.observer||'—')+'</div>'+gmRows(ch.members||[],'challenge')
+        +'<div class="note">Capturado em '+esc(gmDate(ch.capturedAt))+' · observador '+esc(ch.observer||'—')+' · '+fmtS(ch.observedMembers||0)+'/'+(ch.expectedMembers==null?'?':fmtS(ch.expectedMembers))+' posições · '+(ch.complete?'COMPLETO':'PARCIAL')+'. Nível da guilda não recebido nesses pacotes.</div>'+gmRows(ch.members||[],'challenge')
         :'<div class="empty-note">'+(ch.meta&&ch.meta.rawResponses3d?'Operação detectada, mas ainda sem classificação individual confiável. Conferir diagnostics de Guild Might.':'Aguardando abrir Guild Challenge no Albion com Combat Client conectado.')+'</div>')
       +(ch.meta&&ch.meta.note?'<div class="note">'+esc(ch.meta.note)+'</div>':'')+'</div>';
     if(meta.materializationError)html+='<div class="note">Erro ao materializar Might: '+esc(meta.materializationError)+'</div>';
