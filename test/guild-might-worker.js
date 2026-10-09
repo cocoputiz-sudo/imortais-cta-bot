@@ -2,6 +2,7 @@
 const assert = require("assert/strict");
 process.env.PGSSL="disable";
 process.env.GUILD_ID="guild-test";
+const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 const db=require("../src/db");
 const telemetry=require("../src/telemetry");
 async function main(){
@@ -12,11 +13,11 @@ async function main(){
  const ms=Date.now()-5000;
  for(const [id,direction,at,parameters] of [
    ["req-async","request",new Date(ms).toISOString(),{"0":"PvE (Outlands and Roads)"}],
-   ["res-async","response",new Date(ms+250).toISOString(),{"0":["BadMack","RagnaldoKun","ESTHER9950"],"1":[550000,450000,1086795]}]
+   ["res-async","response",new Date(ms+250).toISOString(),{"0":guild,"1":"PVE","2":"sample-marker","3":2086795,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[550000,450000,1086795]}]
  ]){
    await db.pool.query(
      "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) VALUES($1,'might-test','guild_might_probe',$2,'BadMack',$3::jsonb)",
-     [id,at,JSON.stringify({direction,operationName:"GetGuildMightCategoryOverview",operationCode:333,parameters})]
+     [id,at,JSON.stringify({direction,operationName:"GetGuildMightCategoryContribution",operationCode:333,parameters})]
    );
  }
  const first=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -25,7 +26,7 @@ async function main(){
  const {rows}=await db.pool.query("SELECT id,members_complete,category_name FROM guild_might_snapshots WHERE response_event_id='res-async'");
  assert.equal(rows.length,1);
  assert.equal(rows[0].members_complete,true);
- assert.equal(rows[0].category_name,"PvE");
+ assert.equal(rows[0].category_name,"PvE (Outlands e Roads)");
  const sid=rows[0].id;
  const members=await db.pool.query("SELECT player_name FROM guild_might_snapshot_members WHERE snapshot_id=$1 ORDER BY might DESC",[sid]);
  assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]);
@@ -36,12 +37,12 @@ async function main(){
  // Content fingerprint must keep only one materialized leaderboard per UTC day.
  for(const [id,direction,parameters] of [
    ["req-same-content","request",{"0":"PvE (Outlands and Roads)"}],
-   ["res-same-content","response",{"0":["BadMack","RagnaldoKun","ESTHER9950"],"1":[550000,450000,1086795]}]
+   ["res-same-content","response",{"0":guild,"1":"PVE","2":"sample-marker","3":2086795,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[550000,450000,1086795]}]
  ]){
    await db.pool.query(
      "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
      "VALUES($1,'might-other-device','guild_might_probe',now(),'Observer2',$2::jsonb)",
-     [id,JSON.stringify({direction,operationName:"GetGuildMightCategoryOverview",operationCode:333,parameters})]
+     [id,JSON.stringify({direction,operationName:"GetGuildMightCategoryContribution",operationCode:333,parameters})]
    );
  }
  const crossDevice=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -68,7 +69,7 @@ async function main(){
    "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) " +
    "VALUES('challenge-res-1','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
    [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
-     "3":482,"5":["GiganteCarrara","ESTHER9950","JnK1"],"6":[5905587,5179919,4996374]
+     "0":guild,"3":482,"5":["GiganteCarrara","ESTHER9950","JnK1"],"6":[5905587,5179919,4996374]
    }})]
  );
  const challengeBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -87,7 +88,7 @@ async function main(){
    "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
    "VALUES('challenge-res-19','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
    [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
-     "3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
+     "0":guild,"3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
    }})]
  );
  const pageBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -101,7 +102,7 @@ async function main(){
    "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
    "VALUES('challenge-page-duplicate','different-device','guild_might_probe',now(),'Observer2',$1::jsonb)",
    [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
-     "3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
+     "0":guild,"3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
    }})]
  );
  const contentReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
