@@ -103,9 +103,9 @@ async function getDashboard(pool,{days=90}={}){
     pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members,snapshot_marker,guild_total_points FROM guild_challenge_snapshots "+
       "WHERE members_complete=true AND captured_at >= COALESCE($2::timestamptz,now()-($1::text || ' days')::interval) "+
       "AND total_members IS NOT NULL AND device_id=ANY($3::text[]) "+
-      "AND EXISTS(SELECT 1 FROM albion_telemetry_events e WHERE e.event_id=guild_challenge_snapshots.response_event_id "+
+      "AND (layout->>'guildVerified'='true' OR EXISTS(SELECT 1 FROM albion_telemetry_events e WHERE e.event_id=guild_challenge_snapshots.response_event_id "+
       "AND e.payload#>>'{parameters,0,kind}'='bytes' AND e.payload#>>'{parameters,0,length}'='16' "+
-      "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$4) "+
+      "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$4)) "+
       "ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays,epoch.startAt,devices,expectedGuild]),
     pool.query("SELECT COUNT(*)::int AS n,MAX(captured_at) AS newest FROM guild_challenge_snapshots WHERE members_complete=true"),
     pool.query("SELECT COUNT(*)::int AS total,"+
@@ -124,9 +124,9 @@ async function getDashboard(pool,{days=90}={}){
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
       "AND captured_at BETWEEN COALESCE($3::timestamptz,now()-($2::text || ' days')::interval) AND $1::timestamptz "+
       "AND device_id=ANY($4::text[]) "+
-      "AND EXISTS(SELECT 1 FROM albion_telemetry_events e WHERE e.event_id=guild_challenge_snapshots.response_event_id "+
+      "AND (layout->>'guildVerified'='true' OR EXISTS(SELECT 1 FROM albion_telemetry_events e WHERE e.event_id=guild_challenge_snapshots.response_event_id "+
       "AND e.payload#>>'{parameters,0,kind}'='bytes' AND e.payload#>>'{parameters,0,length}'='16' "+
-      "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$5) "+
+      "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$5)) "+
       "ORDER BY captured_at DESC,id DESC",
       [top.captured_at,safeDays,epoch.startAt,devices,expectedGuild]
     );
