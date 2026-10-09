@@ -23,8 +23,9 @@ const KNOWN_CATEGORY_LABELS = Object.freeze({
   DRAGON_AREA: "Terras Ancestrais",
   GVGSEASON: "Magos Engarrafadores"
 });
-const USER_CONFIRMED_CODES = new Set(["GVGSEASON","HELLDUNGEON","DRAGON_AREA"]);
-const TENTATIVE_CODES = new Set(["ENERGYCRYSTAL","SPIDERS","POWERCORE","CASTLE","CORRUPTED","DRAGON_HUNT","SMUGGLERS","TREASURES"]);
+// All 14 mappings validated by guild leader against in-game category labels on 2026-10-09.
+const USER_CONFIRMED_CODES = new Set(Object.keys(KNOWN_CATEGORY_LABELS));
+const TENTATIVE_CODES = new Set();
 
 function nonnegativeInteger(v) { return typeof v === "number" && Number.isSafeInteger(v) && v >= 0; }
 function playerName(v) { return typeof v === "string" && /^[\p{L}\p{N}_-]{2,32}$/u.test(v); }
