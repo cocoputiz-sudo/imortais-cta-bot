@@ -18,7 +18,7 @@ function resolveEpoch(observations,{manualStartAt=null}={}){
   const newest=accepted[accepted.length-1];
   const manualMs=manualStartAt?Date.parse(manualStartAt):NaN;
   if(!newest)return {seasonId:null,startAt:Number.isFinite(manualMs)?new Date(manualMs).toISOString():null,
-    verified:false,source:"season_not_observed"};
+    verified:Number.isFinite(manualMs),source:Number.isFinite(manualMs)?"staff_approved_start":"season_not_observed"};
   const lastOther=[...accepted].reverse().find(x=>x.id!==newest.id);
   let startAt=null,verified=false,source="initial_season_unverified";
   if(lastOther){
