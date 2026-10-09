@@ -7,6 +7,8 @@ const killFame = require("./killFame");
 const guildMight = require("./guildMight");
 const guildChallengeStore = require("./guildChallengeStore");
 const guildManualProgress = require("./guildManualProgress");
+// Production may collect raw Challenge probes, but never expose this feature.
+const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -4586,13 +4588,16 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 
   app.get("/api/telemetry/guild-progress", async (req,res)=>{
-    try{if(!requireMember(req,res))return;res.json({rows:await guildManualProgress.all(pool)});}
+    try{if(!requireMember(req,res))return;const rows=await guildManualProgress.all(pool);res.json({rows:CHALLENGE_UI_ENABLED?rows:rows.filter(r=>r.categoryCode!=="GUILD_CHALLENGE")});}
     catch(e){console.error("guild-progress",e);res.status(500).json({error:"server"});}
   });
   app.post("/api/telemetry/guild-progress", async (req,res)=>{
     const admin=requireAdmin?.(req,res);
     if(!admin){if(!res.headersSent)res.status(403).json({error:"site_admin_only"});return;}
-    try{const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);}
+    try{
+      if(!CHALLENGE_UI_ENABLED && String(req.body?.categoryCode||"").trim().toUpperCase()==="GUILD_CHALLENGE") return res.status(403).json({error:"feature_not_enabled"});
+      const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);
+    }
     catch(e){const bad=/^invalid_/.test(e.message);res.status(bad?400:500).json({error:bad?e.message:"server"});}
   });
 
@@ -4609,6 +4614,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   app.get("/api/telemetry/guild-challenge", async (req, res) => {
     try {
       if (!requireMember || !requireMember(req, res)) return;
+      if(!CHALLENGE_UI_ENABLED)return res.status(404).json({error:"feature_not_enabled"});
       res.json(await guildChallengeStore.getDashboard(pool, { days: req.query.days }));
     } catch(e) {
       console.error("/api/telemetry/guild-challenge:", e);
