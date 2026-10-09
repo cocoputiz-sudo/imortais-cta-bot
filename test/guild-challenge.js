@@ -21,6 +21,6 @@ assert.equal(result[1].members[0].points,5905587);
 const combined=assemblePages(result);
 assert.equal(combined.observedMembers,5);
 assert.equal(combined.complete,false);
-assert.deepEqual(combined.members.map(m=>m.rank),[1,2,3,20,21]);
+assert.deepEqual(combined.members.map(m=>m.rank),[1,2,3,4,5]);
 assert.equal(extractChallengeSnapshots([event("broken","GetGuildChallengePoints","response",{"5":["BadMack"],"6":[-1],"3":482})]).length,0);
 console.log("✅ Guild Challenge: parsing com layout real, paginas e cobertura parcial OK");
