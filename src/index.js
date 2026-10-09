@@ -23,6 +23,7 @@ const roaming = require("./roaming");
 const castelo = require("./castelo");
 const locale = require("./locale");
 const { ctaPingTime } = require("./ctatime");
+const { publishBeforeThread } = require("./cta-publish");
 const { parseConsolidationSteps, isCtaFrozen, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
@@ -3627,19 +3628,11 @@ const webActions = {
 
     const brief = normalizeCtaBrief(briefInput);
     const info = ctaBriefText(briefInput);
-    const thread = await criarCTA(ch, ch.guild, ch.guild.id, actorId, time, { brief: {
-      useDeparture: !!brief.departure,
-      departure: brief.departure,
-      useGear: !!brief.gearTier,
-      gearTier: brief.gearTier,
-      gearCount: brief.gearCount,
-    } });
-
-    const evForLink = { guild_id: ch.guild.id, thread_id: thread.id, time_label: time };
     const mention = CFG.imortalRoleId ? `<@&${CFG.imortalRoleId}>` : "@Imortal";
     const allow = CFG.imortalRoleId ? { allowedMentions: { roles: [CFG.imortalRoleId] } } : {};
+    const announceText = (label) => `${mention} 🛡️ ${label} UTC — chamado!\n\n${info}\n\nLoga e pinga tua função na planilha 👇`;
     const payload = {
-      content: `${mention} 🛡️ ${ctaLinkedLabel(evForLink)} UTC — chamado!\n\n${info}\n\nLoga e pinga tua função na planilha 👇`,
+      content: announceText(`**CTA ${time}**`),
       ...allow,
     };
 
@@ -3650,7 +3643,28 @@ const webActions = {
       } catch (_) { /* ignora imagem inválida */ }
     }
 
-    await ch.send(payload).catch(() => {});
+    // Primeiro publica a imagem e o briefing; só depois cria a planilha.
+    // Atualizar o texto mantém a imagem na posição original e acrescenta o link.
+    await publishBeforeThread({
+      publish: () => ch.send(payload),
+      createThread: () => criarCTA(ch, ch.guild, ch.guild.id, actorId, time, {
+        brief: {
+          useDeparture: !!brief.departure,
+          departure: brief.departure,
+          useGear: !!brief.gearTier,
+          gearTier: brief.gearTier,
+          gearCount: brief.gearCount,
+        },
+      }),
+      updateAnnouncement: (announcement, thread) => {
+        const evForLink = { guild_id: ch.guild.id, thread_id: thread.id, time_label: time };
+        return announcement.edit({
+          content: announceText(ctaLinkedLabel(evForLink)),
+          allowedMentions: { parse: [] },
+        });
+      },
+      onUpdateFailure: (error) => console.warn("CTA: falha ao vincular anúncio à planilha:", error),
+    });
     return { ok: true };
   },
   navigationZones: (query) => navigation.searchZones(query, { limit: 25, blackOnly: true }),
