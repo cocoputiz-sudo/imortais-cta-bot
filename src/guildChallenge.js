@@ -22,7 +22,7 @@ function extractChallengeSnapshots(rows) {
       deviceId:row.device_id||row.deviceId||null,
       capturedAt:row.occurred_at||row.occurredAt||null,
       confidence:1,
-      layout:{namesPath:"5",pointsPath:"6",offsetPath:"4",totalMembersPath:"3"}
+      layout:{namesPath:"5",pointsPath:"6",offsetPath:"4",totalMembersPath:"3",guildVerified:true}
     });
   }
   return pages.sort((a,b)=>new Date(b.capturedAt||0)-new Date(a.capturedAt||0));
