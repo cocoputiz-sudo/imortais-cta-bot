@@ -63,6 +63,19 @@ app.get("/api/homolog/device-arrivals",async(req,res)=>{
  }catch(e){console.error("qa arrivals",e.message);res.status(500).json({error:"server"})}
 });
 app.get("/api/homolog/challenge",async(req,res)=>{try{res.json(await challenge.getDashboard(db.pool,{days:90}))}catch(e){res.status(500).json({error:"challenge"})}});
+
+app.get("/api/homolog/legacy-plan",async(req,res)=>{
+ try{
+  const {planLegacyRepair}=require("./guildLegacyRepair");
+  const plan=await planLegacyRepair(db.pool,{limit:20000});
+  res.set("Cache-Control","no-store").json({
+   dryRun:true,eligible:plan.eligible.length,quarantined:plan.quarantined.length,
+   quarantineReasons:plan.quarantined.reduce((a,r)=>{a[r.reason]=(a[r.reason]||0)+1;return a;},{}),
+   sampleEligible:plan.eligible.slice(0,15).map(x=>({snapshotId:x.snapshotId,code:x.code,oldCategory:x.oldCategory})),
+   note:"Nenhum banco foi modificado. Aplicação futura exige autorização expressa."});
+ }catch(e){console.error("homolog legacy plan",e.message);res.status(500).json({error:"legacy_plan"});}
+});
+
 // Exact production War Room HTML/JS, with isolated homolog-only authentication.
 // No Discord OAuth, production DB, or CTA mutations are available here.
 app.get("/auth/me",(_req,res)=>res.json({
