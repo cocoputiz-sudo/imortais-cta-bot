@@ -325,7 +325,7 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
           capturedAt:pair.responseAt,confidence:1,
           requestParameters:pair.requestParameters||{},
           layout:{namesPath:"6",mightPath:"7",pageOffset:decoded.pageOffset,
-            totalMembers:decoded.totalMembers,guildMight:decoded.guildMight,code:decoded.categoryCode,snapshotMarker:decoded.snapshotMarker},
+            totalMembers:decoded.totalMembers,guildMight:decoded.guildMight,code:decoded.categoryCode,snapshotMarker:decoded.snapshotMarker,guildVerified:true},
           reference:null,
           members:decoded.members.map(m=>({...m,estimatedSp:null}))
         });
