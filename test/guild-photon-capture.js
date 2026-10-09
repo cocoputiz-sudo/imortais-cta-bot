@@ -44,6 +44,26 @@ assert.equal(pve.level,null);
 assert.equal(pve.seasonPoints,null);
 assert.equal(assemblePages([{...castle,capturedAt:"2026-10-09T01:08:48Z"}]).observedMembers,3);
 
+// Same player moves from first place to second place between two paginated responses.
+// Dedup MUST use player identity and the latest observation, then rerank.
+const shifted=assemblePages([
+  {totalMembers:3,pageOffset:0,capturedAt:"2026-10-09T01:00:00Z",
+    members:[{player:"Alpha",points:500,rank:1},{player:"Beta",points:400,rank:2}]},
+  {totalMembers:3,pageOffset:1,capturedAt:"2026-10-09T01:01:00Z",
+    members:[{player:"Alpha",points:510,rank:2},{player:"Gamma",points:600,rank:3}]}
+]);
+assert.equal(shifted.observedMembers,3);
+assert.deepEqual(shifted.members.map(m=>[m.player,m.points,m.rank]),[
+  ["Gamma",600,1],["Alpha",510,2],["Beta",400,3]
+]);
+assert.equal(shifted.complete,true);
+// Incomplete coverage shows observed ranks only, not fabricated global positions.
+const partial=assemblePages([{totalMembers:100,pageOffset:49,
+  capturedAt:"2026-10-09T01:00:00Z",members:[{player:"Only",points:123,rank:50}]}]);
+assert.equal(partial.members[0].rank,1);
+assert.equal(partial.complete,false);
+assert.equal(partial.missingCount,99);
+
 // Do not accidentally classify an overview guild-totals table as a players leaderboard.
 assert.equal(parseMightContributionResponse(fixture.mightOverview),null);
 // Missing field 4 means first page; but an inconsistent total must fail closed.
