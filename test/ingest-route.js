@@ -6,7 +6,8 @@ const { once } = require("node:events");
 process.env.PGSSL = "disable";
 process.env.GUILD_ID = "guild-test";
 process.env.TELEMETRY_INGEST_KEY = "ingest-route-test-key";
-process.env.PORT = String(40000 + (process.pid % 1000));
+// Let the OS choose an unused port; PID-derived ports collide in hosted CI.
+process.env.PORT = "0";
 
 const db = require("../src/db");
 const telemetry = require("../src/telemetry");

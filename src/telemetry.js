@@ -722,8 +722,10 @@ async function initSchema(dbPool) {
       player_name   TEXT NOT NULL,
       might         BIGINT NOT NULL,
       estimated_sp  DOUBLE PRECISION,
+      member_rank   INTEGER,
       PRIMARY KEY(snapshot_id, player_key)
     );
+    ALTER TABLE guild_might_snapshot_members ADD COLUMN IF NOT EXISTS member_rank INTEGER;
 
     CREATE INDEX IF NOT EXISTS idx_guild_might_member_player
       ON guild_might_snapshot_members(player_key);
@@ -3813,7 +3815,8 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
         player_key: playerKey,
         player_name: String(member.player),
         might: Math.max(0, Math.trunc(Number(member.might) || 0)),
-        estimated_sp: member.estimatedSp == null ? null : Number(member.estimatedSp)
+        estimated_sp: member.estimatedSp == null ? null : Number(member.estimatedSp),
+        member_rank: Number.isSafeInteger(member.rank) ? member.rank : null
       });
     }
     if (!memberMap.size) continue;
@@ -3868,11 +3871,12 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
       await client.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1", [id]);
       await client.query(`
         INSERT INTO guild_might_snapshot_members(
-          snapshot_id, player_key, player_name, might, estimated_sp
+          snapshot_id, player_key, player_name, might, estimated_sp, member_rank
         )
-        SELECT $1::bigint, x.player_key, x.player_name, x.might, x.estimated_sp
+        SELECT $1::bigint, x.player_key, x.player_name, x.might, x.estimated_sp, x.member_rank
           FROM jsonb_to_recordset($2::jsonb) AS x(
-            player_key text, player_name text, might bigint, estimated_sp double precision
+            player_key text, player_name text, might bigint, estimated_sp double precision,
+            member_rank integer
           )
       `, [id, JSON.stringify([...memberMap.values()])]);
       await client.query(
@@ -3896,9 +3900,16 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
   const epoch=await guildSeason.getSeasonEpoch(pool);
   const approvedDevices=[...guildRankingAuth.approvedDeviceIds()];
-  if(!guildSeason.canPublishRankings(epoch))return {
+  const configurationNotices=[];
+  if(!approvedDevices.length)configurationNotices.push(
+    "Nenhum dispositivo autorizado para o ranking. Configure GUILD_RANKING_ALLOWED_DEVICE_IDS no serviço de produção.");
+  if(!guildSeason.canPublishRankings(epoch))configurationNotices.push(
+    "Início da temporada ainda não validado. Confira o número oficial e configure GUILD_SEASON_START_AT (UTC), ou aguarde uma transição Photon comprovada.");
+  if(configurationNotices.length)return {
     categories:[],ranking:[],meta:{categoryCount:0,mappedCategoryCount:0,playerCount:0,
-      season:epoch,seasonUnverified:true,newestAt:null,storedSnapshots:0}
+      season:epoch,seasonUnverified:!guildSeason.canPublishRankings(epoch),
+      deviceAuthorizationMissing:!approvedDevices.length,
+      configurationNotices,newestAt:null,storedSnapshots:0}
   };
   // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
   // A rotina de background cuida do backfill e dos novos lotes.
@@ -3909,7 +3920,7 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   const {rows:snapshotRows}=await pool.query(
     "SELECT s.id,s.response_event_id,s.request_event_id,s.device_id,s.observer,s.operation_name, "+
     "s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at, "+
-    "s.request_parameters,s.layout,s.reference_data "+
+    "s.request_parameters,s.layout,s.reference_data,e.payload->'parameters' AS raw_params "+
     "FROM guild_might_snapshots s "+
     "LEFT JOIN albion_telemetry_events e ON e.event_id=s.response_event_id "+
     "WHERE s.members_complete=true AND s.category_mapped=true "+
@@ -3927,10 +3938,10 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   let members = [];
   if (ids.length) {
     const memberRows = await pool.query(`
-      SELECT snapshot_id,player_key,player_name,might,estimated_sp
+      SELECT snapshot_id,player_key,player_name,might,estimated_sp,member_rank
         FROM guild_might_snapshot_members
        WHERE snapshot_id = ANY($1::bigint[])
-       ORDER BY snapshot_id,might DESC,player_name
+       ORDER BY snapshot_id,member_rank NULLS LAST,might DESC,player_name
     `, [ids]);
     members = memberRows.rows || [];
   }
@@ -3942,11 +3953,26 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     membersBySnapshot.get(key).push({
       player: row.player_name,
       might: Number(row.might) || 0,
-      estimatedSp: row.estimated_sp == null ? null : Number(row.estimated_sp)
+      estimatedSp: row.estimated_sp == null ? null : Number(row.estimated_sp),
+      rank:row.member_rank==null?null:Number(row.member_rank)
     });
   }
 
-  const snapshots = snapshotRows.map(row => ({
+  const {parseMightContributionResponse}=require("./guildPhotonVerified");
+  const snapshots = snapshotRows.map(row => {
+    const members=(membersBySnapshot.get(String(row.id))||[]).map(m=>({...m}));
+    // Existing mapped snapshots predate member_rank storage. Their original
+    // Photon payload is required to certify page slots; guesswork on might
+    // ordering or alphabetical tie-breaking must NEVER remove a player.
+    if(members.some(m=>m.rank==null)){
+      const decoded=parseMightContributionResponse(row.raw_params);
+      if(decoded && decoded.categoryCode===row.layout?.code &&
+         decoded.pageOffset===Number(row.layout?.pageOffset)){
+        const ranks=new Map(decoded.members.map(m=>[String(m.player).toLowerCase(),m.rank]));
+        for(const m of members)if(m.rank==null)m.rank=ranks.get(m.player.toLowerCase())??null;
+      }
+    }
+    return {
     responseEventId: row.response_event_id,
     requestEventId: row.request_event_id,
     deviceId: row.device_id,
@@ -3962,8 +3988,9 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     requestParameters: row.request_parameters || {},
     layout: row.layout || {},
     reference: row.reference_data || null,
-    members: membersBySnapshot.get(String(row.id)) || []
-  }));
+    members
+  };
+  });
 
   const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt:epoch.startAt});
   dashboard.meta.season=epoch;

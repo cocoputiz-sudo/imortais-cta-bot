@@ -31,7 +31,14 @@ async function main(){
  assert.equal(rows[0].category_name,"PvE (Outlands e Roads)");
  const sid=rows[0].id;
  const members=await db.pool.query("SELECT player_name FROM guild_might_snapshot_members WHERE snapshot_id=$1 ORDER BY might DESC",[sid]);
- assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]);
+ assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]); 
+ const persistedRank=await db.pool.query(
+   "SELECT player_name,member_rank FROM guild_might_snapshot_members "+
+   "WHERE snapshot_id=$1 ORDER BY member_rank",[sid]);
+ assert.deepEqual(persistedRank.rows.map(x=>[x.player_name,x.member_rank]),
+   [["BadMack",1],["RagnaldoKun",2],["ESTHER9950",3]],
+   "Persist exact Photon rank position regardless of sorting by Might");
+
  const repeat=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(repeat.stored,0,"idempotência");
 
@@ -64,7 +71,21 @@ async function main(){
  assert.equal(dashboard.meta.rawProbes3d,4,"raw events include repeat observations; dedup only affects materialized snapshots");
  assert.equal(dashboard.meta.categoryCount,1);
  assert.equal(dashboard.meta.playerCount,3);
- assert.equal(dashboard.ranking[0].player,"ESTHER9950");
+ assert.equal(dashboard.ranking[0].player,"ESTHER9950"); 
+ // Production must show a clear configuration warning, not an empty mystery.
+ const approvedIds=process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS;
+ delete process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS;
+ const noDevices=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(noDevices.meta.deviceAuthorizationMissing,true);
+ assert(noDevices.meta.configurationNotices.some(x=>x.includes("GUILD_RANKING_ALLOWED_DEVICE_IDS")));
+ process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS=approvedIds;
+ const seasonStart=process.env.GUILD_SEASON_START_AT;
+ delete process.env.GUILD_SEASON_START_AT;
+ const noSeason=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(noSeason.meta.seasonUnverified,true);
+ assert(noSeason.meta.configurationNotices.some(x=>x.includes("GUILD_SEASON_START_AT")));
+ process.env.GUILD_SEASON_START_AT=seasonStart;
+
  // Guild Challenge is a separate points ranking. Its snapshot must survive even
  // when the batch includes no new Guild Might snapshots.
  await db.pool.query(

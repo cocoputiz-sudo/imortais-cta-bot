@@ -1,5 +1,5 @@
 "use strict";
-const {KNOWN_CATEGORY_LABELS,parseMightContributionResponse,parseMightOverviewResponse,assemblePages,validImortaisGuild}=require("./guildPhotonVerified");
+const {KNOWN_CATEGORY_LABELS,parseMightContributionResponse,parseMightOverviewResponse,assembleMightPages,validImortaisGuild}=require("./guildPhotonVerified");
 
 const CATEGORY_ALIASES = Object.freeze({
   "pveoutlandsandroads": "PvE",
@@ -402,7 +402,7 @@ function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
         categoryCode:code,snapshotMarker:s.layout.snapshotMarker??null,
         members:s.members||[]}));
     if(!pages.length)continue;
-    const merged=assemblePages(pages,{seasonStartAt});
+    const merged=assembleMightPages(pages,{seasonStartAt});
     categories.push({...latest,
       category:{key:"name:"+normalizeCategoryLabel(KNOWN_CATEGORY_LABELS[code]),
         name:KNOWN_CATEGORY_LABELS[code],mapped:true,nameTentative:false},
@@ -414,8 +414,11 @@ function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
       oldestMemberAt:merged.oldestMemberAt,
       oldestMemberAgeMs:merged.oldestMemberAgeMs,
       lastCompleteAt:merged.lastCompleteAt,coverage:merged.coverage,
+      sweepComplete:merged.sweepComplete,sweepCoverage:merged.sweepCoverage,
+      sweepStartedAt:merged.sweepStartedAt,sweepDurationMs:merged.sweepDurationMs,
+      sweepMethod:merged.sweepMethod,
       recentWindowStart:seasonStartAt,
-      complete:merged.complete,missingRanges:merged.missingRanges,
+      complete:merged.complete,missingCount:merged.missingCount,
       pages:merged.pages,guildMight:null,
       observedMight:merged.observedMight,
       level:null,seasonPoints:null,threshold:null});

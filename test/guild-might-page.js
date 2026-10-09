@@ -51,6 +51,33 @@ assert(page.includes("America/Sao_Paulo"),"Might timestamps must use Brasília t
 assert(page.includes("(Brasília)"),"Might timestamps must label Brasília");
 assert(page.includes("fmtUtcDateTime(d,true)"),"Might timestamps must preserve UTC comparison");
 
+// Same source rendered by src/homolog.js and production Web UI.
+// Admin in homolog must see Might editor when a category card is selected,
+// and Challenge editor only inside the explicit homolog feature flag.
+const homologSource=fs.readFileSync(require.resolve("../src/homolog"),"utf8");
+assert(homologSource.includes('app.get("/",(_req,res)=>res.type("html").send(web.renderWarRoomPage()))'),
+  "homolog must serve real War Room HTML, not its own duplicate page");
+assert(homologSource.includes("isSiteAdmin:true"),
+  "homolog's isolated test identity must be site admin");
+assert(page.includes("authState.isSiteAdmin?'<button"),
+  "Might edit button must be gated by site-admin");
+assert(page.includes('id="gm-edit-progress"'),
+  "Might edit level / season points button must exist");
+assert(page.includes('id="gm-edit-challenge-progress"'),
+  "Challenge editor must exist only in authorized homolog");
+assert(page.includes("gmEditManual(sc.snapshot.layout.code)"),
+  "Might button must open the real editing flow with category code");
+assert(page.includes("gmEditManual('GUILD_CHALLENGE')"),
+  "Challenge button must open real editing flow");
+assert(page.includes("gm-config-warning"),
+  "production must display a clear notice when season or observers are missing");
+assert(page.includes("Cobertura integral"),
+  "Might card must show complete sweep coverage");
+const root=require("node:path").join(__dirname,"..");
+const example=fs.readFileSync(require("node:path").join(root,"env.example"),"utf8");
+assert(example.includes("# GUILD_SEASON_START_AT="));
+assert(example.includes("# GUILD_RANKING_ALLOWED_DEVICE_IDS="));
+
 const sources = ["PvE (Outlands e Roads)", "Coleta", "Magos Engarrafadores",
   "Núcleos de Esconderijo", "Cristais de Território", "Tesouros das Outlands",
   "Criaturas de Cristal", "Contrabandistas", "Hellgates", "As Profundezas",
