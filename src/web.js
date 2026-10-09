@@ -3126,9 +3126,16 @@ const PAGE = `<!doctype html>
       }).join('')+'</div>';
     if(selected){
       var snap=selected.snapshot,members=snap&&snap.members||[];
+      var reconc=snap&&snap.reconciliation;
+      var reconcileText=!reconc||!reconc.matched
+        ?'Reconciliação: sem Overview correlacionado a este identificador de estado Photon'
+        :reconc.complete
+          ?'Mesmo instante Photon · '+fmtS(reconc.observedMembers)+'/'+fmtS(reconc.expectedMembers)+' · soma '+fmtS(reconc.observedMight)+' · total '+fmtS(reconc.guildMight)+' · diferença '+fmtS(reconc.difference)
+          :'Mesmo instante Photon · '+fmtS(reconc.observedMembers)+'/'+fmtS(reconc.expectedMembers)+' páginas/jogadores cobertos · total '+fmtS(reconc.guildMight)+' · diferença indisponível (snapshot parcial)';
       var catCode=snap&&snap.layout&&snap.layout.code||null, progress=catCode?gmManual(catCode):null;
       html+='<div class="panel"><div class="gm-panel-title"><h3>'+esc(selected.name)+' · ranking individual</h3>'
         +'<span class="pill '+(snap&&snap.category&&snap.category.mapped?'ok':'')+'">'+(snap?'CAPTURADO':'SEM DADOS')+'</span></div>'
+        +'<div class="note">'+esc(reconcileText)+'</div>'
         +'<div class="note">Nível: '+(progress&&progress.level!=null?fmtS(progress.level):'não capturado')+' · SP: '+(progress&&progress.seasonPoints!=null?fmtS(progress.seasonPoints):'não capturado')+(progress?' · fonte: ADMIN MANUAL':'')+'</div>'+(catCode&&authState.isSiteAdmin?'<button class="gm-action" id="gm-edit-progress" type="button">Editar nível / SP</button>':'')+'<div class="note">Snapshot: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' posições · '+(snap&&snap.complete?'COMPLETO':'PARCIAL')+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
         +(snap?gmRows(members,'might')+'<div class="note">Cobertura histórica: '+fmtS(snap.historicalObservedMembers||members.length)+' jogadores · capturas anteriores não entram no ranking atual.</div>'+(snap.historicalMembers&&snap.historicalMembers.length?'<h4>Histórico desatualizado ('+snap.historicalMembers.length+')</h4>'+gmRows(snap.historicalMembers,'might'):''):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
         +'</div>';
