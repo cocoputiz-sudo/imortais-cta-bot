@@ -101,6 +101,27 @@ assert.equal(oldAndNew.historicalMembers.length,1);
 assert.equal(oldAndNew.historicalMembers[0].player,"OldOnly");
 assert.equal(oldAndNew.historicalMembers[0].stale,true);
 assert.equal(oldAndNew.members[0].capturedAt,"2026-10-09T01:00:00Z");
+// Latest complete 481-person snapshot supersedes the old 483-person roster.
+// A departed member stays historical, but must not be in the current ranking.
+const newerRoster=assemblePages([
+ {snapshotMarker:"old",guildTotalPoints:990,totalMembers:3,pageOffset:0,
+  capturedAt:"2026-10-09T01:00:00Z",
+  members:[{player:"Alpha",points:500},{player:"Beta",points:300},{player:"Departed",points:190}]},
+ {snapshotMarker:"new",guildTotalPoints:800,totalMembers:2,pageOffset:0,
+  capturedAt:"2026-10-09T01:03:00Z",
+  members:[{player:"Alpha",points:500},{player:"Beta",points:300}]}
+]);
+assert.equal(newerRoster.complete,true);
+assert.deepEqual(newerRoster.members.map(m=>m.player),["Alpha","Beta"]);
+assert.equal(newerRoster.totalMembers,2);
+assert.equal(newerRoster.guildTotalPoints,800);
+assert.equal(newerRoster.historicalMembers.length,1);
+assert.equal(newerRoster.historicalMembers[0].player,"Departed");
+const secondDumpExact=parseChallengeResponse({"1":639271263141777982,"2":196981040,
+ "3":481,"4":86,"5":["Example"],"6":[100]});
+assert.equal(secondDumpExact.guildTotalPoints,196981040);
+assert.equal(secondDumpExact.snapshotMarker,"639271263141777982");
+
 // Do not accidentally classify an overview guild-totals table as a players leaderboard.
 assert.equal(parseMightContributionResponse(fixture.mightOverview),null);
 // Missing field 4 means first page; but an inconsistent total must fail closed.
