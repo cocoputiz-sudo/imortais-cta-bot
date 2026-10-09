@@ -3896,6 +3896,10 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
   const epoch=await guildSeason.getSeasonEpoch(pool);
   const approvedDevices=[...guildRankingAuth.approvedDeviceIds()];
+  if(!guildSeason.canPublishRankings(epoch))return {
+    categories:[],ranking:[],meta:{categoryCount:0,mappedCategoryCount:0,playerCount:0,
+      season:epoch,seasonUnverified:true,newestAt:null,storedSnapshots:0}
+  };
   // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
   // A rotina de background cuida do backfill e dos novos lotes.
   if (!guildMightWorkerPromise && !guildMightWorkerTimer && !guildMightWorkerState.lastRunAt) {
