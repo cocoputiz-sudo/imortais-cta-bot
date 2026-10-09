@@ -1,4 +1,5 @@
 "use strict";
+const crypto=require("node:crypto");
 const {extractChallengeSnapshots,assemblePages}=require("./guildChallenge");
 
 async function initSchema(pool){
@@ -9,6 +10,9 @@ async function initSchema(pool){
     "members_complete BOOLEAN NOT NULL DEFAULT false,created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
   await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS page_offset INTEGER NOT NULL DEFAULT 0");
   await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS total_members INTEGER");
+  await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS content_hash TEXT");
+  await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS capture_day DATE");
+  await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_guild_challenge_content_dedup ON guild_challenge_snapshots(content_hash,capture_day,page_offset) WHERE content_hash IS NOT NULL AND capture_day IS NOT NULL");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_guild_challenge_snapshot_time ON guild_challenge_snapshots(captured_at DESC)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_guild_challenge_snapshot_page ON guild_challenge_snapshots(page_offset,captured_at DESC)");
   await pool.query("CREATE TABLE IF NOT EXISTS guild_challenge_snapshot_members ("+
@@ -35,17 +39,30 @@ async function materialize(pool,rows){
         points:member.points,member_rank:member.rank});
     }
     if(!memberMap.size)continue;
+    const contentHash=crypto.createHash("sha256").update(JSON.stringify([
+      snap.pageOffset,snap.totalMembers,snap.members.map(m=>[m.player.toLowerCase(),m.points])
+    ])).digest("hex");
+    const capturedDay=new Date(snap.capturedAt).toISOString().slice(0,10);
     const client=await pool.connect();
     try{
       await client.query("BEGIN");
+      const sameContent=await client.query(
+        "SELECT id FROM guild_challenge_snapshots WHERE content_hash=$1 AND capture_day=$2::date AND page_offset=$3 AND members_complete=true LIMIT 1",
+        [contentHash,capturedDay,snap.pageOffset]
+      );
+      if(sameContent.rows.length){
+        await client.query("ROLLBACK");
+        continue;
+      }
       const result=await client.query(
-        "INSERT INTO guild_challenge_snapshots(response_event_id,device_id,observer,confidence,captured_at,layout,page_offset,total_members,members_complete) "+
-        "VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,false) "+
+        "INSERT INTO guild_challenge_snapshots(response_event_id,device_id,observer,confidence,captured_at,layout,page_offset,total_members,content_hash,capture_day,members_complete) "+
+        "VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::date,false) "+
         "ON CONFLICT(response_event_id) DO UPDATE SET "+
         "confidence=GREATEST(guild_challenge_snapshots.confidence,EXCLUDED.confidence),"+
-        "layout=EXCLUDED.layout,page_offset=EXCLUDED.page_offset,total_members=EXCLUDED.total_members,members_complete=false RETURNING id",
+        "layout=EXCLUDED.layout,page_offset=EXCLUDED.page_offset,total_members=EXCLUDED.total_members,"+
+        "content_hash=EXCLUDED.content_hash,capture_day=EXCLUDED.capture_day,members_complete=false RETURNING id",
         [snap.responseEventId,snap.deviceId,snap.observer,snap.confidence,snap.capturedAt,
-          JSON.stringify(snap.layout),snap.pageOffset,snap.totalMembers]
+          JSON.stringify(snap.layout),snap.pageOffset,snap.totalMembers,contentHash,capturedDay]
       );
       const id=result.rows[0].id;
       await client.query("DELETE FROM guild_challenge_snapshot_members WHERE snapshot_id=$1",[id]);
@@ -60,6 +77,7 @@ async function materialize(pool,rows){
       stored++;
     }catch(e){
       await client.query("ROLLBACK").catch(()=>{});
+      if(e.code==="23505"&&e.constraint==="idx_guild_challenge_content_dedup")continue;
       throw e;
     }finally{client.release();}
   }
