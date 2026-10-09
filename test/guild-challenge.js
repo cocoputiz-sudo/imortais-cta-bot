@@ -5,7 +5,7 @@ const f=require("./fixtures/guild-photon-capture-20261009-minimized.json");
 const stamp="2026-10-09T01:11:00.1620572Z";
 const event=(id,op,direction,params,at=stamp)=>({
   event_id:id,player_name:"BadMack",device_id:"workstation-test",
-  occurred_at:at,payload:{operationName:op,direction,parameters:params}
+  occurred_at:at,payload:{operationName:op,direction,parameters:{...params,"0":{kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="}}}
 });
 const result=extractChallengeSnapshots([
   event("wrong","GetGuildMightCategoryContribution","response",f.challengeFirst),
@@ -14,6 +14,9 @@ const result=extractChallengeSnapshots([
   event("response-19","GetGuildChallengePoints","response",f.challengePage19,"2026-10-09T01:11:02Z")
 ]);
 assert.equal(result.length,2);
+const foreign=extractChallengeSnapshots([event("stranger","GetGuildChallengePoints","response",f.challengeFirst)]);
+assert.equal(foreign.length,1);
+
 assert.equal(result[0].pageOffset,19);
 assert.equal(result[1].totalMembers,482);
 assert.equal(result[1].members[0].player,"GiganteCarrara");
