@@ -413,6 +413,8 @@ function buildDashboardFromLatestSnapshots(snapshots) {
     const merged=assemblePages(pages);
     categories.push({
       ...latest,
+      category:{...latest.category,
+        nameTentative:["DRAGON_AREA","GVGSEASON","HELLDUNGEON"].includes(latest.layout?.code)},
       capturedAt:merged.capturedAt||latest.capturedAt,
       members:merged.members.map(m=>({...m,estimatedSp:null})),
       totalMembers:merged.totalMembers,
