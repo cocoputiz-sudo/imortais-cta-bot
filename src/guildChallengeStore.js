@@ -1,7 +1,7 @@
 "use strict";
 const crypto=require("node:crypto");
 const {extractChallengeSnapshots,assemblePages}=require("./guildChallenge");
-const {getSeasonEpoch}=require("./guildSeason");
+const {getSeasonEpoch,canPublishRankings}=require("./guildSeason");
 const {approvedDeviceIds}=require("./guildRankingAuth");
 const {IMORTAIS_GUILD_ID_BASE64}=require("./guildPhotonVerified");
 
@@ -94,6 +94,9 @@ async function materialize(pool,rows){
 async function getDashboard(pool,{days=90}={}){
   const safeDays=Math.max(1,Math.min(365,Number(days)||90));
   const epoch=await getSeasonEpoch(pool);
+  if(!canPublishRankings(epoch))return {available:false,verified:false,season:epoch,
+    members:[],totalPoints:null,observedPoints:0,observedMembers:0,expectedMembers:null,
+    complete:false,meta:{error:"season_boundary_not_verified"}};
   const devices=[...approvedDeviceIds()];
   const expectedGuild=IMORTAIS_GUILD_ID_BASE64;
   const [latest,stats,probes]=await Promise.all([
