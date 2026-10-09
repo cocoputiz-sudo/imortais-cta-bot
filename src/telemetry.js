@@ -3813,7 +3813,7 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
     }
     if (!memberMap.size) continue;
     const contentHash = crypto.createHash("sha256").update(guildMight.stableJson([
-      snapshot.category.key,snapshot.layout?.pageOffset??0,snapshot.layout?.totalMembers??null,
+      snapshot.category.key,snapshot.layout?.snapshotMarker??null,snapshot.layout?.pageOffset??0,snapshot.layout?.totalMembers??null,
       (snapshot.members||[]).map(m=>[String(m.player||"").toLowerCase(),Number(m.might)||0])
     ])).digest("hex");
     const captureDay = new Date(snapshot.capturedAt).toISOString().slice(0,10);
