@@ -75,4 +75,4 @@ function renderRank(){
 }
 load();
 </script></body></html>`;
-(async()=>{await db.init();await telemetry.initSchema(db.pool);telemetry.installRoutes(app,{db,requireMember:permit,requireEditor:permit,requireDeviceManager:permit});const port=Number(process.env.PORT||3000);app.listen(port,"0.0.0.0",()=>console.log("isolated homolog listening",port))})().catch(e=>{console.error("homolog boot:",e.message);process.exit(1)});
+(async()=>{await db.init();await telemetry.initSchema(db.pool);telemetry.installRoutes(app,{db,requireMember:permit,requireEditor:permit,requireDeviceManager:permit,requireAdmin:permit});const port=Number(process.env.PORT||3000);app.listen(port,"0.0.0.0",()=>console.log("isolated homolog listening",port))})().catch(e=>{console.error("homolog boot:",e.message);process.exit(1)});
