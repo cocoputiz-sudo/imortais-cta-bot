@@ -45,4 +45,9 @@ async function getSeasonEpoch(pool){
     "ORDER BY occurred_at DESC LIMIT 250",[[...approvedDeviceIds()]]);
   return resolveEpoch(r.rows,{manualStartAt:process.env.GUILD_SEASON_START_AT||null});
 }
-module.exports={resolveEpoch,getSeasonEpoch};
+function canPublishRankings(epoch,env=process.env){
+  // Only QA can display provisional season data. Production must be bound
+  // to a verified transition or a staff-approved start timestamp.
+  return !!epoch?.verified || env.HOMOLOG_MODE==="1";
+}
+module.exports={resolveEpoch,getSeasonEpoch,canPublishRankings};
