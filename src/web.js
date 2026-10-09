@@ -67,6 +67,12 @@ function requireMember(req, res) {
   if (!sess.isMember) { res.status(403).json({ error: "not_member" }); return null; }
   return sess;
 }
+function requireSiteAdmin(req,res) {
+  const sess=requireMember(req,res);
+  if(!sess)return null;
+  if(!sess.isSiteAdmin){res.status(403).json({error:"site_admin_only"});return null;}
+  return sess;
+}
 function requireEditor(req, res) {
   const sess = requireMember(req, res);
   if (!sess) return null;
@@ -184,7 +190,7 @@ function startWebServer(client, opts) {
   const app = express();
   app.set("trust proxy", 1); // Railway edge/proxy: req.ip passa a refletir o cliente real.
   app.use(express.json({ limit: "12mb" }));
-  telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager });
+  telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager, requireAdmin:requireSiteAdmin });
 
   app.get("/api/health", async (_req, res) => {
     let database = false;
