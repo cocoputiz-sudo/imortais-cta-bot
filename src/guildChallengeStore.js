@@ -104,10 +104,10 @@ async function getDashboard(pool,{days=90}={}){
     // A two-hour window avoids mixing historical seasons; report incomplete coverage explicitly.
     const selected=await pool.query(
       "SELECT id,response_event_id,page_offset,total_members,captured_at,observer "+
-      "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members=$1 "+
-      "AND captured_at BETWEEN GREATEST(($2::timestamptz - interval '24 hours'),now()-($3::text || ' days')::interval) AND $2::timestamptz "+
+      "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
+      "AND captured_at BETWEEN GREATEST(($1::timestamptz - interval '24 hours'),now()-($2::text || ' days')::interval) AND $1::timestamptz "+
       "ORDER BY captured_at DESC,id DESC LIMIT 2500",
-      [top.total_members,top.captured_at,safeDays]
+      [top.captured_at,safeDays]
     );
     const ids=selected.rows.map(x=>x.id);
     let members=[];
