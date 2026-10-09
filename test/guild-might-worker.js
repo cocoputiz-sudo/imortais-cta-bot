@@ -31,6 +31,24 @@ async function main(){
  assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]);
  const repeat=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(repeat.stored,0,"idempotência");
+
+ // Two observers can receive identical data with distinct event IDs.
+ // Content fingerprint must keep only one materialized leaderboard per UTC day.
+ for(const [id,direction,parameters] of [
+   ["req-same-content","request",{"0":"PvE (Outlands and Roads)"}],
+   ["res-same-content","response",{"0":["BadMack","RagnaldoKun","ESTHER9950"],"1":[550000,450000,1086795]}]
+ ]){
+   await db.pool.query(
+     "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
+     "VALUES($1,'might-other-device','guild_might_probe',now(),'Observer2',$2::jsonb)",
+     [id,JSON.stringify({direction,operationName:"GetGuildMightCategoryOverview",operationCode:333,parameters})]
+   );
+ }
+ const crossDevice=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(crossDevice.stored,0,"identical content from another device must not create a second Might snapshot");
+ const countSameContent=await db.pool.query("SELECT count(*)::int AS n FROM guild_might_snapshots");
+ assert.equal(countSameContent.rows[0].n,1,"one content-fingerprint per day");
+
  await db.pool.query("UPDATE guild_might_snapshots SET members_complete=false WHERE id=$1",[sid]);
  await db.pool.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1 AND player_key='badmack'",[sid]);
  const repaired=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -78,6 +96,19 @@ async function main(){
  assert.equal(combinedChallenge.members.length,5,"two pages must be merged");
  assert.deepEqual(combinedChallenge.members.map(m=>m.rank),[1,2,3,20,21]);
  assert.equal(combinedChallenge.complete,false);
+ // Identical Challenge page observed again with a distinct response event ID.
+ await db.pool.query(
+   "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
+   "VALUES('challenge-page-duplicate','different-device','guild_might_probe',now(),'Observer2',$1::jsonb)",
+   [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
+     "3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
+   }})]
+ );
+ const contentReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(contentReplay.challengeStored,0,"identical content from another device must not duplicate Challenge page");
+ const challengePageCount=await db.pool.query("SELECT count(*)::int AS n FROM guild_challenge_snapshots");
+ assert.equal(challengePageCount.rows[0].n,2,"two distinct page offsets, no duplicates");
+
  const challengeReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(challengeReplay.challengeStored,0,"Challenge snapshots idempotent");
  console.log("✅ Guild Challenge: persistence, separation, rank and idempotency");
