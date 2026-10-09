@@ -3099,7 +3099,7 @@ const PAGE = `<!doctype html>
         var snap=c.snapshot,players=snap&&snap.members||[],total=players.reduce(function(a,m){return a+(Number(m.might)||0);},0), guildTotal=snap&&snap.guildMight;
         var top=players[0];
         return '<button class="gm-card'+(selected&&selected.id===c.id?' selected':'')+'" data-gm-card="'+esc(c.id)+'" type="button" aria-pressed="'+(selected&&selected.id===c.id?'true':'false')+'">'
-          +'<span class="gm-name">'+esc(c.name)+'</span>'
+          +'<span class="gm-name">'+esc(c.name)+'</span>'+'<span class="gm-sub">ID técnico: '+esc(snap&&snap.layout&&snap.layout.code||'não capturado')+(snap&&snap.category&&snap.category.nameTentative?' · NOME A CONFIRMAR':'')+'</span>'
           +'<span class="gm-value">'+(snap?fmtS(guildTotal==null?total:guildTotal):'—')+'</span>'
           +'<span class="gm-sub">'+(snap?(players.length+'/'+(snap.totalMembers||'?')+' recentes · '+(snap.historicalObservedMembers||players.length)+' históricos · '+(snap.complete?'completo':'parcial')+' · '+esc(gmDate(snap.capturedAt))):'Aguardando captura da categoria')+'</span>'
           +'</button>';
