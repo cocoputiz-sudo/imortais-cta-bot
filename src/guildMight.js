@@ -20,22 +20,9 @@ const CATEGORY_ALIASES = Object.freeze({
   "ancientlands": "Terras Ancestrais"
 });
 
-const REFERENCE_CATEGORIES_2026_10_07 = Object.freeze({
-  "PvE": { level: 49, targetMight: 26000000, seasonPoints: 200 },
-  "Coleta": { level: 39, targetMight: 2000000, seasonPoints: 200 },
-  "Magos Engarrafadores": { level: 10, targetMight: 43000, seasonPoints: 180 },
-  "Núcleos de Esconderijo": { level: 42, targetMight: 15000000, seasonPoints: 660 },
-  "Cristais de Território": { level: 58, targetMight: 26000000, seasonPoints: 1200 },
-  "Tesouros": { level: 44, targetMight: 5600000, seasonPoints: 368 },
-  "Aranhas": { level: 68, targetMight: 5000000, seasonPoints: 700 },
-  "Contrabandistas": { level: 51, targetMight: 14000000, seasonPoints: 424 },
-  "Hellgates": { level: 17, targetMight: 256000, seasonPoints: 100 },
-  "As Profundezas": { level: 56, targetMight: 1200000, seasonPoints: 200 },
-  "Masmorras Corrompidas": { level: 28, targetMight: 109000, seasonPoints: 50 },
-  "Castelos e Postos": { level: 38, targetMight: 18000000, seasonPoints: 1200 },
-  "Caça aos Dragões": { level: 5, targetMight: 594000, seasonPoints: 280 },
-  "Terras Ancestrais": { level: 48, targetMight: 2400000, seasonPoints: 200 }
-});
+// Historical screenshot-derived SP weights are intentionally disabled.
+// The validated Photon operations do not expose level, threshold or Season Points.
+const REFERENCE_CATEGORIES_2026_10_07 = Object.freeze({});
 
 function spPerMight({ level, targetMight, seasonPoints }) {
   const n = Number(level);
@@ -263,7 +250,11 @@ function inferCategoryIdentity(pair) {
     ...(flattenPhoton(pair?.requestParameters || {}).scalars || []),
     ...(flattenPhoton(pair?.responseParameters || {}).scalars || [])
   ];
-  const refs = Object.keys(REFERENCE_CATEGORIES_2026_10_07);
+  const refs = [...new Set([...Object.values(KNOWN_CATEGORY_LABELS),
+    "PvE","Coleta","Magos Engarrafadores","Aranhas","Tesouros",
+    "Castelos e Postos","Núcleos de Esconderijo","Cristais de Território",
+    "As Profundezas","Masmorras Corrompidas","Caça aos Dragões",
+    "Terras Ancestrais","Hellgates","Contrabandistas"])];
   const byNorm = new Map(refs.map(name => [normalizeCategoryLabel(name), name]));
 
   for (const entry of sources) {
