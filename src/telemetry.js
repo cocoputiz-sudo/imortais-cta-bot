@@ -3873,18 +3873,26 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   }
 
   const { rows: snapshotRows } = await pool.query(`
-    WITH latest AS (
-      SELECT DISTINCT ON(category_key)
-             id,response_event_id,request_event_id,device_id,observer,operation_name,
-             category_key,category_name,category_mapped,confidence,captured_at,
-             request_parameters,layout,reference_data
+    WITH newest AS (
+      SELECT category_key, MAX(captured_at) AS latest_at
         FROM guild_might_snapshots
-       WHERE captured_at >= now() - ($1::text || ' days')::interval
-       ORDER BY category_key,captured_at DESC,id DESC
+       WHERE members_complete=true
+         AND captured_at >= now() - ($1::text || ' days')::interval
+       GROUP BY category_key
+    ), latest_page AS (
+      SELECT DISTINCT ON (
+        s.category_key, COALESCE((s.layout->>'pageOffset')::integer,0)
+      )
+             s.id,s.response_event_id,s.request_event_id,s.device_id,s.observer,s.operation_name,
+             s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at,
+             s.request_parameters,s.layout,s.reference_data
+        FROM guild_might_snapshots s
+        JOIN newest n ON n.category_key=s.category_key
+       WHERE s.members_complete=true
+         AND s.captured_at BETWEEN (n.latest_at - interval '2 hours') AND n.latest_at
+       ORDER BY s.category_key,COALESCE((s.layout->>'pageOffset')::integer,0),s.captured_at DESC,s.id DESC
     )
-    SELECT *
-      FROM latest
-     ORDER BY captured_at DESC,id DESC
+    SELECT * FROM latest_page ORDER BY captured_at DESC,id DESC
   `, [safeDays]);
 
   const ids = snapshotRows.map(x => Number(x.id)).filter(Number.isFinite);
