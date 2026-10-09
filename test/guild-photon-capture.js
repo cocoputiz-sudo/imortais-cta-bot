@@ -8,6 +8,22 @@ const {parseChallengeResponse,parseMightContributionResponse,parseMightOverviewR
 const secondTop=parseChallengeResponse(secondDump.challengeTop.parameters);
 const secondLast=parseChallengeResponse(secondDump.challengeFinal.parameters);
 const secondOverview=parseMightOverviewResponse(secondDump.overview.parameters);
+
+// Normal Combat Client emits previewBase64. A byte-valued final page may
+// contain nonzero scores and must not be silently converted to all zeroes.
+const bytesNonzero=parseChallengeResponse({
+  "1":"newer-marker","2":196981040,"3":3,"4":0,
+  "5":["Alpha","Beta","Gamma"],
+  "6":{kind:"bytes",length:3,previewBase64:Buffer.from([1,17,255]).toString("base64")}
+});
+assert.deepEqual(bytesNonzero.members.map(m=>m.points),[1,17,255]);
+assert.equal(parseChallengeResponse({"3":3,"5":["Alpha","Beta","Gamma"],
+  "6":{kind:"bytes",length:3,previewBase64:Buffer.from([1,17]).toString("base64")}}),null,
+  "truncated preview cannot create invented scores");
+assert.equal(parseChallengeResponse({"3":3,"5":["Alpha","Beta","Gamma"],
+  "6":{kind:"bytes",length:3,previewBase64:"%%%"}}),null,
+  "invalid encoded payload must fail closed");
+
 assert.equal(secondTop.totalMembers,483);
 assert.deepEqual(secondTop.members.slice(0,3).map(m=>m.points),[5930046,5203391,5018288]);
 assert.equal(secondLast.members.length,5,"real zero-byte final page retained");
