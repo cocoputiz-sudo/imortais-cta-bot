@@ -5,6 +5,14 @@ const {assemblePages,KNOWN_CATEGORY_LABELS,validImortaisGuild,parseGuildSeasonRe
 const {buildDashboardFromLatestSnapshots}=require("../src/guildMight");
 const {resolveEpoch}=require("../src/guildSeason");
 const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
+
+const {isApprovedDevice}=require("../src/guildRankingAuth");
+assert.equal(isApprovedDevice("WORKSPACEIGOR",{HOMOLOG_MODE:"0"}),false,
+  "A valid token alone cannot authorize official production ranking");
+assert.equal(isApprovedDevice("WORKSPACEIGOR",{HOMOLOG_MODE:"1"}),true);
+assert.equal(isApprovedDevice("trusted",{HOMOLOG_MODE:"0",GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"}),true);
+assert.equal(isApprovedDevice("other",{HOMOLOG_MODE:"0",GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"}),false);
+
 const other={kind:"bytes",length:16,base64:Buffer.alloc(16,1).toString("base64")};
 assert(validImortaisGuild({"0":guild},"GetGuildChallengePoints"));
 assert(!validImortaisGuild({"0":other},"GetGuildChallengePoints"));
