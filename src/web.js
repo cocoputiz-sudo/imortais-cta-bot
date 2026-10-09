@@ -3019,7 +3019,7 @@ const PAGE = `<!doctype html>
     return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+ (type==='challenge'?'Chavinhas':'Might') +'</th><th>Capturado em</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+'</tr></thead><tbody>'
       +(members&&members.length?members.map(function(m,i){
         var v=Number(type==='challenge'?m.points:m.might)||0;
-        return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
+        return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+esc(gmDate(m.capturedAt))+(m.stale?' · DESATUALIZADO':'')+'</td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
           +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')+'</tr>';
       }).join(''):'<tr><td colspan="5" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
   }
