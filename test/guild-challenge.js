@@ -1,22 +1,26 @@
 "use strict";
-const assert = require("node:assert/strict");
-const { extractChallengeSnapshots } = require("../src/guildChallenge");
-const event = (operationName, direction, parameters) => ({
-  event_id: operationName + direction, player_name: "BadMack",
-  occurred_at: "2026-10-08T20:00:00Z",
-  payload: { operationName, direction, parameters }
+const assert=require("node:assert/strict");
+const {extractChallengeSnapshots,assemblePages}=require("../src/guildChallenge");
+const f=require("./fixtures/guild-photon-capture-20261009-minimized.json");
+const stamp="2026-10-09T01:11:00.1620572Z";
+const event=(id,op,direction,params,at=stamp)=>({
+  event_id:id,player_name:"BadMack",device_id:"workstation-test",
+  occurred_at:at,payload:{operationName:op,direction,parameters:params}
 });
-const good = event("GetGuildChallengePoints", "response", {
-  1: ["PlayerA", "PlayerB", "PlayerC"],
-  2: [5817978, 5072517, 4890194]
-});
-const got = extractChallengeSnapshots([
-  event("GetGuildMightCategoryContribution", "response", good.payload.parameters),
-  event("GetGuildChallengePoints", "request", good.payload.parameters),
-  good
+const result=extractChallengeSnapshots([
+  event("wrong","GetGuildMightCategoryContribution","response",f.challengeFirst),
+  event("request","GetGuildChallengePoints","request",f.challengeFirst),
+  event("response-1","GetGuildChallengePoints","response",f.challengeFirst),
+  event("response-19","GetGuildChallengePoints","response",f.challengePage19,"2026-10-09T01:11:02Z")
 ]);
-assert.equal(got.length, 1);
-assert.deepEqual(got[0].members.map(x => x.points), [5817978, 5072517, 4890194]);
-assert.deepEqual(extractChallengeSnapshots([event("GetGuildChallengePoints", "response", {1: [1,2,3]})]), []);
-assert.deepEqual(extractChallengeSnapshots([event("GetGuildChallengePoints", "response", {1: ["a", "b"],2: [-1,-3]})]), []);
-console.log("guild challenge extraction: ok");
+assert.equal(result.length,2);
+assert.equal(result[0].pageOffset,19);
+assert.equal(result[1].totalMembers,482);
+assert.equal(result[1].members[0].player,"GiganteCarrara");
+assert.equal(result[1].members[0].points,5905587);
+const combined=assemblePages(result);
+assert.equal(combined.observedMembers,5);
+assert.equal(combined.complete,false);
+assert.deepEqual(combined.members.map(m=>m.rank),[1,2,3,20,21]);
+assert.equal(extractChallengeSnapshots([event("broken","GetGuildChallengePoints","response",{"5":["BadMack"],"6":[-1],"3":482})]).length,0);
+console.log("✅ Guild Challenge: parsing com layout real, paginas e cobertura parcial OK");
