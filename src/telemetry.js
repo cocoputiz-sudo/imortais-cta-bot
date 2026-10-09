@@ -3956,6 +3956,42 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   }));
 
   const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots);
+  // Exact server-state reconciliation. Never compare contributions from one
+  // Photon marker with a later Overview marker; retain unavailable when only
+  // partial pages exist for the matching server state.
+  const {parseMightOverviewResponse, reconcileCategoryAtServerInstant}
+    =require("./guildPhotonVerified");
+  const rawOverview=await pool.query(
+    "SELECT payload->'parameters' AS params, occurred_at "+
+    "FROM albion_telemetry_events WHERE type='guild_might_probe' "+
+    "AND payload->>'operationName'='GetGuildMightCategoryOverview' "+
+    "AND payload->>'direction'='response' "+
+    "AND occurred_at>=now()-interval '2 days' "+
+    "ORDER BY occurred_at DESC LIMIT 500");
+  const overviewByMarker=new Map();
+  for(const row of rawOverview.rows){
+    const overview=parseMightOverviewResponse(row.params);
+    if(overview?.snapshotMarker&&!overviewByMarker.has(overview.snapshotMarker))
+      overviewByMarker.set(overview.snapshotMarker,overview);
+  }
+  for(const category of dashboard.categories||[]){
+    const code=category.layout?.code;
+    if(!code)continue;
+    const relevant=snapshots.filter(x=>x.layout?.code===code&&x.layout?.snapshotMarker);
+    const latest=relevant.reduce((p,x)=>!p||
+      new Date(x.capturedAt)>new Date(p.capturedAt)?x:p,null);
+    const marker=latest?.layout?.snapshotMarker;
+    const overview=marker?overviewByMarker.get(marker):null;
+    category.reconciliation=overview?
+      reconcileCategoryAtServerInstant(overview,relevant.map(page=>({
+        snapshotMarker:page.layout.snapshotMarker,categoryCode:code,
+        pageOffset:Number(page.layout.pageOffset)||0,
+        totalMembers:Number(page.layout.totalMembers)||0,
+        capturedAt:page.capturedAt,members:page.members
+      })),code):
+      {matched:false,reason:"no_overview_for_latest_marker",snapshotMarker:marker||null,
+        difference:null};
+  }
   const [countResult, rawResult] = await Promise.all([
     pool.query(
       "SELECT COUNT(*)::int AS n, MIN(captured_at) AS oldest, MAX(captured_at) AS newest FROM guild_might_snapshots"
