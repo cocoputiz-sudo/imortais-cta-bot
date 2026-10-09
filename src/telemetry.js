@@ -6,6 +6,7 @@ const navigation = require("./navigation");
 const killFame = require("./killFame");
 const guildMight = require("./guildMight");
 const guildChallengeStore = require("./guildChallengeStore");
+const guildManualProgress = require("./guildManualProgress");
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -725,6 +726,7 @@ async function initSchema(dbPool) {
   `);
 
   await guildChallengeStore.initSchema(pool);
+  await guildManualProgress.init(pool);
 
   // O histórico é reprocessado em background na inicialização; a primeira
   // visita à aba de Might nunca aguarda milhares de INSERTs.
@@ -3988,13 +3990,13 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
       materializationLastRunAt: guildMightWorkerState.lastRunAt,
       materializationLastScanned: guildMightWorkerState.lastScanned,
       materializationError: guildMightWorkerState.lastError,
-      note: "GuildMight é experimental. Might vem do tráfego Photon observado; SP só é estimado quando a categoria foi mapeada para a referência de 07/10/2026."
+      note: "Might obtido de dados Photon. Níveis e Season Points NÃO estão nessas operações; preenchimento manual admin tem origem identificada."
     }
   };
 }
 
 
-function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager }) {
+function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager, requireAdmin }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
   app.post("/api/telemetry/pairing/create", async (req, res) => {
@@ -4545,6 +4547,17 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       console.error("/api/telemetry/guild-might-probes:", e);
       res.status(500).json({ error: "server" });
     }
+  });
+
+  app.get("/api/telemetry/guild-progress", async (req,res)=>{
+    try{if(!requireMember(req,res))return;res.json({rows:await guildManualProgress.all(pool)});}
+    catch(e){console.error("guild-progress",e);res.status(500).json({error:"server"});}
+  });
+  app.post("/api/telemetry/guild-progress", async (req,res)=>{
+    const admin=requireAdmin?.(req,res);
+    if(!admin){if(!res.headersSent)res.status(403).json({error:"site_admin_only"});return;}
+    try{const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);}
+    catch(e){const bad=/^invalid_/.test(e.message);res.status(bad?400:500).json({error:bad?e.message:"server"});}
   });
 
   app.get("/api/telemetry/guild-might", async (req, res) => {
