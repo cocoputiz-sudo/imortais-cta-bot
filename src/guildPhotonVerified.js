@@ -35,12 +35,19 @@ function namesArray(v) { return Array.isArray(v) && v.every(playerName); }
 function parseChallengeResponse(p) {
   if (!p || !namesArray(p["5"]) || !nonnegativeInteger(p["3"])) return null;
   let points=p["6"];
-  // Observed 2026-10-09 final page: five zero-valued bytes instead of number array.
-  if (points?.kind==="bytes" && points.length===p["5"].length &&
-    typeof points.base64==="string" && /^[A-Za-z0-9+/=]+$/.test(points.base64)) {
-    const octets=Buffer.from(points.base64,"base64");
-    if(octets.length===points.length && octets.every(x=>x===0))
-      points=Array(octets.length).fill(0);
+  // Photon may send small score pages as byte[], including non-zero values.
+  // The normal Combat Client sends previewBase64, while earlier dumps use
+  // base64. Only decode complete byte arrays, never a truncated preview.
+  if(points?.kind==="bytes"){
+    const encoded=typeof points.base64==="string"?points.base64:points.previewBase64;
+    const count=Number(points.length);
+    if(Number.isSafeInteger(count) && count>=0 && count===p["5"].length &&
+      typeof encoded==="string" && /^[A-Za-z0-9+/]*={0,2}$/.test(encoded) &&
+      encoded.length%4===0){
+      const octets=Buffer.from(encoded,"base64");
+      if(octets.length===count && octets.toString("base64")===encoded)
+        points=Array.from(octets);
+    }
   }
   if(!numArray(points) || points.length!==p["5"].length) return null;
   const pageOffset = p["4"] == null ? 0 : p["4"];
