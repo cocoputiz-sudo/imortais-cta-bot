@@ -24,8 +24,8 @@ const assembled=assemblePages([
 assert.equal(assembled.observedMembers,5);
 assert.equal(assembled.complete,false);
 assert.equal(assembled.members[0].points,5906593);
-assert.deepEqual(assembled.missingRanges[0],{from:4,to:19});
-assert.equal(assembled.members[3].rank,20);
+assert.equal(assembled.missingCount,477);
+assert.equal(assembled.members[3].rank,4);
 
 const overview=parseMightOverviewResponse(fixture.mightOverview);
 assert.equal(overview.categories.length,14);
