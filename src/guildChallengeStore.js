@@ -1,6 +1,7 @@
 "use strict";
 const crypto=require("node:crypto");
 const {extractChallengeSnapshots,assemblePages}=require("./guildChallenge");
+const {getSeasonEpoch}=require("./guildSeason");
 
 async function initSchema(pool){
   await pool.query("CREATE TABLE IF NOT EXISTS guild_challenge_snapshots ("+
@@ -90,10 +91,11 @@ async function materialize(pool,rows){
 
 async function getDashboard(pool,{days=90}={}){
   const safeDays=Math.max(1,Math.min(365,Number(days)||90));
+  const epoch=await getSeasonEpoch(pool);
   const [latest,stats,probes]=await Promise.all([
     pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members,snapshot_marker,guild_total_points FROM guild_challenge_snapshots "+
-      "WHERE members_complete=true AND captured_at >= now() - ($1::text || ' days')::interval "+
-      "AND total_members IS NOT NULL ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays]),
+      "WHERE members_complete=true AND captured_at >= COALESCE($2::timestamptz,now()-($1::text || ' days')::interval) "+
+      "AND total_members IS NOT NULL ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays,epoch.startAt]),
     pool.query("SELECT COUNT(*)::int AS n,MAX(captured_at) AS newest FROM guild_challenge_snapshots WHERE members_complete=true"),
     pool.query("SELECT COUNT(*)::int AS total,"+
       "COUNT(*) FILTER(WHERE lower(COALESCE(payload->>'direction','response'))='response')::int AS responses,"+
@@ -109,9 +111,9 @@ async function getDashboard(pool,{days=90}={}){
     const selected=await pool.query(
       "SELECT id,response_event_id,page_offset,total_members,captured_at,observer,snapshot_marker,guild_total_points "+
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
-      "AND captured_at BETWEEN GREATEST(($1::timestamptz - interval '24 hours'),now()-($2::text || ' days')::interval) AND $1::timestamptz "+
-      "ORDER BY captured_at DESC,id DESC LIMIT 2500",
-      [top.captured_at,safeDays]
+      "AND captured_at BETWEEN COALESCE($3::timestamptz,now()-($2::text || ' days')::interval) AND $1::timestamptz "+
+      "ORDER BY captured_at DESC,id DESC",
+      [top.captured_at,safeDays,epoch.startAt]
     );
     const ids=selected.rows.map(x=>x.id);
     let members=[];
@@ -132,7 +134,7 @@ async function getDashboard(pool,{days=90}={}){
       pageOffset:s.page_offset,totalMembers:Number(s.total_members),
       capturedAt:s.captured_at,responseEventId:s.response_event_id,snapshotMarker:s.snapshot_marker,guildTotalPoints:s.guild_total_points===null?null:Number(s.guild_total_points),members:byId.get(String(s.id))||[]
     }));
-    combined=assemblePages(pages);
+    combined=assemblePages(pages,{seasonStartAt:epoch.startAt});
   }
   return {
     available:!!top,verified:!!top,source:"GetGuildChallengePoints",
@@ -140,6 +142,10 @@ async function getDashboard(pool,{days=90}={}){
     confidence:top?1:null,
     members:combined.members,totalPoints:combined.guildTotalPoints??null,
     observedPoints:combined.members.reduce((a,m)=>a+m.points,0),
+    difference:combined.guildTotalPoints==null?null:combined.observedPoints-Number(combined.guildTotalPoints),
+    oldestMemberAt:combined.oldestMemberAt||null,lastCompleteAt:combined.lastCompleteAt||null,
+    coverage:combined.coverage||null,
+    season:epoch,
     snapshotMarker:combined.snapshotMarker||null,
     complete:combined.complete,expectedMembers:combined.totalMembers,
     historicalObservedMembers:combined.historicalObservedMembers||0,
@@ -154,7 +160,7 @@ async function getDashboard(pool,{days=90}={}){
       rawNewestAt:probes.rows[0]?.newest||null,
       pageCount:combined.pages,historicalPageCount:combined.historicalPages,
       level:null,seasonPoints:null,
-      note:"Layout validado com dumps reais. Ranking paginado; posições ausentes continuam ausentes, nunca zero. Nível Guild Challenge e Season Points não estão nesses pacotes."
+      note:"Ranking consolidado da temporada: valores antigos continuam na soma, com data individual. Reconciliacao exata depende de paginas do mesmo marcador. Niveis e SP nao presentes no Photon."
     }
   };
 }
