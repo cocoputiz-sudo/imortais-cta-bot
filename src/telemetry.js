@@ -702,6 +702,11 @@ async function initSchema(dbPool) {
 
     ALTER TABLE guild_might_snapshots
       ADD COLUMN IF NOT EXISTS members_complete BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE guild_might_snapshots ADD COLUMN IF NOT EXISTS content_hash TEXT;
+    ALTER TABLE guild_might_snapshots ADD COLUMN IF NOT EXISTS capture_day DATE;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_guild_might_content_dedup
+      ON guild_might_snapshots(category_key,content_hash,capture_day)
+      WHERE content_hash IS NOT NULL AND capture_day IS NOT NULL;
 
     CREATE INDEX IF NOT EXISTS idx_guild_might_category_time
       ON guild_might_snapshots(category_key, captured_at DESC);
@@ -3805,17 +3810,30 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
       });
     }
     if (!memberMap.size) continue;
+    const contentHash = crypto.createHash("sha256").update(guildMight.stableJson([
+      snapshot.category.key,snapshot.layout?.pageOffset??0,snapshot.layout?.totalMembers??null,
+      (snapshot.members||[]).map(m=>[String(m.player||"").toLowerCase(),Number(m.might)||0])
+    ])).digest("hex");
+    const captureDay = new Date(snapshot.capturedAt).toISOString().slice(0,10);
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      const sameContent=await client.query(
+        "SELECT id FROM guild_might_snapshots WHERE category_key=$1 AND content_hash=$2 AND capture_day=$3::date AND members_complete=true LIMIT 1",
+        [snapshot.category.key,contentHash,captureDay]
+      );
+      if(sameContent.rows.length){
+        await client.query("ROLLBACK");
+        continue;
+      }
       const { rows: savedRows } = await client.query(`
         INSERT INTO guild_might_snapshots(
           response_event_id, request_event_id, device_id, observer, operation_name,
           category_key, category_name, category_mapped, confidence, captured_at,
-          request_parameters, layout, reference_data, members_complete
+          request_parameters, layout, reference_data, content_hash, capture_day, members_complete
         )
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,false)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15::date,false)
         ON CONFLICT(response_event_id) DO UPDATE SET
           request_event_id=EXCLUDED.request_event_id,
           category_key=EXCLUDED.category_key,
@@ -3825,6 +3843,7 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
           request_parameters=EXCLUDED.request_parameters,
           layout=EXCLUDED.layout,
           reference_data=COALESCE(EXCLUDED.reference_data,guild_might_snapshots.reference_data),
+          content_hash=EXCLUDED.content_hash,capture_day=EXCLUDED.capture_day,
           members_complete=false
         RETURNING id
       `, [
@@ -3833,7 +3852,8 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
         snapshot.category.name, !!snapshot.category.mapped, snapshot.confidence,
         snapshot.capturedAt, JSON.stringify(snapshot.requestParameters || {}),
         JSON.stringify(snapshot.layout || {}),
-        snapshot.reference ? JSON.stringify(snapshot.reference) : null
+        snapshot.reference ? JSON.stringify(snapshot.reference) : null,
+        contentHash,captureDay
       ]);
       const id = savedRows[0]?.id;
       if (!id) throw new Error("Guild Might snapshot sem id");
@@ -3856,6 +3876,7 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
       stored++;
     } catch (e) {
       await client.query("ROLLBACK").catch(() => {});
+      if(e.code==="23505"&&e.constraint==="idx_guild_might_content_dedup")continue;
       throw e;
     } finally {
       client.release();
