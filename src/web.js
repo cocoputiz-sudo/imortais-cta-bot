@@ -464,15 +464,26 @@ function startWebServer(client, opts) {
 
   app.post("/api/setweapon", async (req, res) => {
     const sess = requireEditor(req, res); if (!sess) return;
-    const { event, userId, weapon } = req.body || {};
-    const w = String(weapon || "").trim();
-    if (!w || !WEAPONS[w.toUpperCase()]) return res.status(400).json({ error: "weapon" });
-    const ev = await db.getEvent(event).catch(() => null);
-    if (!ev) return res.status(404).json({ error: "event" });
-    // Fixa a pessoa na vaga atual (manual=true) para o motor nao reposiciona-la depois da troca de arma.
-    await db.pool.query("UPDATE cta_signups SET weapon=$3, manual=(COALESCE(manual,false) OR (party_index IS NOT NULL AND slot_index IS NOT NULL)) WHERE event_id=$1 AND user_id=$2", [ev.id, userId, w.toUpperCase()]);
-    if (_act.applyEdit) await _act.applyEdit(ev.id);
-    res.json({ ok: true });
+    try {
+      const { event, userId, weapon } = req.body || {};
+      const uid = String(userId || "").trim();
+      const w = String(weapon || "").trim().toUpperCase();
+      if (!uid) return res.status(400).json({ error: "user" });
+      if (!w || !WEAPONS[w]) return res.status(400).json({ error: "weapon" });
+      const ev = await db.getEvent(event).catch(() => null);
+      if (!ev) return res.status(404).json({ error: "event" });
+      // Uma troca de arma feita pela staff nao deve deslocar o jogador da vaga manual.
+      const { rows } = await db.pool.query(
+        "UPDATE cta_signups SET weapon=$3, manual=(COALESCE(manual,false) OR (party_index IS NOT NULL AND slot_index IS NOT NULL)) WHERE event_id=$1 AND user_id=$2 RETURNING user_id, weapon",
+        [ev.id, uid, w]
+      );
+      if (!rows.length) return res.status(404).json({ error: "user_not_found" });
+      if (_act.applyEdit) await _act.applyEdit(ev.id);
+      res.json({ ok: true, userId: rows[0].user_id, weapon: rows[0].weapon });
+    } catch (e) {
+      console.error("/api/setweapon:", e);
+      res.status(500).json({ error: "server" });
+    }
   });
 
   app.get("/api/news", async (req, res) => {
@@ -1314,7 +1325,7 @@ const PAGE = `<!doctype html>
           +'<div class="mural-feature"><b>📦 Registros & Loot</b><span>Loot observado pelos Combat Clients, deduplicação, valores, top looters e conferência por dia/horário.</span></div>'
           +'<div class="mural-feature"><b>⚔️ Combate</b><span>Dano, cura, kills, mortes, Kill Fame, Death Fame, Battle Reports, mapas e placar contra guildas inimigas.</span></div>'
           +'<div class="mural-feature"><b>📊 Scout</b><span>Perfis dos jogadores, histórico, destaques, alertas, presença por área e indicadores de desempenho.</span></div>'
-          +'<div class="mural-feature"><b>🟢 Guilda online</b><span>Jogadores observados online, cruzamento da lista do jogo com pings e call, contribuinte e quem ainda está equipando.</span></div>'
+          +'<div class="mural-feature"><b>🟢 Guilda online</b><span>Jogadores observados online, cruzamento da lista do jogo com pings e call, contribuintes autorizados e quem está esquipando o CTA.</span></div>'
           +'<div class="mural-feature"><b>🏅 Guild Might</b><span>Snapshots passivos de contribuição, ranking por Might e SP estimado conforme as categorias são mapeadas.</span></div>'
           +'<div class="mural-feature"><b>🖥️ Dispositivos</b><span>Heartbeat e saúde dos Combat Clients conectados à telemetria do War Room.</span></div>'
           +'<div class="mural-feature"><b>📣 Mural</b><span>Comunicados importantes da guilda e atualizações do próprio sistema.</span></div>'
@@ -1367,17 +1378,65 @@ const PAGE = `<!doctype html>
       }); }).catch(function(){ flash('● erro','var(--red)'); });
   }
   function doMove(uid,party,slot){ if(current) post('/api/move',{event:current,userId:uid,party:party,slot:slot}); }
-  function doSetWeapon(uid,weapon){ if(current) post('/api/setweapon',{event:current,userId:uid,weapon:weapon}); }
+  function doSetWeapon(uid,weapon){
+    var eventId=current;
+    if(!eventId) return Promise.reject(new Error('CTA não selecionado'));
+    return fetch('/api/setweapon',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({event:eventId,userId:uid,weapon:weapon})
+    }).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if(!r.ok||j.ok===false) throw new Error(j.error||'não foi possível alterar a arma');
+        return j;
+      });
+    }).then(function(j){
+      // Consulta a formação persistida antes de exibir sucesso; o SSE continua ativo.
+      return fetch('/api/roster?event='+encodeURIComponent(eventId),{cache:'no-store'})
+        .then(function(r){if(!r.ok)throw new Error('roster');return r.json();})
+        .then(function(data){if(String(current)===String(eventId))render(data);})
+        .catch(function(){/* o SSE atualizara a formacao se esta leitura falhar */})
+        .then(function(){return j;});
+    });
+  }
   function openWeaponPicker(wspan,s){
     if(!s.options||!s.options.length) return;
     if(wspan.nextSibling && wspan.nextSibling.className==='wsel') return;
+    var row=wspan.closest('.slot'), previousDrag=row?row.getAttribute('draggable'):null;
+    if(row) row.setAttribute('draggable','false'); // dropdown nativo dentro de linha arrastavel
     var sel=document.createElement('select'); sel.className='wsel';
     var opts=s.options.slice(); if(s.weapon && opts.indexOf(s.weapon)<0) opts.unshift(s.weapon);
     opts.forEach(function(w){ var o=document.createElement('option'); o.value=w; o.textContent=w; if(w===s.weapon)o.selected=true; sel.appendChild(o); });
+    var saving=false, closed=false;
     wspan.style.display='none'; wspan.parentNode.insertBefore(sel,wspan.nextSibling); sel.focus();
-    function close(){ if(sel.parentNode) sel.parentNode.removeChild(sel); wspan.style.display=''; if(pendingRenderData){ var pd=pendingRenderData; pendingRenderData=null; render(pd); } }
-    sel.addEventListener('change',function(){ var v=sel.value; close(); if(v!==s.weapon) doSetWeapon(s.userId,v); });
-    sel.addEventListener('blur',close);
+    function close(){
+      if(closed)return;
+      closed=true;
+      if(sel.parentNode)sel.parentNode.removeChild(sel);
+      wspan.style.display='';
+      if(row){if(previousDrag===null)row.removeAttribute('draggable');else row.setAttribute('draggable',previousDrag);}
+      if(pendingRenderData){var pd=pendingRenderData;pendingRenderData=null;render(pd);}
+    }
+    sel.addEventListener('pointerdown',function(e){e.stopPropagation();});
+    sel.addEventListener('dragstart',function(e){e.preventDefault();e.stopPropagation();});
+    sel.addEventListener('change',function(){
+      if(saving||closed)return;
+      var v=sel.value;
+      if(v===s.weapon){close();return;}
+      saving=true;sel.disabled=true;
+      doSetWeapon(s.userId,v).then(function(result){
+        s.weapon=result.weapon||v;
+        wspan.textContent=s.weapon;
+        flash('● arma alterada para '+s.weapon,'var(--green)');
+        close();
+      }).catch(function(e){
+        flash('● '+(e.message||'não foi possível alterar a arma'),'var(--red)');
+        close();
+      });
+    });
+    sel.addEventListener('blur',function(){
+      // Evita remover o select antes do evento change do menu nativo.
+      setTimeout(function(){if(!saving&&!closed&&document.activeElement!==sel)close();},150);
+    });
   }
 
   var pendingRenderData=null;
@@ -3091,7 +3150,7 @@ const PAGE = `<!doctype html>
     var totals=d.totals||{};
     var groups=d.groups||{};
     var defs=[
-      ['equipando','🔴 Equipando','#e05252'],
+      ['equipando','🔴 Esquipando o CTA','#e05252'],
       ['contribuinte','🔵 Contribuinte (autorizado)','#4f91ff'],
       ['naCallSemPing','🟡 Na call sem ping','#e2b95e'],
       ['pingouForaDaCall','🟠 Pingou e está fora da call','#f28c28'],
@@ -3130,7 +3189,7 @@ const PAGE = `<!doctype html>
     var names=((d.groups||{}).equipando||[]).map(function(x){return String(x.name||'').trim();}).filter(Boolean);
     copy.onclick=function(){
       var text=names.join('\\n');
-      var done=function(){ flash('● nomes de Equipando copiados','var(--green)'); };
+      var done=function(){ flash('● nomes de quem está esquipando copiados','var(--green)'); };
       if(navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(text).then(done).catch(function(){ flash('● não foi possível copiar','var(--red)'); });
         return;
