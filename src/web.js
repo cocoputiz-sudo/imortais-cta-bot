@@ -3040,17 +3040,21 @@ const PAGE = `<!doctype html>
     chosen.forEach(function(c){
       if(!c.snapshot) return;
       (c.snapshot.members||[]).forEach(function(m,i){
-        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,m.estimatedSp==null?'':Math.round(Number(m.estimatedSp)||0),c.snapshot.capturedAt||'']);
+        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,'',m.capturedAt||c.snapshot.capturedAt||'','RECENTE']);
+      });
+      (c.snapshot.historicalMembers||[]).forEach(function(m,i){
+        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,'',m.capturedAt||'','DESATUALIZADO']);
       });
     });
     var stamp=new Date().toLocaleString('pt-BR');
     if(format==='csv'){
-      var lines=[['Categoria','Posição','Jogador','Might','SP estimado','Snapshot'].map(gmCsvValue).join(';')];
+      var lines=[['Categoria','Posição observada','Jogador','Might','SP (não capturado)','Capturado em','Status'].map(gmCsvValue).join(';')];
       records.forEach(function(r){lines.push(r.map(gmCsvValue).join(';'));});
       lines.push('');
-      lines.push(['GUILD CHALLENGE - pontuação separada','','','','',''].map(gmCsvValue).join(';'));
-      lines.push(['Jogador','Posição','Chavinhas','','','Snapshot'].map(gmCsvValue).join(';'));
-      (ch.members||[]).forEach(function(m,i){lines.push([m.player,m.rank||i+1,m.points,'','',ch.capturedAt||''].map(gmCsvValue).join(';'));});
+      lines.push(['GUILD CHALLENGE - pontuação separada','','','','','',''].map(gmCsvValue).join(';'));
+      lines.push(['Jogador','Posição observada','Chavinhas','','','Capturado em','Status'].map(gmCsvValue).join(';'));
+      (ch.members||[]).forEach(function(m,i){lines.push([m.player,m.rank||i+1,m.points,'','',m.capturedAt||ch.capturedAt||'','RECENTE'].map(gmCsvValue).join(';'));});
+      (ch.historicalMembers||[]).forEach(function(m,i){lines.push([m.player,m.rank||i+1,m.points,'','',m.capturedAt||'','DESATUALIZADO'].map(gmCsvValue).join(';'));});
       gmDownload('imortais-might-challenge.csv',String.fromCharCode(65279)+lines.join(String.fromCharCode(13,10)),'text/csv;charset=utf-8');
       return;
     }
