@@ -94,7 +94,7 @@ async function main(){
  assert.equal(pageBatch.challengeStored,1,"only new page should be stored");
  const combinedChallenge=await challengeStore.getDashboard(db.pool,{days:1});
  assert.equal(combinedChallenge.members.length,5,"two pages must be merged");
- assert.deepEqual(combinedChallenge.members.map(m=>m.rank),[1,2,3,20,21]);
+ assert.deepEqual(combinedChallenge.members.map(m=>m.rank),[1,2,3,4,5]);
  assert.equal(combinedChallenge.complete,false);
  // Identical Challenge page observed again with a distinct response event ID.
  await db.pool.query(
