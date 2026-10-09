@@ -27,6 +27,27 @@ const KNOWN_CATEGORY_LABELS = Object.freeze({
 const USER_CONFIRMED_CODES = new Set(Object.keys(KNOWN_CATEGORY_LABELS));
 const TENTATIVE_CODES = new Set();
 
+// Identifier captured from verified IMORTAIS Photon probes, not a Discord
+// role or the observer's display name. Match in constant time after decoding.
+const IMORTAIS_GUILD_ID_BASE64="ckzUYJXLFUmTBs0y4mZ+SQ==";
+function validImortaisGuild(p,operation){
+  if(!p||typeof p!=="object")return false;
+  // GvgSeasonContributionByActivity response uses param 1 for guild identity;
+  // Might overview/contribution and Challenge use param 0.
+  const field=operation==="GetGvgSeasonContributionByActivity"?"1":"0";
+  const raw=p[field];
+  if(!raw||raw.kind!=="bytes"||raw.length!==16)return false;
+  const b64=typeof raw.base64==="string"?raw.base64:raw.previewBase64;
+  if(typeof b64!=="string"||b64.length!==24||!/^[A-Za-z0-9+/]{22}==$/.test(b64))return false;
+  const buf=Buffer.from(b64,"base64");
+  return buf.length===16&&buf.toString("base64")===b64&&
+    require("node:crypto").timingSafeEqual(buf,Buffer.from(IMORTAIS_GUILD_ID_BASE64,"base64"));
+}
+function parseGuildSeasonResponse(p){
+  return validImortaisGuild(p,"GetGvgSeasonContributionByActivity")&&
+    nonnegativeInteger(p["0"])&&p["0"]>0?p["0"]:null;
+}
+
 function nonnegativeInteger(v) { return typeof v === "number" && Number.isSafeInteger(v) && v >= 0; }
 function playerName(v) { return typeof v === "string" && /^[\p{L}\p{N}_-]{2,32}$/u.test(v); }
 function numArray(v) { return Array.isArray(v) && v.every(nonnegativeInteger); }
@@ -284,5 +305,5 @@ function reconcileCategoryAtServerInstant(overview, contributionPages, categoryC
    difference:sum-category.guildMight};
 }
 
-module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,parseChallengeResponse,
+module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,IMORTAIS_GUILD_ID_BASE64,validImortaisGuild,parseGuildSeasonResponse,parseChallengeResponse,
   parseMightContributionResponse,parseMightOverviewResponse,assemblePages,reconcileCategoryAtServerInstant};
