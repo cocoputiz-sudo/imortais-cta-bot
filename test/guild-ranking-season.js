@@ -3,7 +3,10 @@ const assert=require("node:assert/strict");
 const {assemblePages,KNOWN_CATEGORY_LABELS,validImortaisGuild,parseGuildSeasonResponse}
   =require("../src/guildPhotonVerified");
 const {buildDashboardFromLatestSnapshots}=require("../src/guildMight");
-const {resolveEpoch}=require("../src/guildSeason");
+const {resolveEpoch,canPublishRankings}=require("../src/guildSeason");
+assert.equal(canPublishRankings({verified:false},{HOMOLOG_MODE:"0"}),false);
+assert.equal(canPublishRankings({verified:false},{HOMOLOG_MODE:"1"}),true);
+assert.equal(canPublishRankings({verified:true},{HOMOLOG_MODE:"0"}),true);
 const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 
 const {isApprovedDevice}=require("../src/guildRankingAuth");
