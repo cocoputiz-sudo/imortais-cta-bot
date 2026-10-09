@@ -437,7 +437,4 @@ function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
       playerCount:ranking.size,seasonStartAt,
       newestAt:categories.reduce((last,c)=>!last||new Date(c.capturedAt)>new Date(last)?c.capturedAt:last,null),
       referenceDate:null}};
-}: null
-    }
-  };
 }
