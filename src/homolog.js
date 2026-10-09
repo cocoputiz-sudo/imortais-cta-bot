@@ -50,6 +50,17 @@ app.post("/api/homolog/materialize",async(req,res)=>{
  try{const r=await telemetry.materializeGuildMightRecent({minutes:5000,limit:10000});res.json(r)}
  catch(e){console.error("materialize",e.message);res.status(500).json({error:"materialize"})}
 });
+app.get("/api/homolog/device-arrivals",async(req,res)=>{
+ try{
+  const r=await db.pool.query(
+   "SELECT COALESCE(payload->>'operationName','?') AS operation, COUNT(*)::int AS n, "+
+   "MAX(received_at) AS last_received_at FROM albion_telemetry_events "+
+   "WHERE device_id='WORKSPACEIGOR' AND type='guild_might_probe' "+
+   "GROUP BY COALESCE(payload->>'operationName','?') ORDER BY operation");
+  res.json({deviceId:"WORKSPACEIGOR",operations:r.rows,
+   received:r.rows.reduce((sum,x)=>sum+Number(x.n),0)});
+ }catch(e){console.error("qa arrivals",e.message);res.status(500).json({error:"server"})}
+});
 app.get("/api/homolog/challenge",async(req,res)=>{try{res.json(await challenge.getDashboard(db.pool,{days:90}))}catch(e){res.status(500).json({error:"challenge"})}});
 app.get("/",(_req,res)=>res.type("html").send(PAGE));
 const PAGE=`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -67,7 +78,7 @@ table{border-collapse:collapse;width:100%;margin-top:12px}th,td{border-bottom:1p
 <button type="button" onclick="issueToken()">Gerar chave temporária WORKSPACEIGOR</button>
 <input id="tokenOutput" type="password" autocomplete="off" readonly placeholder="Chave aparece apenas uma vez aqui" size="48">
 <button type="button" onclick="copyToken()">Copiar chave</button></div><p class="muted">Ambiente separado de produção • snapshots Photon de teste • nenhuma informação é enviada ao Discord</p>
-<p id="status">Carregando...</p><div class="grid"><div class="panel" id="overall"></div><div class="panel" id="challenge"></div></div>
+<p id="status">Carregando...</p><div class="panel" id="qaArrivals">WORKSPACEIGOR: aguardando primeiros eventos de homologação.</div><div class="grid"><div class="panel" id="overall"></div><div class="panel" id="challenge"></div></div>
 <h2>Categorias de Might (14)</h2><div id="cards"></div><h2 id="heading">Selecione uma categoria</h2>
 <input id="filter" placeholder="Buscar jogador" aria-label="Buscar jogador" oninput="renderRank()">
 <div id="rank"></div><script>
@@ -84,6 +95,12 @@ const fmt=x=>Number(x||0).toLocaleString("pt-BR");
 const when=x=>x?new Date(x).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo"}):"não informado";
 async function load(){
  try{const [a,b]=await Promise.all([fetch("/api/telemetry/guild-might?days=90").then(r=>r.json()),fetch("/api/homolog/challenge").then(r=>r.json())]);
+ fetch("/api/homolog/device-arrivals").then(r=>r.json()).then(q=>{
+  document.getElementById("qaArrivals").innerHTML=
+    "<b>WORKSPACEIGOR — dados recebidos neste ambiente: "+fmt(q.received)+"</b> "+
+    (q.operations||[]).map(op=>"<div>"+esc(op.operation)+": "+fmt(op.n)+
+    " eventos · recebido "+esc(when(op.last_received_at))+"</div>").join("");
+ }).catch(()=>{});
  d=a;ch=b;document.getElementById("status").textContent="Último Might: "+when(a.meta?.newestAt)+" • Challenge: "+when(b.capturedAt);
  document.getElementById("overall").textContent="Might: "+(a.categories||[]).length+"/14 categorias";
  document.getElementById("challenge").textContent="Challenge: "+fmt(b.observedMembers)+"/"+fmt(b.expectedMembers)+" recentes • "+fmt(b.historicalObservedMembers)+" históricos";
