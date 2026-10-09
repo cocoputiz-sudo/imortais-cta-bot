@@ -77,3 +77,56 @@ Os 127 inteiros podem ser interpretados como ticks de 100 nanossegundos desde 01
 Ambiente de homologação `imortais-might-homolog-20261009` / `homologacao`, com PostgreSQL e credenciais isoladas, executando o código do PR #66 em um entrypoint **sem Discord**. Replay do segundo dump via `POST /api/telemetry/ingest`: **1.824 eventos**, usando device de homologação e credencial separada. Teste: token inválido recebeu HTTP 401; 100 eventos na primeira remessa resultaram em 100 inserções; repetição dos mesmos 100 resultou em zero inserções e 100 duplicados. Materialização: 698 respostas de Might geraram 660 snapshots de Might distintos, 86 respostas de Challenge geraram 86 snapshots/páginas. API do site verificou 14 categorias de Might e 473/483 jogadores recentes de Challenge, 483/483 no histórico e 10 apenas históricos.
 
 A rotina temporária de replay já foi excluída do Railway; o ambiente de leitura deve ser mantido até a aprovação do usuário e a futura Fase B. Ao fim dos testes autorizados, excluir aplicativo/banco temporários e credenciais, sem tocar na produção.
+
+
+## Auditoria de consistência: soma dos jogadores x último Overview (segundo dump)
+
+O Overview de referência foi recebido em `2026-10-09T04:53:13.4316141Z`.
+Para cada categoria, foram reunidas as observações individuais mais recentes dentro
+das duas horas que antecederam **a última resposta de contribuição dessa categoria**.
+Diferença = soma de jogadores - Overview. Não equiparar timestamps diferentes.
+
+| Código | Soma recente jogadores | Último Overview | Diferença |
+|---|---:|---:|---:|
+| CASTLE | 200352048074 | 200352048074 | 0 |
+| CORRUPTED | 1115060430 | 1115060430 | 0 |
+| DRAGON_AREA | 25653397000 | 25653397000 | 0 |
+| DRAGON_HUNT | 4693532190 | 4693532190 | 0 |
+| ENERGYCRYSTAL | 263103707483 | 263103707483 | 0 |
+| GATHERING | 21934324446 | 21937245941 | -2921495 |
+| GVGSEASON | 422358686 | 422358686 | 0 |
+| HELLDUNGEON | 12312239530 | 12312239530 | 0 |
+| HELLGATE | 2825823911 | 2825823911 | 0 |
+| POWERCORE | 153508588840 | 153508588840 | 0 |
+| PVE | 272432722795 | 272449874570 | -17151775 |
+| SMUGGLERS | 141053295893 | 141053295893 | 0 |
+| SPIDERS | 51395879404 | 51395879404 | 0 |
+| TREASURES | 58002247559 | 58002247559 | 0 |
+
+Coleta: a última resposta de contribuição foi em `04:45:06.692Z`,
+e seu total de guilda nessa resposta era `21934368094`. Mesmo nessa resposta
+a soma observada `21934324446` está **43648** abaixo do agregado;
+isso **não pode ser explicado apenas** pelo avanço posterior do Overview.
+Investigar se a lista de membros sofreu atualização dentro da navegação paginada
+ou se o total inclui contribuições omitidas pela classificação.
+
+PvE: última contribuição em `04:44:25.408Z`; a soma de jogadores
+`272432722795` coincide **exatamente** com o agregado da resposta.
+A diferença ao Overview foi produzida pelo descompasso entre horários.
+
+## Permissões do site em produção (segundo o código do PR #66)
+
+- `GET /api/telemetry/guild-might` e `GET /api/telemetry/guild-challenge`
+  dependem de `requireMember`: sessão OAuth2 Discord válida e `isMember=true`,
+  isto é, **todos os membros autenticados da guilda**, não apenas oficiais.
+  O HTML externo pode ser carregado como casca por visitantes, mas as APIs bloqueiam
+  conteúdo sem sessão (401) ou não-membros (403).
+- `GET /api/telemetry/guild-progress` também exige `requireMember`; nível/SP
+  manuais podem ser lidos por membros, com fonte identificada.
+- `POST /api/telemetry/guild-progress` depende de `requireSiteAdmin`
+  e verifica `sess.isSiteAdmin`. O atributo é decidido no login Discord
+  considerando proprietário do servidor, `SITE_ADMIN_IDS` e a role administrativa
+  configurada como `STAFF_ROLE_ID`. Não é acesso aberto a todo usuário que
+  vê os rankings.
+- Este documento descreve a autorização do código da branch, não uma política
+  implantada em produção. Nada foi merged/deployed no ambiente principal.
