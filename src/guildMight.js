@@ -244,7 +244,7 @@ function inferCategoryIdentity(pair) {
     const name=KNOWN_CATEGORY_LABELS[rawCode];
     return {key:"name:"+normalizeCategoryLabel(name),name,mapped:true,
       source:"photon-category-code",rawLabel:rawCode,
-      sourcePath:"1",nameTentative:["DRAGON_AREA","GVGSEASON","HELLDUNGEON"].includes(rawCode)};
+      sourcePath:"1",nameTentative:false};
   }
   const sources = [
     ...(flattenPhoton(pair?.requestParameters || {}).scalars || []),
@@ -414,7 +414,7 @@ function buildDashboardFromLatestSnapshots(snapshots) {
     categories.push({
       ...latest,
       category:{...latest.category,
-        nameTentative:!["GVGSEASON","HELLDUNGEON","DRAGON_AREA"].includes(latest.layout?.code) && ["ENERGYCRYSTAL","SPIDERS","POWERCORE","CASTLE","CORRUPTED","DRAGON_HUNT","SMUGGLERS","TREASURES"].includes(latest.layout?.code)},
+        nameTentative:false},
       capturedAt:merged.capturedAt||latest.capturedAt,
       members:merged.members.map(m=>({...m,estimatedSp:null})),
       totalMembers:merged.totalMembers,
