@@ -49,6 +49,8 @@ function parseChallengeResponse(p) {
       totalMembers > 100000 || p["5"].length > 1200) return null;
   return {
     operation: "GetGuildChallengePoints",
+    snapshotMarker:p["1"]==null?null:String(p["1"]),
+    guildTotalPoints:nonnegativeInteger(p["2"])?p["2"]:null,
     pageOffset, totalMembers,
     // 1/2 appear to be server markers/aggregates; semantics not verified.
     members: p["5"].map((player,i) => ({player,points:points[i],rank:pageOffset+i+1})),
@@ -109,7 +111,8 @@ function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
     observedMembers:0,historicalObservedMembers:0,complete:false,missingCount:0,pages:0};
   const newest=entries[entries.length-1];
   const recent=entries.filter(p=>p.ms>=newest.ms-maxWindowMs && p.totalMembers===newest.totalMembers &&
-    (!newest.categoryCode||p.categoryCode===newest.categoryCode));
+    (!newest.categoryCode||p.categoryCode===newest.categoryCode) &&
+    (!newest.snapshotMarker||p.snapshotMarker===newest.snapshotMarker));
   // Full file history and recent observations must be kept separate. A historical
   // value is NEVER copied into the live/current leaderboard.
   function latestByPlayer(collection){
@@ -156,6 +159,8 @@ function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
     capturedAt:newest.capturedAt,
     recentWindowStart:new Date(newest.ms-maxWindowMs).toISOString(),
     categoryCode:newest.categoryCode||null,
+    snapshotMarker:newest.snapshotMarker||null,
+    guildTotalPoints:newest.guildTotalPoints??null,
     ranksRecalculated:true
   };
 }
