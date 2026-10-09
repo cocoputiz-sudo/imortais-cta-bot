@@ -84,35 +84,57 @@ function parseMightOverviewResponse(p) {
 }
 
 /** Reconstruct rank slots, never treat a single paginated response as a full leaderboard. */
-function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}) {
+function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
   const entries=(pages||[])
-    .filter(p=>p && nonnegativeInteger(p.pageOffset) && nonnegativeInteger(p.totalMembers) && Array.isArray(p.members))
+    .filter(p=>p && nonnegativeInteger(p.pageOffset) &&
+      nonnegativeInteger(p.totalMembers) && Array.isArray(p.members))
     .map(p=>({...p,ms:Date.parse(p.capturedAt||p.captured_at||0)}))
     .filter(p=>Number.isFinite(p.ms))
     .sort((a,b)=>a.ms-b.ms);
-  if(!entries.length) return {members:[],totalMembers:null,observedMembers:0,complete:false,missingRanges:[],pages:0};
+  if(!entries.length)return {
+    members:[],totalMembers:null,observedMembers:0,complete:false,
+    missingRanges:[],pages:0
+  };
   const newest=entries[entries.length-1];
-  const selected=entries.filter(p=>newest.ms-p.ms<=maxWindowMs && p.totalMembers===newest.totalMembers && 
-    (!newest.categoryCode || p.categoryCode===newest.categoryCode));
-  const slots=new Map();
-  for(const page of selected) {
-    for(let i=0;i<page.members.length;i++) {
-      const rank=page.pageOffset+i+1;
-      if(rank>newest.totalMembers)continue;
-      slots.set(rank,{...page.members[i],rank});
+  const selected=entries.filter(p=>newest.ms-p.ms<=maxWindowMs &&
+    p.totalMembers===newest.totalMembers &&
+    (!newest.categoryCode||p.categoryCode===newest.categoryCode));
+  // Player identity, not ranking offset, is the deduplication key. A member
+  // may move from rank 20 to rank 3 between pages and must appear once only.
+  const byPlayer=new Map();
+  for(const page of selected){
+    for(const member of page.members){
+      const name=String(member.player||"").trim();
+      if(!playerName(name))continue;
+      const key=name.toLocaleLowerCase("en");
+      const existing=byPlayer.get(key);
+      if(!existing || page.ms>existing.ms || page.ms===existing.ms &&
+          String(page.responseEventId||"")>String(existing.eventId||"")){
+        byPlayer.set(key,{...member,player:name,ms:page.ms,
+          eventId:page.responseEventId||null});
+      }
     }
   }
-  const members=[...slots.values()].sort((a,b)=>a.rank-b.rank);
-  const missingRanges=[];
-  for(let rank=1;rank<=newest.totalMembers;rank++){
-    if(slots.has(rank))continue;
-    const last=missingRanges[missingRanges.length-1];
-    if(last && last.to===rank-1) last.to=rank;
-    else missingRanges.push({from:rank,to:rank});
-  }
-  return {members,totalMembers:newest.totalMembers,observedMembers:members.length,
-    complete:members.length===newest.totalMembers,missingRanges,
-    pages:selected.length,capturedAt:newest.capturedAt,categoryCode:newest.categoryCode||null};
+  const members=[...byPlayer.values()].sort((a,b)=>{
+    const av=a.points??a.might??0,bv=b.points??b.might??0;
+    return bv-av||a.player.localeCompare(b.player,"pt-BR");
+  }).map((m,i)=>({
+    player:m.player,rank:i+1,
+    ...(m.points!=null?{points:m.points}:{}),
+    ...(m.might!=null?{might:m.might}:{})
+  }));
+  // rank here means position among OBSERVED members, not a confirmed global rank
+  // when coverage is incomplete. We never fabricate missing players as zero.
+  const observedMembers=members.length;
+  return {
+    members,totalMembers:newest.totalMembers,observedMembers,
+    complete:observedMembers===newest.totalMembers,
+    missingCount:Math.max(0,newest.totalMembers-observedMembers),
+    missingRanges:[], // obsolete when positions are recalculated by player
+    ranksRecalculated:true,
+    pages:selected.length,capturedAt:newest.capturedAt,
+    categoryCode:newest.categoryCode||null
+  };
 }
 
 module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,parseChallengeResponse,
