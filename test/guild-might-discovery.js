@@ -14,14 +14,9 @@ function near(actual, expected, epsilon, label) {
   assert(Math.abs(actual - expected) <= epsilon, label + ": " + actual + " != " + expected);
 }
 
-near(referenceWeightsPerMillion().PvE, 384.6153846, 0.01, "peso PvE");
-near(referenceWeightsPerMillion().Aranhas, 9660, 0.01, "peso Aranhas");
-near(
-  spPerMight({ level: 17, targetMight: 256000, seasonPoints: 100 }) * 1000000,
-  7031.25,
-  0.01,
-  "peso Hellgates"
-);
+assert.deepEqual(referenceWeightsPerMillion(), {}, "No screenshot-derived SP weights should be active");
+near(spPerMight({level:17,targetMight:256000,seasonPoints:100})*1000000,
+  7031.25,0.01,"pure mathematical helper remains available");
 
 const simple = inferContributionLayout({
   "0": ["ESTHER9950", "GiganteCarrara", "BadMack"],
@@ -108,7 +103,7 @@ const stale = correlateProbeRows([
 ]);
 assert.strictEqual(stale.pairs[0].requestEventId, null, "request antigo não pode correlacionar");
 
-console.log("✅ GuildMight discovery: pesos, layout e correlação request/response OK");
+console.log("✅ GuildMight discovery: disabled screenshot weights, layout and request correlation OK");
 
 
 const snapshots = buildContributionSnapshots(rows);
@@ -152,7 +147,7 @@ const mappedRows = [
 const mapped = buildContributionSnapshots(mappedRows);
 assert.strictEqual(mapped[0].category.name, "Aranhas");
 assert.strictEqual(mapped[0].category.mapped, true);
-near(mapped[0].members[0].estimatedSp, 9660, 0.1, "SP estimado usa referência mapeada");
+assert.equal(mapped[0].members[0].estimatedSp,null,"Season Points cannot be inferred from screenshots");
 
 console.log("✅ GuildMight snapshots/dashboard: extração utilizável e categoria mapeada/não mapeada OK");
 
@@ -223,3 +218,4 @@ assert.strictEqual(smugglersSnapshots[0].category.mapped, true);
 // Exercise Challenge extraction and generated Guild Might page in the CI discovery step.
 require("./guild-challenge");
 require("./guild-might-page");
+require("./guild-photon-capture");
