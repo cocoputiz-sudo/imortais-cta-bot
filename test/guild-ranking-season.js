@@ -28,7 +28,7 @@ const partial={pageOffset:0,totalMembers:481,snapshotMarker:"new-marker",
   capturedAt:after,members:names.slice(0,16).map((player,i)=>({player,points:1200+i}))};
 const assembled=assemblePages([...baseline,partial],{asOf:"2026-10-09T22:00:00Z"});
 assert.equal(assembled.members.length,481,"16-person partial cannot erase 481-player ranking");
-assert.equal(assembled.lastCompleteAt,at);
+assert.equal(new Date(assembled.lastCompleteAt).getTime(),new Date(at).getTime());
 assert.equal(assembled.complete,false,"current marker is partial");
 assert.equal(assembled.members.find(x=>x.player==="Member481").points,520);
 const lower={...partial,capturedAt:"2026-10-09T21:31:00Z",
