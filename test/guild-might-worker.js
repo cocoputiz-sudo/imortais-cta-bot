@@ -2,6 +2,7 @@
 const assert = require("assert/strict");
 process.env.PGSSL="disable";
 process.env.GUILD_ID="guild-test";
+process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS="might-test,might-other-device,challenge-test,different-device";
 const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 const db=require("../src/db");
 const telemetry=require("../src/telemetry");
