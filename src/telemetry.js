@@ -3900,9 +3900,16 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
   const epoch=await guildSeason.getSeasonEpoch(pool);
   const approvedDevices=[...guildRankingAuth.approvedDeviceIds()];
-  if(!guildSeason.canPublishRankings(epoch))return {
+  const configurationNotices=[];
+  if(!approvedDevices.length)configurationNotices.push(
+    "Nenhum dispositivo autorizado para o ranking. Configure GUILD_RANKING_ALLOWED_DEVICE_IDS no serviço de produção.");
+  if(!guildSeason.canPublishRankings(epoch))configurationNotices.push(
+    "Início da temporada ainda não validado. Confira o número oficial e configure GUILD_SEASON_START_AT (UTC), ou aguarde uma transição Photon comprovada.");
+  if(configurationNotices.length)return {
     categories:[],ranking:[],meta:{categoryCount:0,mappedCategoryCount:0,playerCount:0,
-      season:epoch,seasonUnverified:true,newestAt:null,storedSnapshots:0}
+      season:epoch,seasonUnverified:!guildSeason.canPublishRankings(epoch),
+      deviceAuthorizationMissing:!approvedDevices.length,
+      configurationNotices,newestAt:null,storedSnapshots:0}
   };
   // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
   // A rotina de background cuida do backfill e dos novos lotes.
