@@ -1,8 +1,23 @@
 "use strict";
 const assert=require("node:assert/strict");
 const fixture=require("./fixtures/guild-photon-capture-20261009-minimized.json");
+const secondDump=require("./fixtures/guild-photon-second-dump-minimized.json");
 const {parseChallengeResponse,parseMightContributionResponse,parseMightOverviewResponse,assemblePages}
   =require("../src/guildPhotonVerified");
+
+const secondTop=parseChallengeResponse(secondDump.challengeTop.parameters);
+const secondLast=parseChallengeResponse(secondDump.challengeFinal.parameters);
+const secondOverview=parseMightOverviewResponse(secondDump.overview.parameters);
+assert.equal(secondTop.totalMembers,483);
+assert.deepEqual(secondTop.members.slice(0,3).map(m=>m.points),[5930046,5203391,5018288]);
+assert.equal(secondLast.members.length,5,"real zero-byte final page retained");
+assert.equal(secondLast.members[0].rank,479);
+assert(secondLast.members.every(m=>m.points===0));
+assert.equal(secondOverview.categories.length,14);
+assert.equal(secondOverview.categories.find(c=>c.code==="GVGSEASON").name,"Magos Engarrafadores");
+assert.equal(secondOverview.categories.find(c=>c.code==="HELLDUNGEON").name,"As Profundezas");
+assert.equal(secondOverview.categories.find(c=>c.code==="DRAGON_AREA").name,"Terras Ancestrais");
+assert(secondOverview.categories.every(c=>c.level===null&&c.seasonPoints===null));
 
 const challenge=parseChallengeResponse(fixture.challengeFirst);
 assert(challenge);
