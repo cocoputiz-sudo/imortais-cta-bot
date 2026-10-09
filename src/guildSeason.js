@@ -1,5 +1,6 @@
 "use strict";
 const {parseGuildSeasonResponse}=require("./guildPhotonVerified");
+const {approvedDeviceIds}=require("./guildRankingAuth");
 // A season boundary is a positive change of the GVG season identifier in
 // GetGvgSeasonContributionByActivity field 0, with validated IMORTAIS id in
 // field 1. Time of first new-season observation is a conservative boundary.
@@ -40,7 +41,8 @@ async function getSeasonEpoch(pool){
     "WHERE type='guild_might_probe' "+
     "AND payload->>'operationName'='GetGvgSeasonContributionByActivity' "+
     "AND payload->>'direction'='response' "+
-    "ORDER BY occurred_at DESC LIMIT 250");
+    "AND device_id=ANY($1::text[]) "+
+    "ORDER BY occurred_at DESC LIMIT 250",[[...approvedDeviceIds()]]);
   return resolveEpoch(r.rows,{manualStartAt:process.env.GUILD_SEASON_START_AT||null});
 }
 module.exports={resolveEpoch,getSeasonEpoch};
