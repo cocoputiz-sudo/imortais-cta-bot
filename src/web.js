@@ -2833,7 +2833,7 @@ const PAGE = `<!doctype html>
               fwhen=ffi+' → '+fla;
             }
             var playerTable='<div style="overflow-x:auto;margin-top:12px"><table class="dtable"><thead><tr>'
-              +'<th>#</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Kill Fame</th><th>Death Fame</th><th>Dano bruto</th><th>Cura bruta</th>'
+              +'<th>Pos. observada</th><th>Jogador</th><th>PT</th><th>Dano dedup.</th><th>Cura dedup.</th><th>Kills</th><th>Mortes</th><th>Kill Fame</th><th>Death Fame</th><th>Dano bruto</th><th>Cura bruta</th>'
               +'</tr></thead><tbody>'
               +(players.length?players.map(function(p,i){
                 return '<tr><td>'+(i+1)+'</td><td><button type="button" class="scout-player-link" data-scout-player="'+scoutAttr(p.n||'')+'" data-scout-label="'+scoutAttr('Batalha '+(f.n||'?'))+'" data-scout-damage="'+Number(p.damage||0)+'" data-scout-healing="'+Number(p.healing||0)+'" data-scout-kills="'+Number(p.kills||0)+'" data-scout-deaths="'+Number(p.deaths||0)+'" data-scout-pt="'+scoutAttr(p.pt||'Sem PT')+'">'+esc(p.n||'?')+'</button></td><td>'+esc(p.pt||'Sem PT')+'</td>'
@@ -3016,7 +3016,7 @@ const PAGE = `<!doctype html>
   }
   function gmRows(members,type){
     var sum=(members||[]).reduce(function(a,m){return a+Number(type==='challenge'?m.points:m.might)||0;},0);
-    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>'+ (type==='challenge'?'Chavinhas':'Might') +'</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+'</tr></thead><tbody>'
+    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+ (type==='challenge'?'Chavinhas':'Might') +'</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+'</tr></thead><tbody>'
       +(members&&members.length?members.map(function(m,i){
         var v=Number(type==='challenge'?m.points:m.might)||0;
         return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
@@ -3061,12 +3061,12 @@ const PAGE = `<!doctype html>
       body+='<h2>'+esc(c.name)+'</h2>';
       if(!c.snapshot){body+='<p>Sem dados recebidos desta categoria.</p>';return;}
       body+='<p>Snapshot: '+esc(gmDate(c.snapshot.capturedAt))+' · mapeamento: '+(c.snapshot.category&&c.snapshot.category.mapped?'identificado':'pendente')+'</p>'
-        +'<table><thead><tr><th>#</th><th>Jogador</th><th>Might</th><th>SP estimado</th></tr></thead><tbody>'
+        +'<table><thead><tr><th>Pos. observada</th><th>Jogador</th><th>Might</th><th>SP estimado</th></tr></thead><tbody>'
         +(c.snapshot.members||[]).map(function(m,i){return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.might)+'</td><td>'+gmSp(m.estimatedSp)+'</td></tr>';}).join('')
         +'</tbody></table>';
     });
     body+='<h2>Guild Challenge · Chavinhas</h2><p>Este ranking é independente do Might. Extração experimental'+(ch.capturedAt?' · snapshot '+esc(gmDate(ch.capturedAt)):' · ainda sem snapshot')+'.</p>'
-      +'<table><thead><tr><th>#</th><th>Jogador</th><th>Challenge Points</th></tr></thead><tbody>'
+      +'<table><thead><tr><th>Pos. observada</th><th>Jogador</th><th>Challenge Points</th></tr></thead><tbody>'
       +(ch.members||[]).map(function(m,i){return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td>'+esc(m.player)+'</td><td>'+fmtS(m.points)+'</td></tr>';}).join('')+'</tbody></table>';
     var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Relatório</title>'
       +'<style>body{max-width:1050px;margin:35px auto;padding:0 20px;font:14px Arial,sans-serif;color:#1d2833}h1,h2{color:#8c2731}h2{margin-top:30px}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{padding:8px;border:1px solid #ccc;text-align:left}th{background:#eee}@media print{h2{break-before:auto}tr{break-inside:avoid}}</style>'
@@ -3110,7 +3110,7 @@ const PAGE = `<!doctype html>
     } else {
       html+='<div class="panel"><h3>🏆 Ranking geral de Might observado</h3>'
         +'<div class="note">Soma apenas os últimos snapshots disponíveis de cada categoria. Categorias ainda não capturadas ficam fora do total.</div>'
-        +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>#</th><th>Jogador</th><th>Might observado</th><th>SP estimado</th><th>Categorias</th></tr></thead><tbody>'
+        +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>Might observado</th><th>SP estimado</th><th>Categorias</th></tr></thead><tbody>'
         +(ranking.length?ranking.map(function(m,i){return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td>'+fmtS(m.might||0)+'</td><td>'+gmSp(m.estimatedSp)+'</td><td>'+fmtS(m.categories||0)+'</td></tr>';}).join(''):'<tr><td colspan="5">Aguardando snapshots.</td></tr>')
         +'</tbody></table></div></div>';
     }
