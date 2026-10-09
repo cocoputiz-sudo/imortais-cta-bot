@@ -64,6 +64,28 @@ assert.equal(partial.members[0].rank,1);
 assert.equal(partial.complete,false);
 assert.equal(partial.missingCount,99);
 
+// Second real dump: final Challenge page is an all-zero byte buffer.
+const finalPage=parseChallengeResponse({
+  "3":483,"4":478,"5":["facjj","Yamadha","GivisTabua","GDFP9C12","LastMember"],
+  "6":{kind:"bytes",length:5,base64:"AAAAAAA="}
+});
+assert.equal(finalPage.members.length,5);
+assert(finalPage.members.every(m=>m.points===0));
+assert.equal(finalPage.members[0].rank,479);
+
+// Historical-only members must not contaminate the recent ranking.
+const oldAndNew=assemblePages([
+ {totalMembers:3,pageOffset:0,capturedAt:"2026-10-08T19:00:00Z",
+  members:[{player:"OldOnly",points:900}]},
+ {totalMembers:3,pageOffset:0,capturedAt:"2026-10-09T01:00:00Z",
+  members:[{player:"Alpha",points:500},{player:"Beta",points:400}]}
+]);
+assert.deepEqual(oldAndNew.members.map(m=>m.player),["Alpha","Beta"]);
+assert.equal(oldAndNew.historicalObservedMembers,3);
+assert.equal(oldAndNew.historicalMembers.length,1);
+assert.equal(oldAndNew.historicalMembers[0].player,"OldOnly");
+assert.equal(oldAndNew.historicalMembers[0].stale,true);
+assert.equal(oldAndNew.members[0].capturedAt,"2026-10-09T01:00:00Z");
 // Do not accidentally classify an overview guild-totals table as a players leaderboard.
 assert.equal(parseMightContributionResponse(fixture.mightOverview),null);
 // Missing field 4 means first page; but an inconsistent total must fail closed.
