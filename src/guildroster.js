@@ -9,8 +9,8 @@
 //   - online e pingou (e na call)           -> pronto
 //   - online e pingou, fora da call         -> falta entrar na call
 //   - online na call, sem ping              -> falta pingar
-//   - online, sem ping e fora da call       -> "equipando" (esquipando o CTA)
-//   - idem, com cargo isento (CONTRIBUINTE) -> autorizado, não cobrar
+//   - online, sem ping e fora da call       -> "esquipando o CTA" (chave interna: equipando)
+//   - idem, com cargo isento (CONTRIBUINTE 1/2/3) -> autorizado, não cobrar
 //   - offline mas pingou                    -> pingou e não está logado
 //   - offline mas na call                   -> só no Discord
 // Nomes em pings/call que não existem na lista colada aparecem à parte, para
@@ -23,7 +23,8 @@
 
 const MAX_CHARS = 600_000;
 const MAX_LINES = 3_000;
-const DEFAULT_EXEMPT_ROLES = ["contribuinte"];
+// Cargos que nao entram na cobranca de ausencia do CTA, inclusive o nome legado.
+const DEFAULT_EXEMPT_ROLES = ["contribuinte", "contribuinte 1", "contribuinte 2", "contribuinte 3"];
 
 // Mesma regra de nomes usada no resto do projeto: tira "!", espaços e tags
 // de guilda/nacionalidade do começo ([IM], [ESP]...), em minúsculas.
