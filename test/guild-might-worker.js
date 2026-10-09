@@ -50,7 +50,7 @@ async function main(){
    "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) " +
    "VALUES('challenge-res-1','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
    [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
-     "0":["GiganteCarorra","ESTHER9950","JnK1"],"1":[5817978,5072517,4890194]
+     "3":482,"5":["GiganteCarrara","ESTHER9950","JnK1"],"6":[5905587,5179919,4996374]
    }})]
  );
  const challengeBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -59,9 +59,25 @@ async function main(){
  const challenge=await challengeStore.getDashboard(db.pool,{days:1});
  assert.equal(challenge.available,true);
  assert.equal(challenge.members.length,3);
- assert.deepEqual(challenge.members.map(m=>m.player),["GiganteCarorra","ESTHER9950","JnK1"]);
- assert.equal(challenge.members[0].points,5817978);
- assert.equal(challenge.verified,false,"values remain experimental until real Photon validation");
+ assert.deepEqual(challenge.members.map(m=>m.player),["GiganteCarrara","ESTHER9950","JnK1"]);
+ assert.equal(challenge.members[0].points,5905587);
+ assert.equal(challenge.verified,true,"real Photon field positions validated");
+ assert.equal(challenge.complete,false,"a single page must never be presented as complete");
+ assert.equal(challenge.expectedMembers,482);
+ assert.equal(challenge.observedMembers,3);
+ await db.pool.query(
+   "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
+   "VALUES('challenge-res-19','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
+   [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
+     "3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
+   }})]
+ );
+ const pageBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(pageBatch.challengeStored,1,"only new page should be stored");
+ const combinedChallenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(combinedChallenge.members.length,5,"two pages must be merged");
+ assert.deepEqual(combinedChallenge.members.map(m=>m.rank),[1,2,3,20,21]);
+ assert.equal(combinedChallenge.complete,false);
  const challengeReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(challengeReplay.challengeStored,0,"Challenge snapshots idempotent");
  console.log("✅ Guild Challenge: persistence, separation, rank and idempotency");
