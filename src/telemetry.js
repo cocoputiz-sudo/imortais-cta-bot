@@ -7,6 +7,7 @@ const killFame = require("./killFame");
 const guildMight = require("./guildMight");
 const guildChallengeStore = require("./guildChallengeStore");
 const guildManualProgress = require("./guildManualProgress");
+const guildSeason = require("./guildSeason");
 // Production may collect raw Challenge probes, but never expose this feature.
 const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
 
@@ -3891,29 +3892,23 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
 
 async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
+  const epoch=await guildSeason.getSeasonEpoch(pool);
   // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
   // A rotina de background cuida do backfill e dos novos lotes.
   if (!guildMightWorkerPromise && !guildMightWorkerTimer && !guildMightWorkerState.lastRunAt) {
     scheduleGuildMightMaterialization({ backfill: true });
   }
 
-  const { rows: snapshotRows } = await pool.query(`
-    WITH newest AS (
-      SELECT category_key, MAX(captured_at) AS latest_at
-        FROM guild_might_snapshots
-       WHERE members_complete=true
-         AND captured_at >= now() - ($1::text || ' days')::interval
-       GROUP BY category_key
-    )
-    SELECT s.id,s.response_event_id,s.request_event_id,s.device_id,s.observer,s.operation_name,
-           s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at,
-           s.request_parameters,s.layout,s.reference_data
-      FROM guild_might_snapshots s
-      JOIN newest n ON n.category_key=s.category_key
-     WHERE s.members_complete=true
-       AND s.captured_at BETWEEN (n.latest_at - interval '24 hours') AND n.latest_at
-     ORDER BY s.captured_at DESC,s.id DESC
-  `, [safeDays]);
+  const {rows:snapshotRows}=await pool.query(
+    "SELECT s.id,s.response_event_id,s.request_event_id,s.device_id,s.observer,s.operation_name, "+
+    "s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at, "+
+    "s.request_parameters,s.layout,s.reference_data "+
+    "FROM guild_might_snapshots s "+
+    "WHERE s.members_complete=true AND s.category_mapped=true "+
+    "AND COALESCE(s.layout->>'code','') <> '' "+
+    "AND s.captured_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
+    "ORDER BY s.captured_at ASC,s.id ASC",
+    [epoch.startAt,safeDays]);
 
   const ids = snapshotRows.map(x => Number(x.id)).filter(Number.isFinite);
   let members = [];
@@ -3957,27 +3952,41 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     members: membersBySnapshot.get(String(row.id)) || []
   }));
 
-  const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots);
+  const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt:epoch.startAt});
+  dashboard.meta.season=epoch;
   // Exact server-state reconciliation. Never compare contributions from one
   // Photon marker with a later Overview marker; retain unavailable when only
   // partial pages exist for the matching server state.
-  const {parseMightOverviewResponse, reconcileCategoryAtServerInstant}
+  const {parseMightOverviewResponse,reconcileCategoryAtServerInstant,validImortaisGuild}
     =require("./guildPhotonVerified");
   const rawOverview=await pool.query(
     "SELECT payload->'parameters' AS params, occurred_at "+
     "FROM albion_telemetry_events WHERE type='guild_might_probe' "+
     "AND payload->>'operationName'='GetGuildMightCategoryOverview' "+
     "AND payload->>'direction'='response' "+
-    "AND occurred_at>=now()-interval '2 days' "+
-    "ORDER BY occurred_at DESC LIMIT 500");
+    "AND occurred_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
+    "ORDER BY occurred_at DESC LIMIT 1500",[epoch.startAt,safeDays]);
   const overviewByMarker=new Map();
   for(const row of rawOverview.rows){
+    if(!validImortaisGuild(row.params,"GetGuildMightCategoryOverview"))continue;
     const overview=parseMightOverviewResponse(row.params);
     if(overview?.snapshotMarker&&!overviewByMarker.has(overview.snapshotMarker))
       overviewByMarker.set(overview.snapshotMarker,overview);
   }
+  // Overview provides authoritative GUILD totals. Consolidated player
+  // values are independently reported; do not present their difference as
+  // exact instant reconciliation unless all rank slots match one marker.
+  const overviewByCategory=new Map();
+  for(const overview of overviewByMarker.values()){
+    for(const c of overview.categories||[])if(!overviewByCategory.has(c.code))
+      overviewByCategory.set(c.code,{guildMight:c.guildMight,marker:overview.snapshotMarker});
+  }
   for(const category of dashboard.categories||[]){
     const code=category.layout?.code;
+    const official=overviewByCategory.get(code);
+    category.guildMight=official?Number(official.guildMight):null;
+    category.difference=category.guildMight==null?null:
+      Number(category.observedMight||0)-category.guildMight;
     if(!code)continue;
     const relevant=snapshots.filter(x=>x.layout?.code===code&&x.layout?.snapshotMarker);
     const latest=relevant.reduce((p,x)=>!p||
