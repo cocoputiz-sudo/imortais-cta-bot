@@ -6,7 +6,7 @@ Captura local privada: `guild-probes-20261009-00(1).ndjson`, 1.824 linhas (699 r
 
 ## Mapeamento das categorias
 
-A resposta de `GetGuildMightCategoryOverview` fornece códigos, não seus nomes visuais. Os onze nomes previamente atribuídos a partir de semântica/ordem da interface continuam sujeitos a graus distintos de verificação. Apenas três foram explicitamente checados pela liderança no jogo neste ciclo. O dump confirma os líderes/valores das três classes, porém o significado visual dessas strings **não é comprovável pelo pacote isolado**.
+A resposta de `GetGuildMightCategoryOverview` fornece códigos, não nomes visuais. O líder da guilda confirmou no jogo as **14 correspondências** em 09/10/2026. As outras 11 foram inicialmente sugeridas por semântica técnica, contexto das atividades ou tradução do código, mas agora têm confirmação independente por inspeção visual da interface. Esta confirmação é do usuário, não uma string localizada enviada pelo Photon.
 
 | Código | Nome apresentado | Evidência / confiança |
 |---|---|---|
@@ -25,7 +25,7 @@ A resposta de `GetGuildMightCategoryOverview` fornece códigos, não seus nomes 
 | SPIDERS | Criaturas de Cristal | Inferência contextual envolvendo criaturas/aracnídeos; requer prova visual |
 | TREASURES | Tesouros das Outlands | Tradução contextual; detalhe geográfico da UI |
 
-**Não classificar os 11 nomes por código como provados pelo servidor**: o campo de códigos não contém rótulos localizados.
+**Todas as 14 correspondências foram confirmadas pelo usuário no jogo.** O protocolo, isoladamente, ainda não fornece o rótulo localizado.
 
 ## Overview: 127 respostas, inspeção campo a campo
 
@@ -67,3 +67,13 @@ Segundo dump: Challenge **473/483 recente**, **483/483 histórico**, dez apenas 
 7. Desligar envio experimental, revogar credenciais, encerrar homolog; **pedir aprovação expressa para merge, deploy e release**.
 
 Este documento é uma auditoria do estado do PR, não uma autorização de publicação.
+
+## Campo 1 do Overview: hipótese de timestamp
+
+Os 127 inteiros podem ser interpretados como ticks de 100 nanossegundos desde 01/01/0001 UTC (formato associado ao .NET). Ao converter os 127 registros, a data resultante fica **36,14–41,74 segundos anterior** a `capturedAtUtc` (mediana: **39,65 segundos antes**). Isso é forte evidência de um relógio/marcador temporal, mas não prova que seja o instante exato da resposta. Usar `capturedAtUtc` para exibir hora de coleta; preservar o valor bruto `1` no registro de telemetria.
+
+## Execução Fase A em Railway
+
+Ambiente de homologação `imortais-might-homolog-20261009` / `homologacao`, com PostgreSQL e credenciais isoladas, executando o código do PR #66 em um entrypoint **sem Discord**. Replay do segundo dump via `POST /api/telemetry/ingest`: **1.824 eventos**, usando device de homologação e credencial separada. Teste: token inválido recebeu HTTP 401; 100 eventos na primeira remessa resultaram em 100 inserções; repetição dos mesmos 100 resultou em zero inserções e 100 duplicados. Materialização: 698 respostas de Might geraram 660 snapshots de Might distintos, 86 respostas de Challenge geraram 86 snapshots/páginas. API do site verificou 14 categorias de Might e 473/483 jogadores recentes de Challenge, 483/483 no histórico e 10 apenas históricos.
+
+A rotina temporária de replay já foi excluída do Railway; o ambiente de leitura deve ser mantido até a aprovação do usuário e a futura Fase B. Ao fim dos testes autorizados, excluir aplicativo/banco temporários e credenciais, sem tocar na produção.
