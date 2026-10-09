@@ -87,7 +87,7 @@ assert.equal(shifted.observedMembers,3);
 assert.deepEqual(shifted.members.map(m=>[m.player,m.points,m.rank]),[
   ["Gamma",600,1],["Alpha",510,2],["Beta",400,3]
 ]);
-assert.equal(shifted.complete,true);
+assert.equal(shifted.complete,false,"without a shared marker there is no proven complete server instant");
 // Incomplete coverage shows observed ranks only, not fabricated global positions.
 const partial=assemblePages([{totalMembers:100,pageOffset:49,
   capturedAt:"2026-10-09T01:00:00Z",members:[{player:"Only",points:123,rank:50}]}]);
@@ -111,12 +111,11 @@ const oldAndNew=assemblePages([
  {totalMembers:3,pageOffset:0,capturedAt:"2026-10-09T01:00:00Z",
   members:[{player:"Alpha",points:500},{player:"Beta",points:400}]}
 ]);
-assert.deepEqual(oldAndNew.members.map(m=>m.player),["Alpha","Beta"]);
+assert.deepEqual(oldAndNew.members.map(m=>m.player),["OldOnly","Alpha","Beta"]);
 assert.equal(oldAndNew.historicalObservedMembers,3);
-assert.equal(oldAndNew.historicalMembers.length,1);
-assert.equal(oldAndNew.historicalMembers[0].player,"OldOnly");
-assert.equal(oldAndNew.historicalMembers[0].stale,true);
-assert.equal(oldAndNew.members[0].capturedAt,"2026-10-09T01:00:00Z");
+assert.equal(oldAndNew.historicalMembers.length,0);
+assert.equal(oldAndNew.members[0].player,"OldOnly");
+assert.equal(oldAndNew.members[0].capturedAt,"2026-10-08T19:00:00Z");
 // Latest complete 481-person snapshot supersedes the old 483-person roster.
 // A departed member stays historical, but must not be in the current ranking.
 const newerRoster=assemblePages([
