@@ -8,6 +8,22 @@ const {parseChallengeResponse,parseMightContributionResponse,parseMightOverviewR
 const secondTop=parseChallengeResponse(secondDump.challengeTop.parameters);
 const secondLast=parseChallengeResponse(secondDump.challengeFinal.parameters);
 const secondOverview=parseMightOverviewResponse(secondDump.overview.parameters);
+
+// Normal Combat Client emits previewBase64. A byte-valued final page may
+// contain nonzero scores and must not be silently converted to all zeroes.
+const bytesNonzero=parseChallengeResponse({
+  "1":"newer-marker","2":196981040,"3":3,"4":0,
+  "5":["Alpha","Beta","Gamma"],
+  "6":{kind:"bytes",length:3,previewBase64:Buffer.from([1,17,255]).toString("base64")}
+});
+assert.deepEqual(bytesNonzero.members.map(m=>m.points),[1,17,255]);
+assert.equal(parseChallengeResponse({"3":3,"5":["Alpha","Beta","Gamma"],
+  "6":{kind:"bytes",length:3,previewBase64:Buffer.from([1,17]).toString("base64")}}),null,
+  "truncated preview cannot create invented scores");
+assert.equal(parseChallengeResponse({"3":3,"5":["Alpha","Beta","Gamma"],
+  "6":{kind:"bytes",length:3,previewBase64:"%%%"}}),null,
+  "invalid encoded payload must fail closed");
+
 assert.equal(secondTop.totalMembers,483);
 assert.deepEqual(secondTop.members.slice(0,3).map(m=>m.points),[5930046,5203391,5018288]);
 assert.equal(secondLast.members.length,5,"real zero-byte final page retained");
@@ -71,7 +87,7 @@ assert.equal(shifted.observedMembers,3);
 assert.deepEqual(shifted.members.map(m=>[m.player,m.points,m.rank]),[
   ["Gamma",600,1],["Alpha",510,2],["Beta",400,3]
 ]);
-assert.equal(shifted.complete,true);
+assert.equal(shifted.complete,false,"without a shared marker there is no proven complete server instant");
 // Incomplete coverage shows observed ranks only, not fabricated global positions.
 const partial=assemblePages([{totalMembers:100,pageOffset:49,
   capturedAt:"2026-10-09T01:00:00Z",members:[{player:"Only",points:123,rank:50}]}]);
@@ -88,6 +104,16 @@ assert.equal(finalPage.members.length,5);
 assert(finalPage.members.every(m=>m.points===0));
 assert.equal(finalPage.members[0].rank,479);
 
+const realFinalFromDump=parseChallengeResponse({
+  "0":{kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="},
+  "1":"639271777747774964","2":199643226,"3":481,"4":477,
+  "5":["brayan7893","facjj","GivisTabua","Aa4r0n"],
+  "6":{kind:"bytes",length:4,base64:"KgAAAA=="}
+});
+assert.deepEqual(realFinalFromDump.members.map(x=>x.points),[42,0,0,0]);
+assert.deepEqual(realFinalFromDump.members.map(x=>x.rank),[478,479,480,481]);
+
+
 // Historical-only members must not contaminate the recent ranking.
 const oldAndNew=assemblePages([
  {totalMembers:3,pageOffset:0,capturedAt:"2026-10-08T19:00:00Z",
@@ -95,12 +121,11 @@ const oldAndNew=assemblePages([
  {totalMembers:3,pageOffset:0,capturedAt:"2026-10-09T01:00:00Z",
   members:[{player:"Alpha",points:500},{player:"Beta",points:400}]}
 ]);
-assert.deepEqual(oldAndNew.members.map(m=>m.player),["Alpha","Beta"]);
+assert.deepEqual(oldAndNew.members.map(m=>m.player),["OldOnly","Alpha","Beta"]);
 assert.equal(oldAndNew.historicalObservedMembers,3);
-assert.equal(oldAndNew.historicalMembers.length,1);
-assert.equal(oldAndNew.historicalMembers[0].player,"OldOnly");
-assert.equal(oldAndNew.historicalMembers[0].stale,true);
-assert.equal(oldAndNew.members[0].capturedAt,"2026-10-09T01:00:00Z");
+assert.equal(oldAndNew.historicalMembers.length,0);
+assert.equal(oldAndNew.members[0].player,"OldOnly");
+assert.equal(oldAndNew.members[0].capturedAt,"2026-10-08T19:00:00Z");
 // Latest complete 481-person snapshot supersedes the old 483-person roster.
 // A departed member stays historical, but must not be in the current ranking.
 const newerRoster=assemblePages([

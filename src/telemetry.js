@@ -7,6 +7,10 @@ const killFame = require("./killFame");
 const guildMight = require("./guildMight");
 const guildChallengeStore = require("./guildChallengeStore");
 const guildManualProgress = require("./guildManualProgress");
+const guildSeason = require("./guildSeason");
+const guildRankingAuth = require("./guildRankingAuth");
+// Production may collect raw Challenge probes, but never expose this feature.
+const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -3779,9 +3783,10 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
      ORDER BY occurred_at ASC, received_at ASC
   `, [safeMinutes, safeLimit]);
 
-  // Guild Challenge é um ranking independente; persistir mesmo sem snapshots de Might.
-  const challenge = await guildChallengeStore.materialize(pool, rows);
-  const snapshots = guildMight.buildContributionSnapshots(rows, { minConfidence: 0.85 });
+  // Pairing grants telemetry access, not authorization for official rankings.
+  const trustedRows=rows.filter(x=>guildRankingAuth.isApprovedDevice(x.device_id));
+  const challenge = await guildChallengeStore.materialize(pool, trustedRows);
+  const snapshots = guildMight.buildContributionSnapshots(trustedRows, { minConfidence: 0.85 });
   if (!snapshots.length) {
     return { probes: rows.length, snapshots: 0, stored: 0, challengeStored: challenge.stored };
   }
@@ -3889,29 +3894,25 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
 
 async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
+  const epoch=await guildSeason.getSeasonEpoch(pool);
+  const approvedDevices=[...guildRankingAuth.approvedDeviceIds()];
   // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
   // A rotina de background cuida do backfill e dos novos lotes.
   if (!guildMightWorkerPromise && !guildMightWorkerTimer && !guildMightWorkerState.lastRunAt) {
     scheduleGuildMightMaterialization({ backfill: true });
   }
 
-  const { rows: snapshotRows } = await pool.query(`
-    WITH newest AS (
-      SELECT category_key, MAX(captured_at) AS latest_at
-        FROM guild_might_snapshots
-       WHERE members_complete=true
-         AND captured_at >= now() - ($1::text || ' days')::interval
-       GROUP BY category_key
-    )
-    SELECT s.id,s.response_event_id,s.request_event_id,s.device_id,s.observer,s.operation_name,
-           s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at,
-           s.request_parameters,s.layout,s.reference_data
-      FROM guild_might_snapshots s
-      JOIN newest n ON n.category_key=s.category_key
-     WHERE s.members_complete=true
-       AND s.captured_at BETWEEN (n.latest_at - interval '24 hours') AND n.latest_at
-     ORDER BY s.captured_at DESC,s.id DESC
-  `, [safeDays]);
+  const {rows:snapshotRows}=await pool.query(
+    "SELECT s.id,s.response_event_id,s.request_event_id,s.device_id,s.observer,s.operation_name, "+
+    "s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at, "+
+    "s.request_parameters,s.layout,s.reference_data "+
+    "FROM guild_might_snapshots s "+
+    "WHERE s.members_complete=true AND s.category_mapped=true "+
+    "AND COALESCE(s.layout->>'code','') <> '' "+
+    "AND s.device_id=ANY($3::text[]) "+
+    "AND s.captured_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
+    "ORDER BY s.captured_at ASC,s.id ASC",
+    [epoch.startAt,safeDays,approvedDevices]);
 
   const ids = snapshotRows.map(x => Number(x.id)).filter(Number.isFinite);
   let members = [];
@@ -3955,27 +3956,42 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     members: membersBySnapshot.get(String(row.id)) || []
   }));
 
-  const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots);
+  const dashboard = guildMight.buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt:epoch.startAt});
+  dashboard.meta.season=epoch;
   // Exact server-state reconciliation. Never compare contributions from one
   // Photon marker with a later Overview marker; retain unavailable when only
   // partial pages exist for the matching server state.
-  const {parseMightOverviewResponse, reconcileCategoryAtServerInstant}
+  const {parseMightOverviewResponse,reconcileCategoryAtServerInstant,validImortaisGuild}
     =require("./guildPhotonVerified");
   const rawOverview=await pool.query(
     "SELECT payload->'parameters' AS params, occurred_at "+
     "FROM albion_telemetry_events WHERE type='guild_might_probe' "+
     "AND payload->>'operationName'='GetGuildMightCategoryOverview' "+
     "AND payload->>'direction'='response' "+
-    "AND occurred_at>=now()-interval '2 days' "+
-    "ORDER BY occurred_at DESC LIMIT 500");
+    "AND occurred_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
+    "AND device_id=ANY($3::text[]) "+
+    "ORDER BY occurred_at DESC LIMIT 1500",[epoch.startAt,safeDays,approvedDevices]);
   const overviewByMarker=new Map();
   for(const row of rawOverview.rows){
+    if(!validImortaisGuild(row.params,"GetGuildMightCategoryOverview"))continue;
     const overview=parseMightOverviewResponse(row.params);
     if(overview?.snapshotMarker&&!overviewByMarker.has(overview.snapshotMarker))
       overviewByMarker.set(overview.snapshotMarker,overview);
   }
+  // Overview provides authoritative GUILD totals. Consolidated player
+  // values are independently reported; do not present their difference as
+  // exact instant reconciliation unless all rank slots match one marker.
+  const overviewByCategory=new Map();
+  for(const overview of overviewByMarker.values()){
+    for(const c of overview.categories||[])if(!overviewByCategory.has(c.code))
+      overviewByCategory.set(c.code,{guildMight:c.guildMight,marker:overview.snapshotMarker});
+  }
   for(const category of dashboard.categories||[]){
     const code=category.layout?.code;
+    const official=overviewByCategory.get(code);
+    category.guildMight=official?Number(official.guildMight):null;
+    category.difference=category.guildMight==null?null:
+      Number(category.observedMight||0)-category.guildMight;
     if(!code)continue;
     const relevant=snapshots.filter(x=>x.layout?.code===code&&x.layout?.snapshotMarker);
     const latest=relevant.reduce((p,x)=>!p||
@@ -4586,13 +4602,16 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   });
 
   app.get("/api/telemetry/guild-progress", async (req,res)=>{
-    try{if(!requireMember(req,res))return;res.json({rows:await guildManualProgress.all(pool)});}
+    try{if(!requireMember(req,res))return;const rows=await guildManualProgress.all(pool);res.json({rows:CHALLENGE_UI_ENABLED?rows:rows.filter(r=>r.categoryCode!=="GUILD_CHALLENGE")});}
     catch(e){console.error("guild-progress",e);res.status(500).json({error:"server"});}
   });
   app.post("/api/telemetry/guild-progress", async (req,res)=>{
     const admin=requireAdmin?.(req,res);
     if(!admin){if(!res.headersSent)res.status(403).json({error:"site_admin_only"});return;}
-    try{const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);}
+    try{
+      if(!CHALLENGE_UI_ENABLED && String(req.body?.categoryCode||"").trim().toUpperCase()==="GUILD_CHALLENGE") return res.status(403).json({error:"feature_not_enabled"});
+      const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);
+    }
     catch(e){const bad=/^invalid_/.test(e.message);res.status(bad?400:500).json({error:bad?e.message:"server"});}
   });
 
@@ -4609,6 +4628,7 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
   app.get("/api/telemetry/guild-challenge", async (req, res) => {
     try {
       if (!requireMember || !requireMember(req, res)) return;
+      if(!CHALLENGE_UI_ENABLED)return res.status(404).json({error:"feature_not_enabled"});
       res.json(await guildChallengeStore.getDashboard(pool, { days: req.query.days }));
     } catch(e) {
       console.error("/api/telemetry/guild-challenge:", e);

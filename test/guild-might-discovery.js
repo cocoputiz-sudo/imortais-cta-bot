@@ -106,114 +106,28 @@ assert.strictEqual(stale.pairs[0].requestEventId, null, "request antigo não pod
 console.log("✅ GuildMight discovery: disabled screenshot weights, layout and request correlation OK");
 
 
-const snapshots = buildContributionSnapshots(rows);
-assert.strictEqual(snapshots.length, 1, "uma response de Contribution deve virar um snapshot utilizável");
-assert.strictEqual(snapshots[0].members.length, 2);
-assert.strictEqual(snapshots[0].members[0].player, "ESTHER9950");
-assert.strictEqual(snapshots[0].members[0].might, 1080164);
-assert.strictEqual(snapshots[0].category.name, "Categoria #7");
-assert.strictEqual(snapshots[0].category.mapped, false);
-
-const dash = buildDashboardFromLatestSnapshots(snapshots);
-assert.strictEqual(dash.meta.categoryCount, 1);
-assert.strictEqual(dash.meta.playerCount, 2);
-assert.strictEqual(dash.ranking[0].player, "ESTHER9950");
-assert.strictEqual(dash.ranking[0].might, 1080164);
-
-const mappedRows = [
-  {
-    event_id: "req-map",
-    device_id: "d3",
-    player_name: "BadMack",
-    occurred_at: new Date(base + 1000).toISOString(),
-    payload: {
-      direction: "request",
-      operationName: "GetGuildMightCategoryContribution",
-      parameters: { "0": "Aranhas" }
-    }
-  },
-  {
-    event_id: "res-map",
-    device_id: "d3",
-    player_name: "BadMack",
-    occurred_at: new Date(base + 1200).toISOString(),
-    payload: {
-      direction: "response",
-      operationName: "GetGuildMightCategoryContribution",
-      parameters: { "2": ["BadMack", "RagnaldoKun"], "3": [1000000, 500000] }
-    }
-  }
-];
-const mapped = buildContributionSnapshots(mappedRows);
-assert.strictEqual(mapped[0].category.name, "Aranhas");
-assert.strictEqual(mapped[0].category.mapped, true);
-assert.equal(mapped[0].members[0].estimatedSp,null,"Season Points cannot be inferred from screenshots");
-
-console.log("✅ GuildMight snapshots/dashboard: extração utilizável e categoria mapeada/não mapeada OK");
-
-
-const overviewRows = [
-  {
-    event_id: "req-overview",
-    device_id: "d4",
-    player_name: "BadMack",
-    occurred_at: new Date(base + 2000).toISOString(),
-    payload: {
-      direction: "request",
-      operationName: "GetGuildMightCategoryOverview",
-      parameters: { "0": "PvE (Outlands and Roads)" }
-    }
-  },
-  {
-    event_id: "res-overview",
-    device_id: "d4",
-    player_name: "BadMack",
-    occurred_at: new Date(base + 2250).toISOString(),
-    payload: {
-      direction: "response",
-      operationName: "GetGuildMightCategoryOverview",
-      parameters: {
-        "1": ["ESTHER9950", "GiganteCarrara", "BadMack"],
-        "2": [1086795, 943429, 777777]
-      }
-    }
-  }
-];
-const overviewSnapshots = buildContributionSnapshots(overviewRows);
-assert.strictEqual(overviewSnapshots.length, 1, "Overview também deve materializar quando contém nomes/Might");
-assert.strictEqual(overviewSnapshots[0].category.name, "PvE");
-assert.strictEqual(overviewSnapshots[0].category.mapped, true);
-assert.strictEqual(overviewSnapshots[0].category.source, "payload-alias");
-assert.strictEqual(overviewSnapshots[0].members[0].player, "ESTHER9950");
-assert.strictEqual(overviewSnapshots[0].members[0].might, 1086795);
-
-const smugglersRows = [
-  {
-    event_id: "req-smug",
-    device_id: "d5",
-    player_name: "BadMack",
-    occurred_at: new Date(base + 3000).toISOString(),
-    payload: {
-      direction: "request",
-      operationName: "GetGuildMightCategoryContribution",
-      parameters: { "0": "Smugglers" }
-    }
-  },
-  {
-    event_id: "res-smug",
-    device_id: "d5",
-    player_name: "BadMack",
-    occurred_at: new Date(base + 3200).toISOString(),
-    payload: {
-      direction: "response",
-      operationName: "GetGuildMightCategoryContribution",
-      parameters: { "0": ["BadMack", "RagnaldoKun"], "1": [120000, 90000] }
-    }
-  }
-];
-const smugglersSnapshots = buildContributionSnapshots(smugglersRows);
-assert.strictEqual(smugglersSnapshots[0].category.name, "Contrabandistas");
-assert.strictEqual(smugglersSnapshots[0].category.mapped, true);
+// Old heuristic records without verifiable guild and category MUST NOT enter
+// the official 14-category ranking. Discovery stays available for diagnostics.
+const legacy = buildContributionSnapshots(rows);
+assert.equal(legacy.length,0,"legacy heuristic responses are quarantined");
+const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
+const verifiedRows=[{
+ event_id:"verified-1",device_id:"d3",player_name:"BadMack",
+ occurred_at:new Date(base+1200).toISOString(),
+ payload:{direction:"response",operationName:"GetGuildMightCategoryContribution",
+  parameters:{"0":guild,"1":"PVE","2":"marker","3":1800000,"4":2,
+    "6":["BadMack","RagnaldoKun"],"7":[1000000,800000]}}
+}];
+const verified=buildContributionSnapshots(verifiedRows);
+assert.equal(verified.length,1);
+assert.equal(verified[0].layout.code,"PVE");
+assert.equal(verified[0].category.mapped,true);
+assert.equal(verified[0].members.length,2);
+assert.equal(buildDashboardFromLatestSnapshots(verified).meta.categoryCount,1);
+const foreign=structuredClone(verifiedRows);
+foreign[0].payload.parameters["0"]={kind:"bytes",length:16,base64:Buffer.alloc(16,9).toString("base64")};
+assert.equal(buildContributionSnapshots(foreign).length,0);
+console.log("✅ GuildMight verified Photon only; legacy and other guilds quarantined");
 
 // Exercise Challenge extraction and generated Guild Might page in the CI discovery step.
 require("./guild-challenge");

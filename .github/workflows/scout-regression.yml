@@ -15,6 +15,8 @@ on:
       - "src/guildPhotonVerified.js"
       - "src/guildChallenge.js"
       - "src/guildChallengeStore.js"
+      - "src/guildSeason.js"
+      - "src/guildLegacyRepair.js"
       - "src/guildManualProgress.js"
       - "src/homolog.js"
       - "src/ctatime.js"
@@ -37,6 +39,8 @@ on:
       - "test/guild-might-discovery.js"
       - "test/guild-might-worker.js"
       - "test/guild-challenge.js"
+      - "test/guild-ranking-season.js"
+      - "test/guild-legacy-repair.js"
       - "test/guild-might-page.js"
       - "test/guild-manual-progress.js"
       - "test/guild-photon-capture.js"
@@ -105,6 +109,10 @@ jobs:
         run: node test/ingest-route.js
       - name: Guild Might discovery
         run: node test/guild-might-discovery.js
+      - name: Guild ranking season monotonic and guild ID
+        run: node test/guild-ranking-season.js
+      - name: Legacy guild snapshot repair dry-run
+        run: node test/guild-legacy-repair.js
       - name: Guild Might worker e snapshots em Postgres
         run: node test/guild-might-worker.js
       - name: Guild Might e Challenge - testes especificos do PR 66

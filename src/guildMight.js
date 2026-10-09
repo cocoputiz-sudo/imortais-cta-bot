@@ -1,5 +1,5 @@
 "use strict";
-const {KNOWN_CATEGORY_LABELS,parseMightContributionResponse,parseMightOverviewResponse,assemblePages}=require("./guildPhotonVerified");
+const {KNOWN_CATEGORY_LABELS,parseMightContributionResponse,parseMightOverviewResponse,assemblePages,validImortaisGuild}=require("./guildPhotonVerified");
 
 const CATEGORY_ALIASES = Object.freeze({
   "pveoutlandsandroads": "PvE",
@@ -308,6 +308,7 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
 
   for (const pair of correlation.pairs) {
     if (!/^GetGuildMightCategory(?:Contribution|Overview)$/.test(String(pair.operationName || ""))) continue;
+    if(!validImortaisGuild(pair.responseParameters,pair.operationName))continue;
     if(pair.operationName==="GetGuildMightCategoryOverview" &&
       parseMightOverviewResponse(pair.responseParameters)) {
       // Values here are GUILD category totals, never player names.
@@ -380,85 +381,61 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
   return snapshots.sort((a,b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0));
 }
 
-function buildDashboardFromLatestSnapshots(snapshots) {
+function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
   const byCategory=new Map();
   for(const snap of snapshots||[]){
-    const key=String(snap?.category?.key||"");
-    if(!key)continue;
-    if(!byCategory.has(key))byCategory.set(key,[]);
-    byCategory.get(key).push(snap);
+    const code=snap?.layout?.code;
+    // Old heuristic records are useful as diagnostics, not authenticated
+    // leaderboard rows. Reprocessing is a separate, auditable operation.
+    if(!code||!KNOWN_CATEGORY_LABELS[code]||snap.category?.mapped!==true)continue;
+    if(!byCategory.has(code))byCategory.set(code,[]);
+    byCategory.get(code).push(snap);
   }
-
-  // Pages from the same category are combined by rank. The very last 28
-  // members viewed in the game must never replace the complete leaderboard.
   const categories=[];
-  for(const list of byCategory.values()){
+  for(const [code,list] of byCategory){
     list.sort((a,b)=>new Date(a.capturedAt||0)-new Date(b.capturedAt||0));
     const latest=list[list.length-1];
-    const valid=list.filter(s=>
-      Number.isInteger(Number(s.layout?.pageOffset)) &&
-      Number.isInteger(Number(s.layout?.totalMembers)) &&
-      Number(s.layout.totalMembers)>=0);
-    if(!valid.length){
-      categories.push(latest); // backward-compatible legacy observations
-      continue;
-    }
-    const pages=valid.map(s=>({
-      ...s,
-      pageOffset:Number(s.layout.pageOffset),
-      totalMembers:Number(s.layout.totalMembers),
-      categoryCode:s.layout.code||null,
-      members:s.members||[]
-    }));
-    const merged=assemblePages(pages);
-    categories.push({
-      ...latest,
-      category:{...latest.category,
-        nameTentative:false},
+    const pages=list.filter(s=>Number.isInteger(Number(s.layout?.pageOffset))&&
+      Number.isInteger(Number(s.layout?.totalMembers))&&Number(s.layout.totalMembers)>0)
+      .map(s=>({...s,pageOffset:Number(s.layout.pageOffset),
+        totalMembers:Number(s.layout.totalMembers),
+        categoryCode:code,snapshotMarker:s.layout.snapshotMarker??null,
+        members:s.members||[]}));
+    if(!pages.length)continue;
+    const merged=assemblePages(pages,{seasonStartAt});
+    categories.push({...latest,
+      category:{key:"name:"+normalizeCategoryLabel(KNOWN_CATEGORY_LABELS[code]),
+        name:KNOWN_CATEGORY_LABELS[code],mapped:true,nameTentative:false},
       capturedAt:merged.capturedAt||latest.capturedAt,
       members:merged.members.map(m=>({...m,estimatedSp:null})),
-      totalMembers:merged.totalMembers,
-      observedMembers:merged.observedMembers,
+      totalMembers:merged.totalMembers,observedMembers:merged.observedMembers,
       historicalObservedMembers:merged.historicalObservedMembers,
       historicalMembers:merged.historicalMembers,
-      recentWindowStart:merged.recentWindowStart,
-      complete:merged.complete,
-      missingRanges:merged.missingRanges,
-      pages:merged.pages,
-      guildMight:Number(latest.layout?.guildMight)||null,
-      level:null,seasonPoints:null,threshold:null
-    });
+      oldestMemberAt:merged.oldestMemberAt,
+      oldestMemberAgeMs:merged.oldestMemberAgeMs,
+      lastCompleteAt:merged.lastCompleteAt,coverage:merged.coverage,
+      recentWindowStart:seasonStartAt,
+      complete:merged.complete,missingRanges:merged.missingRanges,
+      pages:merged.pages,guildMight:null,
+      observedMight:merged.observedMight,
+      level:null,seasonPoints:null,threshold:null});
   }
-  categories.sort((a,b)=>
-    Number(b.category?.mapped)-Number(a.category?.mapped) ||
-    new Date(b.capturedAt||0)-new Date(a.capturedAt||0));
-
-  const ranking = new Map();
-  for (const category of categories) {
-    for (const member of category.members || []) {
-      const key = String(member.player || "").trim().toLowerCase();
-      if (!key) continue;
-      if (!ranking.has(key)) {
-        ranking.set(key, { player: member.player, might: 0, estimatedSp: null, mappedCategories: 0, categories: 0 });
-      }
-      const row = ranking.get(key);
-      row.might += Number(member.might) || 0;
+  categories.sort((a,b)=>a.category.name.localeCompare(b.category.name,"pt-BR"));
+  const ranking=new Map();
+  for(const category of categories){
+    for(const member of category.members||[]){
+      const key=String(member.player||"").trim().toLowerCase();
+      if(!key)continue;
+      if(!ranking.has(key))ranking.set(key,{player:member.player,might:0,estimatedSp:null,categories:0});
+      const row=ranking.get(key);
+      row.might+=Number(member.might)||0;
       row.categories++;
-      // Season Points are not present in 449/450. Never approximate using screenshots.
     }
   }
-
-  return {
-    categories,
-    ranking: [...ranking.values()]
-      .sort((a,b) => b.might - a.might || a.player.localeCompare(b.player, "pt-BR")),
-    meta: {
-      categoryCount: categories.length,
-      mappedCategoryCount: categories.filter(x => x.category?.mapped).length,
-      playerCount: ranking.size,
-      newestAt: categories.reduce((latest, x) =>
-        !latest || new Date(x.capturedAt || 0) > new Date(latest) ? x.capturedAt : latest, null),
-      referenceDate: null
-    }
-  };
+  return {categories,ranking:[...ranking.values()]
+    .sort((a,b)=>b.might-a.might||a.player.localeCompare(b.player,"pt-BR")),
+    meta:{categoryCount:categories.length,mappedCategoryCount:categories.length,
+      playerCount:ranking.size,seasonStartAt,
+      newestAt:categories.reduce((last,c)=>!last||new Date(c.capturedAt)>new Date(last)?c.capturedAt:last,null),
+      referenceDate:null}};
 }

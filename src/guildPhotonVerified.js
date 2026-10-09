@@ -27,6 +27,27 @@ const KNOWN_CATEGORY_LABELS = Object.freeze({
 const USER_CONFIRMED_CODES = new Set(Object.keys(KNOWN_CATEGORY_LABELS));
 const TENTATIVE_CODES = new Set();
 
+// Identifier captured from verified IMORTAIS Photon probes, not a Discord
+// role or the observer's display name. Match in constant time after decoding.
+const IMORTAIS_GUILD_ID_BASE64="ckzUYJXLFUmTBs0y4mZ+SQ==";
+function validImortaisGuild(p,operation){
+  if(!p||typeof p!=="object")return false;
+  // GvgSeasonContributionByActivity response uses param 1 for guild identity;
+  // Might overview/contribution and Challenge use param 0.
+  const field=operation==="GetGvgSeasonContributionByActivity"?"1":"0";
+  const raw=p[field];
+  if(!raw||raw.kind!=="bytes"||raw.length!==16)return false;
+  const b64=typeof raw.base64==="string"?raw.base64:raw.previewBase64;
+  if(typeof b64!=="string"||b64.length!==24||!/^[A-Za-z0-9+/]{22}==$/.test(b64))return false;
+  const buf=Buffer.from(b64,"base64");
+  return buf.length===16&&buf.toString("base64")===b64&&
+    require("node:crypto").timingSafeEqual(buf,Buffer.from(IMORTAIS_GUILD_ID_BASE64,"base64"));
+}
+function parseGuildSeasonResponse(p){
+  return validImortaisGuild(p,"GetGvgSeasonContributionByActivity")&&
+    nonnegativeInteger(p["0"])&&p["0"]>0?p["0"]:null;
+}
+
 function nonnegativeInteger(v) { return typeof v === "number" && Number.isSafeInteger(v) && v >= 0; }
 function playerName(v) { return typeof v === "string" && /^[\p{L}\p{N}_-]{2,32}$/u.test(v); }
 function numArray(v) { return Array.isArray(v) && v.every(nonnegativeInteger); }
@@ -35,12 +56,19 @@ function namesArray(v) { return Array.isArray(v) && v.every(playerName); }
 function parseChallengeResponse(p) {
   if (!p || !namesArray(p["5"]) || !nonnegativeInteger(p["3"])) return null;
   let points=p["6"];
-  // Observed 2026-10-09 final page: five zero-valued bytes instead of number array.
-  if (points?.kind==="bytes" && points.length===p["5"].length &&
-    typeof points.base64==="string" && /^[A-Za-z0-9+/=]+$/.test(points.base64)) {
-    const octets=Buffer.from(points.base64,"base64");
-    if(octets.length===points.length && octets.every(x=>x===0))
-      points=Array(octets.length).fill(0);
+  // Photon may send small score pages as byte[], including non-zero values.
+  // The normal Combat Client sends previewBase64, while earlier dumps use
+  // base64. Only decode complete byte arrays, never a truncated preview.
+  if(points?.kind==="bytes"){
+    const encoded=typeof points.base64==="string"?points.base64:points.previewBase64;
+    const count=Number(points.length);
+    if(Number.isSafeInteger(count) && count>=0 && count===p["5"].length &&
+      typeof encoded==="string" && /^[A-Za-z0-9+/]*={0,2}$/.test(encoded) &&
+      encoded.length%4===0){
+      const octets=Buffer.from(encoded,"base64");
+      if(octets.length===count && octets.toString("base64")===encoded)
+        points=Array.from(octets);
+    }
   }
   if(!numArray(points) || points.length!==p["5"].length) return null;
   const pageOffset = p["4"] == null ? 0 : p["4"];
@@ -102,67 +130,140 @@ function parseMightOverviewResponse(p) {
 }
 
 /** Reconstruct rank slots, never treat a single paginated response as a full leaderboard. */
-function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
-  const entries=(pages||[])
-    .filter(p=>p && nonnegativeInteger(p.pageOffset) &&
+function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
+  const started=seasonStartAt==null?Number.NEGATIVE_INFINITY:Date.parse(seasonStartAt);
+  const entries=(pages||[]).filter(p=>p && nonnegativeInteger(p.pageOffset) &&
       nonnegativeInteger(p.totalMembers) && Array.isArray(p.members))
     .map(p=>({...p,ms:Date.parse(p.capturedAt||p.captured_at||0)}))
-    .filter(p=>Number.isFinite(p.ms))
+    .filter(p=>Number.isFinite(p.ms) && p.ms>=started)
     .sort((a,b)=>a.ms-b.ms);
-  if(!entries.length)return {members:[],currentMembers:[],historicalMembers:[],totalMembers:null,
-    observedMembers:0,historicalObservedMembers:0,complete:false,missingCount:0,pages:0};
+  const empty={members:[],currentMembers:[],historicalMembers:[],totalMembers:null,
+    observedMembers:0,historicalObservedMembers:0,complete:false,missingCount:0,
+    pages:0,historicalPages:0,lastCompleteAt:null,oldestMemberAt:null};
+  if(!entries.length)return empty;
   const newest=entries[entries.length-1];
-  const recent=entries.filter(p=>p.ms>=newest.ms-maxWindowMs && p.totalMembers===newest.totalMembers &&
-    (!newest.categoryCode||p.categoryCode===newest.categoryCode) &&
-    (!newest.snapshotMarker||p.snapshotMarker===newest.snapshotMarker));
-  // Full file history and recent observations must be kept separate. A historical
-  // value is NEVER copied into the live/current leaderboard.
-  function latestByPlayer(collection){
-    const chosen=new Map();
-    for(const page of collection){
-      for(const member of page.members){
-        const name=String(member.player||"").trim();
-        if(!playerName(name))continue;
-        const key=name.toLocaleLowerCase("en");
-        const old=chosen.get(key);
-        if(!old||page.ms>=old.ms){
-          chosen.set(key,{...member,player:name,
-            capturedAt:page.capturedAt,ms:page.ms,
-            stale:page.ms<newest.ms-maxWindowMs});
+  const now=asOf==null?Date.now():Date.parse(asOf);
+  const validNow=Number.isFinite(now)?now:Date.now();
+  const normalize=name=>String(name||"").trim().toLocaleLowerCase("en");
+  // A complete capture must cover ALL positions in one exact server marker.
+  // If Photon gives no marker, only a full single page can be trusted.
+  const groups=new Map();
+  for(const p of entries){
+    const marker=p.snapshotMarker==null?null:String(p.snapshotMarker);
+    const groupKey=marker==null
+      ? "unmarked:"+String(p.responseEventId||p.ms)+":"+p.pageOffset
+      : [p.categoryCode||"",marker,p.totalMembers].join("\u001f");
+    if(!groups.has(groupKey))groups.set(groupKey,[]);
+    groups.get(groupKey).push(p);
+  }
+  const completed=[];
+  for(const group of groups.values()){
+    const size=group[0].totalMembers;
+    if(group.some(p=>p.totalMembers!==size))continue;
+    const ranks=new Map();
+    let conflict=false;
+    for(const p of group){
+      for(let i=0;i<p.members.length;i++){
+        const name=normalize(p.members[i]?.player);
+        const rank=p.pageOffset+i;
+        if(!playerName(String(p.members[i]?.player||"")) || rank<0 || rank>=size){conflict=true;break;}
+        const old=ranks.get(rank);
+        if(old && normalize(old.member.player)!==name)conflict=true;
+        if(!old||p.ms>old.ms)ranks.set(rank,{member:p.members[i],ms:p.ms,capturedAt:p.capturedAt});
+      }
+      if(conflict)break;
+    }
+    const keys=new Set([...ranks.values()].map(x=>normalize(x.member.player)));
+    if(!conflict && ranks.size===size && keys.size===size && size>0){
+      const at=Math.max(...group.map(p=>p.ms));
+      completed.push({at,members:[...ranks.values()],marker:group[0].snapshotMarker??null,totalMembers:size});
+    }
+  }
+  completed.sort((a,b)=>a.at-b.at);
+  const latestComplete=completed[completed.length-1]||null;
+  const start=latestComplete?.at??Number.NEGATIVE_INFINITY;
+  const current=new Map(),deleted=new Map();
+  if(latestComplete){
+    for(const {member,ms,capturedAt} of latestComplete.members){
+      const key=normalize(member.player);
+      current.set(key,{...member,capturedAt,ms});
+    }
+    // Older valid increases are floors only for members still present in
+    // the complete capture. Their older timestamps are not used as 'fresh'.
+    for(const p of entries){
+      if(p.ms>start)break;
+      for(const m of p.members){
+        const key=normalize(m.player),existing=current.get(key);
+        if(existing && (m.might??m.points??0)>(existing.might??existing.points??0)){
+          const value=m.might??m.points;
+          if(m.might!=null)existing.might=value; else existing.points=value;
         }
       }
     }
-    return chosen;
+    const departed=new Map();
+    for(const p of entries){
+      if(p.ms>=start)break;
+      for(const m of p.members)if(!current.has(normalize(m.player))) departed.set(normalize(m.player),{
+        ...m,player:m.player,capturedAt:p.capturedAt,ms:p.ms,stale:true,removedByComplete:true});
+    }
+    for(const [k,v] of departed)deleted.set(k,v);
   }
-  const current=latestByPlayer(recent);
-  const historical=latestByPlayer(entries);
-  function sortRanks(items){
-    return [...items].sort((a,b)=>
-      (b.points??b.might??0)-(a.points??a.might??0) ||
-      a.player.localeCompare(b.player,"pt-BR"))
-      .map((m,i)=>({
-        player:m.player,rank:i+1,capturedAt:m.capturedAt,
-        stale:m.stale,
-        ...(m.points!=null?{points:m.points}:{}),
-        ...(m.might!=null?{might:m.might}:{})
-      }));
+  for(const p of entries){
+    if(p.ms<=start)continue;
+    for(const m of p.members){
+      const name=String(m.player||"").trim(),key=normalize(name);
+      if(!playerName(name))continue;
+      const prev=current.get(key);
+      // Might and Challenge are monotonic within the same season. A lower
+      // reading never overwrites a trusted higher prior observation.
+      const oldValue=prev?.might??prev?.points??-1;
+      const value=m.might??m.points??0;
+      const row={...(prev||{}),...m,player:name,capturedAt:p.capturedAt,ms:p.ms};
+      if(value<oldValue){
+        if(prev.might!=null)row.might=prev.might;
+        else row.points=prev.points;
+        row.lowerReadingIgnored=true;
+      }
+      current.set(key,row);
+      deleted.delete(key);
+    }
   }
+  const sortRanks=items=>[...items].sort((a,b)=>
+    (b.points??b.might??0)-(a.points??a.might??0) ||
+    a.player.localeCompare(b.player,"pt-BR"))
+    .map((m,i)=>({
+      player:m.player,rank:i+1,capturedAt:m.capturedAt,
+      stale:validNow-m.ms>24*60*60*1000,
+      ...(m.lowerReadingIgnored?{lowerReadingIgnored:true}:{}),
+      ...(m.removedByComplete?{removedByComplete:true}:{}),
+      ...(m.points!=null?{points:m.points}:{}),
+      ...(m.might!=null?{might:m.might}:{})
+    }));
   const members=sortRanks(current.values());
-  const historicalMembers=sortRanks([...historical.entries()]
-    .filter(([key])=>!current.has(key)).map(([,member])=>({...member,stale:true})));
+  const historicalMembers=sortRanks(deleted.values());
+  const newestMarker=String(newest.snapshotMarker??"");
+  const latestIsComplete=completed.some(c=>c.at===newest.ms &&
+    String(c.marker??"")===newestMarker);
+  const times=[...current.values()].map(x=>x.ms);
   return {
     members,currentMembers:members,historicalMembers,
-    totalMembers:newest.totalMembers,
-    observedMembers:members.length,
-    historicalObservedMembers:historical.size,
-    complete:members.length===newest.totalMembers,
+    totalMembers:newest.totalMembers,observedMembers:members.length,
+    historicalObservedMembers:current.size+deleted.size,
+    complete:latestIsComplete,
+    lastCompleteAt:latestComplete?new Date(latestComplete.at).toISOString():null,
+    oldestMemberAt:times.length?new Date(Math.min(...times)).toISOString():null,
+    oldestMemberAgeMs:times.length?Math.max(0,validNow-Math.min(...times)):null,
     missingCount:Math.max(0,newest.totalMembers-members.length),
-    pages:recent.length,historicalPages:entries.length,
+    coverage:members.length+"/"+newest.totalMembers,
+    pages:entries.filter(p=>String(p.snapshotMarker??"")===newestMarker).length,
+    historicalPages:entries.length,
     capturedAt:newest.capturedAt,
-    recentWindowStart:new Date(newest.ms-maxWindowMs).toISOString(),
+    recentWindowStart:seasonStartAt,
     categoryCode:newest.categoryCode||null,
     snapshotMarker:newest.snapshotMarker||null,
     guildTotalPoints:newest.guildTotalPoints??null,
+    observedPoints:members.reduce((total,m)=>total+(m.points??0),0),
+    observedMight:members.reduce((total,m)=>total+(m.might??0),0),
     ranksRecalculated:true
   };
 }
@@ -204,5 +305,5 @@ function reconcileCategoryAtServerInstant(overview, contributionPages, categoryC
    difference:sum-category.guildMight};
 }
 
-module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,parseChallengeResponse,
+module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,IMORTAIS_GUILD_ID_BASE64,validImortaisGuild,parseGuildSeasonResponse,parseChallengeResponse,
   parseMightContributionResponse,parseMightOverviewResponse,assemblePages,reconcileCategoryAtServerInstant};
