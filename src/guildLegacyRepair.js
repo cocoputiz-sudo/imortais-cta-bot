@@ -64,8 +64,8 @@ async function applyLegacyRepair(pool,plan,{allowApply=false}={}){
       await client.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1",[item.snapshotId]);
       for(const member of item.members){
         await client.query("INSERT INTO guild_might_snapshot_members "+
-          "(snapshot_id,player_key,player_name,might,estimated_sp) VALUES($1,$2,$3,$4,NULL)",
-          [item.snapshotId,String(member.player).toLowerCase(),member.player,member.might]);
+          "(snapshot_id,player_key,player_name,might,estimated_sp,member_rank) VALUES($1,$2,$3,$4,NULL,$5)",
+          [item.snapshotId,String(member.player).toLowerCase(),member.player,member.might,Number.isSafeInteger(member.rank)?member.rank:null]);
       }
       await client.query("COMMIT");
       repaired++;
