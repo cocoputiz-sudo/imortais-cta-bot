@@ -3907,12 +3907,16 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     "s.category_key,s.category_name,s.category_mapped,s.confidence,s.captured_at, "+
     "s.request_parameters,s.layout,s.reference_data "+
     "FROM guild_might_snapshots s "+
+    "JOIN albion_telemetry_events e ON e.event_id=s.response_event_id "+
     "WHERE s.members_complete=true AND s.category_mapped=true "+
+    "AND e.payload#>>'{parameters,0,kind}'='bytes' "+
+    "AND e.payload#>>'{parameters,0,length}'='16' "+
+    "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$4 "+
     "AND COALESCE(s.layout->>'code','') <> '' "+
     "AND s.device_id=ANY($3::text[]) "+
     "AND s.captured_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
     "ORDER BY s.captured_at ASC,s.id ASC",
-    [epoch.startAt,safeDays,approvedDevices]);
+    [epoch.startAt,safeDays,approvedDevices,require("./guildPhotonVerified").IMORTAIS_GUILD_ID_BASE64]);
 
   const ids = snapshotRows.map(x => Number(x.id)).filter(Number.isFinite);
   let members = [];
