@@ -27,6 +27,25 @@ app.use((req,res,next)=>{
   return readAuth(req,res,next);
 });
 // Initialized inside boot after the staging schema is ready.
+app.post("/api/homolog/issue-client-token", async(req,res)=>{
+ try {
+   // This route is behind the homolog-only HTTP Basic authentication.
+   // Bound to the test machine, never to the master production credential.
+   const token="imt_"+crypto.randomBytes(32).toString("base64url");
+   const hash=crypto.createHash("sha256").update(token).digest("hex");
+   const client=await db.pool.connect();
+   try {
+     await client.query("BEGIN");
+     await client.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() "+
+       "WHERE label='WORKSPACEIGOR-HOMOLOG' AND revoked_at IS NULL");
+     await client.query("INSERT INTO albion_telemetry_agent_tokens "+
+       "(token_hash,label,device_id,player_name) VALUES($1,'WORKSPACEIGOR-HOMOLOG','WORKSPACEIGOR','BadMack')",[hash]);
+     await client.query("COMMIT");
+   } catch(e) {await client.query("ROLLBACK");throw e} finally {client.release()}
+   res.set("Cache-Control","no-store").json({ok:true,token,deviceId:"WORKSPACEIGOR",
+     note:"Chave restrita à homologação. Ao gerar outra, a anterior é revogada."});
+ }catch(e){console.error("issue-client-token",e.message);res.status(500).json({error:"server"})}
+});
 app.post("/api/homolog/materialize",async(req,res)=>{
  try{const r=await telemetry.materializeGuildMightRecent({minutes:5000,limit:10000});res.json(r)}
  catch(e){console.error("materialize",e.message);res.status(500).json({error:"materialize"})}
@@ -44,11 +63,21 @@ button.selected{border-color:#e1ae62;color:#e1ae62}
 table{border-collapse:collapse;width:100%;margin-top:12px}th,td{border-bottom:1px solid #334354;text-align:left;padding:8px}
 .grid{display:flex;gap:18px;flex-wrap:wrap}.panel{background:#192534;border:1px solid #334353;padding:14px;border-radius:10px;margin:12px 0}
 .stale{color:#eab16a}input{background:#1b2b3e;color:white;padding:10px;border:1px solid #536070}
-</style></head><body><h1>IMORTAIS · Homologação Guild Might</h1><p class="muted">Ambiente separado de produção • snapshots Photon de teste • nenhuma informação é enviada ao Discord</p>
+</style></head><body><h1>IMORTAIS · Homologação Guild Might</h1><div class="panel"><b>Fase B — chave de envio exclusivo à homologação</b><p class="muted">Somente dispositivo WORKSPACEIGOR / jogador BadMack. Ao gerar uma nova chave, a anterior deixa de funcionar.</p>
+<button type="button" onclick="issueToken()">Gerar chave temporária WORKSPACEIGOR</button>
+<input id="tokenOutput" type="password" autocomplete="off" readonly placeholder="Chave aparece apenas uma vez aqui" size="48">
+<button type="button" onclick="copyToken()">Copiar chave</button></div><p class="muted">Ambiente separado de produção • snapshots Photon de teste • nenhuma informação é enviada ao Discord</p>
 <p id="status">Carregando...</p><div class="grid"><div class="panel" id="overall"></div><div class="panel" id="challenge"></div></div>
 <h2>Categorias de Might (14)</h2><div id="cards"></div><h2 id="heading">Selecione uma categoria</h2>
 <input id="filter" placeholder="Buscar jogador" aria-label="Buscar jogador" oninput="renderRank()">
 <div id="rank"></div><script>
+async function issueToken(){
+ if(!confirm("Revogar a chave anterior e gerar uma nova, exclusivamente para WORKSPACEIGOR?"))return;
+ const r=await fetch("/api/homolog/issue-client-token",{method:"POST"});
+ if(!r.ok){alert("Erro de autorização ou servidor: "+r.status);return}
+ const j=await r.json();document.getElementById("tokenOutput").value=j.token;
+}
+function copyToken(){const input=document.getElementById("tokenOutput");if(!input.value){alert("Gere a chave primeiro");return};navigator.clipboard.writeText(input.value).then(()=>alert("Chave copiada")).catch(()=>{input.type="text";input.select();alert("Copie a chave selecionada")})}
 let d={categories:[]},ch={},pick=null;
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmt=x=>Number(x||0).toLocaleString("pt-BR");
