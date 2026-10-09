@@ -1,4 +1,5 @@
 "use strict";
+const {KNOWN_CATEGORY_LABELS,parseMightContributionResponse,parseMightOverviewResponse,assemblePages}=require("./guildPhotonVerified");
 
 const CATEGORY_ALIASES = Object.freeze({
   "pveoutlandsandroads": "PvE",
@@ -164,7 +165,8 @@ function correlateProbeRows(rows, { windowMs = 10000 } = {}) {
     const deviceId = String(row.device_id || row.deviceId || "");
     const at = new Date(row.occurred_at || row.occurredAt || 0);
     const atMs = at.getTime();
-    const key = deviceId + "\u001f" + operationName;
+    const reqSerial = payload.parameters?.["255"];
+    const key = deviceId + "\u001f" + operationName + "\u001f" + (reqSerial == null ? "" : String(reqSerial));
 
     if (direction === "request") {
       pending.set(key, row);
@@ -248,6 +250,15 @@ function getByPath(root, path) {
 }
 
 function inferCategoryIdentity(pair) {
+  // Actual 449 response includes the stable category code in parameter "1".
+  const rawCode=pair?.responseParameters?.["1"];
+  if(pair?.operationName==="GetGuildMightCategoryContribution" &&
+    typeof rawCode==="string" && KNOWN_CATEGORY_LABELS[rawCode]){
+    const name=KNOWN_CATEGORY_LABELS[rawCode];
+    return {key:"name:"+normalizeCategoryLabel(name),name,mapped:true,
+      source:"photon-category-code",rawLabel:rawCode,
+      sourcePath:"1",nameTentative:["DRAGON_AREA","GVGSEASON","HELLDUNGEON"].includes(rawCode)};
+  }
   const sources = [
     ...(flattenPhoton(pair?.requestParameters || {}).scalars || []),
     ...(flattenPhoton(pair?.responseParameters || {}).scalars || [])
@@ -306,6 +317,29 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
 
   for (const pair of correlation.pairs) {
     if (!/^GetGuildMightCategory(?:Contribution|Overview)$/.test(String(pair.operationName || ""))) continue;
+    if(pair.operationName==="GetGuildMightCategoryOverview" &&
+      parseMightOverviewResponse(pair.responseParameters)) {
+      // Values here are GUILD category totals, never player names.
+      continue;
+    }
+    if(pair.operationName==="GetGuildMightCategoryContribution"){
+      const decoded=parseMightContributionResponse(pair.responseParameters);
+      if(decoded){
+        const category=inferCategoryIdentity(pair);
+        snapshots.push({
+          responseEventId:pair.responseEventId,requestEventId:pair.requestEventId,
+          deviceId:pair.deviceId,observer:pair.observer,
+          operationName:pair.operationName,category,
+          capturedAt:pair.responseAt,confidence:1,
+          requestParameters:pair.requestParameters||{},
+          layout:{namesPath:"6",mightPath:"7",pageOffset:decoded.pageOffset,
+            totalMembers:decoded.totalMembers,guildMight:decoded.guildMight,code:decoded.categoryCode},
+          reference:null,
+          members:decoded.members.map(m=>({...m,estimatedSp:null}))
+        });
+        continue;
+      }
+    }
     const candidate = (pair.discovery?.candidates || [])[0];
     if (!candidate || Number(candidate.confidence) < minConfidence) continue;
 
@@ -323,8 +357,9 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
     if (!members.length) continue;
 
     const category = inferCategoryIdentity(pair);
-    const reference = category.mapped ? REFERENCE_CATEGORIES_2026_10_07[category.name] || null : null;
-    const perMight = reference ? spPerMight(reference) : 0;
+    // Legacy non-standard payloads are kept for diagnostics only.
+    // No level/SP calculation is valid without explicit Photon fields.
+    const reference = null;
 
     snapshots.push({
       responseEventId: pair.responseEventId,
@@ -341,11 +376,11 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
         mightPath: candidate.mightPath,
         count: candidate.count
       },
-      reference: reference ? { ...reference, referenceDate: "2026-10-07" } : null,
+      reference: null,
       members: members
         .map(m => ({
           ...m,
-          estimatedSp: reference ? m.might * perMight : null
+          estimatedSp: null
         }))
         .sort((a,b) => b.might - a.might || a.player.localeCompare(b.player, "pt-BR"))
     });
@@ -399,7 +434,7 @@ function buildDashboardFromLatestSnapshots(snapshots) {
       playerCount: ranking.size,
       newestAt: categories.reduce((latest, x) =>
         !latest || new Date(x.capturedAt || 0) > new Date(latest) ? x.capturedAt : latest, null),
-      referenceDate: "2026-10-07"
+      referenceDate: null
     }
   };
 }
