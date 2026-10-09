@@ -58,7 +58,7 @@ async function main(){
  const now=Date.now();
  const dashboard=await telemetry.getGuildMightDashboard({days:1});
  assert(Date.now()-now<4000,"painel não pode aguardar backfill");
- assert.equal(dashboard.meta.rawProbes3d,2);
+ assert.equal(dashboard.meta.rawProbes3d,4,"raw events include repeat observations; dedup only affects materialized snapshots");
  assert.equal(dashboard.meta.categoryCount,1);
  assert.equal(dashboard.meta.playerCount,3);
  assert.equal(dashboard.ranking[0].player,"ESTHER9950");
