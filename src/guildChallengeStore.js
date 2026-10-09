@@ -42,7 +42,7 @@ async function materialize(pool,rows){
     }
     if(!memberMap.size)continue;
     const contentHash=crypto.createHash("sha256").update(JSON.stringify([
-      snap.pageOffset,snap.totalMembers,snap.members.map(m=>[m.player.toLowerCase(),m.points])
+      snap.snapshotMarker,snap.guildTotalPoints,snap.pageOffset,snap.totalMembers,snap.members.map(m=>[m.player.toLowerCase(),m.points])
     ])).digest("hex");
     const capturedDay=new Date(snap.capturedAt).toISOString().slice(0,10);
     const client=await pool.connect();
