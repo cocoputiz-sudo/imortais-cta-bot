@@ -104,6 +104,16 @@ assert.equal(finalPage.members.length,5);
 assert(finalPage.members.every(m=>m.points===0));
 assert.equal(finalPage.members[0].rank,479);
 
+const realFinalFromDump=parseChallengeResponse({
+  "0":{kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="},
+  "1":"639271777747774964","2":199643226,"3":481,"4":477,
+  "5":["brayan7893","facjj","GivisTabua","Aa4r0n"],
+  "6":{kind:"bytes",length:4,base64:"KgAAAA=="}
+});
+assert.deepEqual(realFinalFromDump.members.map(x=>x.points),[42,0,0,0]);
+assert.deepEqual(realFinalFromDump.members.map(x=>x.rank),[478,479,480,481]);
+
+
 // Historical-only members must not contaminate the recent ranking.
 const oldAndNew=assemblePages([
  {totalMembers:3,pageOffset:0,capturedAt:"2026-10-08T19:00:00Z",
