@@ -105,9 +105,9 @@ async function getDashboard(pool,{days=90}={}){
     const selected=await pool.query(
       "SELECT id,response_event_id,page_offset,total_members,captured_at,observer "+
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members=$1 "+
-      "AND captured_at BETWEEN ($2::timestamptz - interval '2 hours') AND $2::timestamptz "+
-      "ORDER BY captured_at ASC,id ASC",
-      [top.total_members,top.captured_at]
+      "AND captured_at BETWEEN GREATEST(($2::timestamptz - interval '24 hours'),now()-($3::text || ' days')::interval) AND $2::timestamptz "+
+      "ORDER BY captured_at DESC,id DESC LIMIT 2500",
+      [top.total_members,top.captured_at,safeDays]
     );
     const ids=selected.rows.map(x=>x.id);
     let members=[];
@@ -126,7 +126,7 @@ async function getDashboard(pool,{days=90}={}){
     }
     const pages=selected.rows.map(s=>({
       pageOffset:s.page_offset,totalMembers:Number(s.total_members),
-      capturedAt:s.captured_at,members:byId.get(String(s.id))||[]
+      capturedAt:s.captured_at,responseEventId:s.response_event_id,members:byId.get(String(s.id))||[]
     }));
     combined=assemblePages(pages);
   }
@@ -136,6 +136,9 @@ async function getDashboard(pool,{days=90}={}){
     confidence:top?1:null,
     members:combined.members,totalPoints:combined.members.reduce((a,m)=>a+m.points,0),
     complete:combined.complete,expectedMembers:combined.totalMembers,
+    historicalObservedMembers:combined.historicalObservedMembers||0,
+    historicalMembers:combined.historicalMembers||[],
+    recentWindowStart:combined.recentWindowStart||null,
     observedMembers:combined.observedMembers,missingRanges:combined.missingRanges,
     meta:{
       days:safeDays,storedSnapshots:Number(stats.rows[0]?.n)||0,
@@ -143,7 +146,7 @@ async function getDashboard(pool,{days=90}={}){
       rawProbes3d:Number(probes.rows[0]?.total)||0,
       rawResponses3d:Number(probes.rows[0]?.responses)||0,
       rawNewestAt:probes.rows[0]?.newest||null,
-      pageCount:combined.pages,
+      pageCount:combined.pages,historicalPageCount:combined.historicalPages,
       level:null,seasonPoints:null,
       note:"Layout validado com dumps reais. Ranking paginado; posições ausentes continuam ausentes, nunca zero. Nível Guild Challenge e Season Points não estão nesses pacotes."
     }
