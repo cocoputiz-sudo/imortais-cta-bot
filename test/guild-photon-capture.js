@@ -117,7 +117,7 @@ assert.equal(newerRoster.totalMembers,2);
 assert.equal(newerRoster.guildTotalPoints,800);
 assert.equal(newerRoster.historicalMembers.length,1);
 assert.equal(newerRoster.historicalMembers[0].player,"Departed");
-const secondDumpExact=parseChallengeResponse({"1":639271263141777982,"2":196981040,
+const secondDumpExact=parseChallengeResponse({"1":"639271263141777982","2":196981040,
  "3":481,"4":86,"5":["Example"],"6":[100]});
 assert.equal(secondDumpExact.guildTotalPoints,196981040);
 assert.equal(secondDumpExact.snapshotMarker,"639271263141777982");
@@ -127,14 +127,14 @@ assert.equal(secondDumpExact.snapshotMarker,"639271263141777982");
 // never compare the old player sum to the new marker's total.
 const {reconcileCategoryAtServerInstant}=require("../src/guildPhotonVerified");
 const gaOverview=parseMightOverviewResponse({
- "1":639271178496263415,"2":["GATHERING"],"3":[21934324446]});
+ "1":"639271178496263415","2":["GATHERING"],"3":[21934324446]});
 const gbOverview=parseMightOverviewResponse({
- "1":639271178598269601,"2":["GATHERING"],"3":[21934368094]});
+ "1":"639271178598269601","2":["GATHERING"],"3":[21934368094]});
 const ga=parseMightContributionResponse({
- "1":"GATHERING","2":639271178496263415,"3":21934324446,
+ "1":"GATHERING","2":"639271178496263415","3":21934324446,
  "4":2,"6":["Alpha","Beta"],"7":[21934324400,46]});
 const gb=parseMightContributionResponse({
- "1":"GATHERING","2":639271178598269601,"3":21934368094,
+ "1":"GATHERING","2":"639271178598269601","3":21934368094,
  "4":2,"6":["Alpha","Beta"],"7":[21934368000,94]});
 assert.equal(gbOverview.categories[0].guildMight-gaOverview.categories[0].guildMight,43648);
 assert.equal(reconcileCategoryAtServerInstant(gaOverview,[ga,gb],"GATHERING").difference,0);
