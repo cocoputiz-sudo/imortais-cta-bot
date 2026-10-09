@@ -390,21 +390,52 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
 }
 
 function buildDashboardFromLatestSnapshots(snapshots) {
-  const latestByCategory = new Map();
-  for (const snapshot of snapshots || []) {
-    const key = String(snapshot?.category?.key || "");
-    if (!key) continue;
-    const previous = latestByCategory.get(key);
-    if (!previous || new Date(snapshot.capturedAt || 0) > new Date(previous.capturedAt || 0)) {
-      latestByCategory.set(key, snapshot);
-    }
+  const byCategory=new Map();
+  for(const snap of snapshots||[]){
+    const key=String(snap?.category?.key||"");
+    if(!key)continue;
+    if(!byCategory.has(key))byCategory.set(key,[]);
+    byCategory.get(key).push(snap);
   }
 
-  const categories = [...latestByCategory.values()]
-    .sort((a,b) =>
-      Number(b.category?.mapped) - Number(a.category?.mapped) ||
-      new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0)
-    );
+  // Pages from the same category are combined by rank. The very last 28
+  // members viewed in the game must never replace the complete leaderboard.
+  const categories=[];
+  for(const list of byCategory.values()){
+    list.sort((a,b)=>new Date(a.capturedAt||0)-new Date(b.capturedAt||0));
+    const latest=list[list.length-1];
+    const valid=list.filter(s=>
+      Number.isInteger(Number(s.layout?.pageOffset)) &&
+      Number.isInteger(Number(s.layout?.totalMembers)) &&
+      Number(s.layout.totalMembers)>=0);
+    if(!valid.length){
+      categories.push(latest); // backward-compatible legacy observations
+      continue;
+    }
+    const pages=valid.map(s=>({
+      ...s,
+      pageOffset:Number(s.layout.pageOffset),
+      totalMembers:Number(s.layout.totalMembers),
+      categoryCode:s.layout.code||null,
+      members:s.members||[]
+    }));
+    const merged=assemblePages(pages);
+    categories.push({
+      ...latest,
+      capturedAt:merged.capturedAt||latest.capturedAt,
+      members:merged.members.map(m=>({...m,estimatedSp:null})),
+      totalMembers:merged.totalMembers,
+      observedMembers:merged.observedMembers,
+      complete:merged.complete,
+      missingRanges:merged.missingRanges,
+      pages:merged.pages,
+      guildMight:Number(latest.layout?.guildMight)||null,
+      level:null,seasonPoints:null,threshold:null
+    });
+  }
+  categories.sort((a,b)=>
+    Number(b.category?.mapped)-Number(a.category?.mapped) ||
+    new Date(b.capturedAt||0)-new Date(a.capturedAt||0));
 
   const ranking = new Map();
   for (const category of categories) {
@@ -412,22 +443,19 @@ function buildDashboardFromLatestSnapshots(snapshots) {
       const key = String(member.player || "").trim().toLowerCase();
       if (!key) continue;
       if (!ranking.has(key)) {
-        ranking.set(key, { player: member.player, might: 0, estimatedSp: 0, mappedCategories: 0, categories: 0 });
+        ranking.set(key, { player: member.player, might: 0, estimatedSp: null, mappedCategories: 0, categories: 0 });
       }
       const row = ranking.get(key);
       row.might += Number(member.might) || 0;
       row.categories++;
-      if (member.estimatedSp != null && Number.isFinite(Number(member.estimatedSp))) {
-        row.estimatedSp += Number(member.estimatedSp);
-        row.mappedCategories++;
-      }
+      // Season Points are not present in 449/450. Never approximate using screenshots.
     }
   }
 
   return {
     categories,
     ranking: [...ranking.values()]
-      .sort((a,b) => b.might - a.might || b.estimatedSp - a.estimatedSp || a.player.localeCompare(b.player, "pt-BR")),
+      .sort((a,b) => b.might - a.might || a.player.localeCompare(b.player, "pt-BR")),
     meta: {
       categoryCount: categories.length,
       mappedCategoryCount: categories.filter(x => x.category?.mapped).length,
