@@ -3907,7 +3907,7 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
       FROM guild_might_snapshots s
       JOIN newest n ON n.category_key=s.category_key
      WHERE s.members_complete=true
-       AND s.captured_at BETWEEN (n.latest_at - interval '2 hours') AND n.latest_at
+       AND s.captured_at BETWEEN (n.latest_at - interval '24 hours') AND n.latest_at
      ORDER BY s.captured_at DESC,s.id DESC
   `, [safeDays]);
 
