@@ -83,6 +83,32 @@ async function withPoolQueryObserver(observer, fn) {
   }
 }
 
+async function testUnauthorizedGuildProbesBlocked(base) {
+  await resetDb();
+  const body=JSON.stringify({
+    device:{deviceId:"unpaired-guild-probe",playerName:"BadMack",version:"test"},
+    events:[{
+      eventId:"unauthorized-guild-challenge",
+      type:"guild_might_probe",
+      occurredAt:new Date().toISOString(),
+      playerName:"BadMack",
+      payload:{direction:"response",operationName:"GetGuildChallengePoints",
+        parameters:{"3":482,"5":["GiganteCarrara","ESTHER9950"],"6":[5905587,5179919]}}
+    }]
+  });
+  for(const token of [null,"imt_no_registered_pairing"]){
+    const headers={"Content-Type":"application/json"};
+    if(token)headers.Authorization="Bearer "+token;
+    const result=await fetch(base+"/api/telemetry/ingest",{method:"POST",headers,body});
+    assert.equal(result.status,401,"unpaired Guild Might/Challenge uploads must be rejected");
+  }
+  const count=await db.pool.query(
+    "SELECT count(*)::int AS n FROM albion_telemetry_events WHERE type='guild_might_probe'"
+  );
+  assert.equal(count.rows[0].n,0,"unauthorized attempts must not write telemetry");
+  ok("Guild probe ingest: token ausente ou não pareado => HTTP 401 e zero snapshots");
+}
+
 async function testHealthyBatchHasNoPostResponseFailure(base) {
   await resetDb();
 
@@ -385,6 +411,7 @@ async function main() {
   const base = "http://127.0.0.1:" + addr.port;
 
   try {
+    await testUnauthorizedGuildProbesBlocked(base);
     await testHealthyBatchHasNoPostResponseFailure(base);
     await testSanitizesNulAndInvalidOccurredAt(base);
     await testFallbackIsolatesBadPresenceProbe(base);
