@@ -3077,7 +3077,15 @@ const PAGE = `<!doctype html>
     {name:'Terras Ancestrais',aliases:['Terras Ancestrais']}
   ];
   function gmNorm(x){return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');}
-  function gmDate(x){return x?fmtUtcDateTime(x,true):'não capturado';}
+  function gmDate(x){
+    if(!x)return 'não capturado';
+    var d=new Date(x);if(!isFinite(d.getTime()))return 'data desconhecida';
+    var br=new Intl.DateTimeFormat('pt-BR',{
+      timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',year:'numeric',
+      hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+    }).format(d);
+    return br+' (Brasília) · '+fmtUtcDateTime(d,true);
+  }
   function gmSp(x){return x==null?'—':fmtS(Math.round(Number(x)||0));}
   function gmCards(categories){
     var found={};
