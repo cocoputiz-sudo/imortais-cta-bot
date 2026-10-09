@@ -10,6 +10,8 @@ async function initSchema(pool){
     "members_complete BOOLEAN NOT NULL DEFAULT false,created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
   await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS page_offset INTEGER NOT NULL DEFAULT 0");
   await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS total_members INTEGER");
+  await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS snapshot_marker TEXT");
+  await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS guild_total_points BIGINT");
   await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS content_hash TEXT");
   await pool.query("ALTER TABLE guild_challenge_snapshots ADD COLUMN IF NOT EXISTS capture_day DATE");
   await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_guild_challenge_content_dedup ON guild_challenge_snapshots(content_hash,capture_day,page_offset) WHERE content_hash IS NOT NULL AND capture_day IS NOT NULL");
@@ -55,14 +57,16 @@ async function materialize(pool,rows){
         continue;
       }
       const result=await client.query(
-        "INSERT INTO guild_challenge_snapshots(response_event_id,device_id,observer,confidence,captured_at,layout,page_offset,total_members,content_hash,capture_day,members_complete) "+
-        "VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::date,false) "+
+        "INSERT INTO guild_challenge_snapshots(response_event_id,device_id,observer,confidence,captured_at,layout,page_offset,total_members,content_hash,capture_day,snapshot_marker,guild_total_points,members_complete) "+
+        "VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10::date,$11,$12,false) "+
         "ON CONFLICT(response_event_id) DO UPDATE SET "+
         "confidence=GREATEST(guild_challenge_snapshots.confidence,EXCLUDED.confidence),"+
         "layout=EXCLUDED.layout,page_offset=EXCLUDED.page_offset,total_members=EXCLUDED.total_members,"+
-        "content_hash=EXCLUDED.content_hash,capture_day=EXCLUDED.capture_day,members_complete=false RETURNING id",
+        "content_hash=EXCLUDED.content_hash,capture_day=EXCLUDED.capture_day,"+
+        "snapshot_marker=EXCLUDED.snapshot_marker,guild_total_points=EXCLUDED.guild_total_points,"+
+        "members_complete=false RETURNING id",
         [snap.responseEventId,snap.deviceId,snap.observer,snap.confidence,snap.capturedAt,
-          JSON.stringify(snap.layout),snap.pageOffset,snap.totalMembers,contentHash,capturedDay]
+          JSON.stringify(snap.layout),snap.pageOffset,snap.totalMembers,contentHash,capturedDay,snap.snapshotMarker,snap.guildTotalPoints]
       );
       const id=result.rows[0].id;
       await client.query("DELETE FROM guild_challenge_snapshot_members WHERE snapshot_id=$1",[id]);
@@ -87,7 +91,7 @@ async function materialize(pool,rows){
 async function getDashboard(pool,{days=90}={}){
   const safeDays=Math.max(1,Math.min(365,Number(days)||90));
   const [latest,stats,probes]=await Promise.all([
-    pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members FROM guild_challenge_snapshots "+
+    pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members,snapshot_marker,guild_total_points FROM guild_challenge_snapshots "+
       "WHERE members_complete=true AND captured_at >= now() - ($1::text || ' days')::interval "+
       "AND total_members IS NOT NULL ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays]),
     pool.query("SELECT COUNT(*)::int AS n,MAX(captured_at) AS newest FROM guild_challenge_snapshots WHERE members_complete=true"),
@@ -103,7 +107,7 @@ async function getDashboard(pool,{days=90}={}){
     // Always pick the most recent page at each offset, not simply the latest 16 players.
     // A two-hour window avoids mixing historical seasons; report incomplete coverage explicitly.
     const selected=await pool.query(
-      "SELECT id,response_event_id,page_offset,total_members,captured_at,observer "+
+      "SELECT id,response_event_id,page_offset,total_members,captured_at,observer,snapshot_marker,guild_total_points "+
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
       "AND captured_at BETWEEN GREATEST(($1::timestamptz - interval '24 hours'),now()-($2::text || ' days')::interval) AND $1::timestamptz "+
       "ORDER BY captured_at DESC,id DESC LIMIT 2500",
@@ -126,7 +130,7 @@ async function getDashboard(pool,{days=90}={}){
     }
     const pages=selected.rows.map(s=>({
       pageOffset:s.page_offset,totalMembers:Number(s.total_members),
-      capturedAt:s.captured_at,responseEventId:s.response_event_id,members:byId.get(String(s.id))||[]
+      capturedAt:s.captured_at,responseEventId:s.response_event_id,snapshotMarker:s.snapshot_marker,guildTotalPoints:s.guild_total_points===null?null:Number(s.guild_total_points),members:byId.get(String(s.id))||[]
     }));
     combined=assemblePages(pages);
   }
@@ -134,7 +138,9 @@ async function getDashboard(pool,{days=90}={}){
     available:!!top,verified:!!top,source:"GetGuildChallengePoints",
     capturedAt:top?.captured_at||null,observer:top?.observer||null,
     confidence:top?1:null,
-    members:combined.members,totalPoints:combined.members.reduce((a,m)=>a+m.points,0),
+    members:combined.members,totalPoints:combined.guildTotalPoints??null,
+    observedPoints:combined.members.reduce((a,m)=>a+m.points,0),
+    snapshotMarker:combined.snapshotMarker||null,
     complete:combined.complete,expectedMembers:combined.totalMembers,
     historicalObservedMembers:combined.historicalObservedMembers||0,
     historicalMembers:combined.historicalMembers||[],
