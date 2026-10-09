@@ -308,6 +308,7 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
 
   for (const pair of correlation.pairs) {
     if (!/^GetGuildMightCategory(?:Contribution|Overview)$/.test(String(pair.operationName || ""))) continue;
+    if(!validImortaisGuild(pair.responseParameters,pair.operationName))continue;
     if(pair.operationName==="GetGuildMightCategoryOverview" &&
       parseMightOverviewResponse(pair.responseParameters)) {
       // Values here are GUILD category totals, never player names.
