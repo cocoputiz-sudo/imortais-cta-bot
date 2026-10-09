@@ -19,11 +19,12 @@ const KNOWN_CATEGORY_LABELS = Object.freeze({
   SMUGGLERS: "Contrabandistas",
   SPIDERS: "Criaturas de Cristal",
   TREASURES: "Tesouros das Outlands",
-  // Labels below are proposed correspondences, not confirmed by a Photon string.
+  // Confirmed by guild leader in Albion UI against category leaderboard on 2026-10-09.
   DRAGON_AREA: "Terras Ancestrais",
   GVGSEASON: "Magos Engarrafadores"
 });
-const TENTATIVE_CODES = new Set(["DRAGON_AREA", "GVGSEASON", "HELLDUNGEON", "ENERGYCRYSTAL", "SPIDERS", "POWERCORE", "CASTLE", "CORRUPTED", "DRAGON_HUNT", "SMUGGLERS", "TREASURES"]);
+const USER_CONFIRMED_CODES = new Set(["GVGSEASON","HELLDUNGEON","DRAGON_AREA"]);
+const TENTATIVE_CODES = new Set(["ENERGYCRYSTAL","SPIDERS","POWERCORE","CASTLE","CORRUPTED","DRAGON_HUNT","SMUGGLERS","TREASURES"]);
 
 function nonnegativeInteger(v) { return typeof v === "number" && Number.isSafeInteger(v) && v >= 0; }
 function playerName(v) { return typeof v === "string" && /^[\p{L}\p{N}_-]{2,32}$/u.test(v); }
@@ -95,51 +96,60 @@ function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
     .map(p=>({...p,ms:Date.parse(p.capturedAt||p.captured_at||0)}))
     .filter(p=>Number.isFinite(p.ms))
     .sort((a,b)=>a.ms-b.ms);
-  if(!entries.length)return {
-    members:[],totalMembers:null,observedMembers:0,complete:false,
-    missingRanges:[],pages:0
-  };
+  if(!entries.length)return {members:[],currentMembers:[],historicalMembers:[],totalMembers:null,
+    observedMembers:0,historicalObservedMembers:0,complete:false,missingCount:0,pages:0};
   const newest=entries[entries.length-1];
-  const selected=entries.filter(p=>newest.ms-p.ms<=maxWindowMs &&
-    p.totalMembers===newest.totalMembers &&
+  const recent=entries.filter(p=>p.ms>=newest.ms-maxWindowMs && p.totalMembers===newest.totalMembers &&
     (!newest.categoryCode||p.categoryCode===newest.categoryCode));
-  // Player identity, not ranking offset, is the deduplication key. A member
-  // may move from rank 20 to rank 3 between pages and must appear once only.
-  const byPlayer=new Map();
-  for(const page of selected){
-    for(const member of page.members){
-      const name=String(member.player||"").trim();
-      if(!playerName(name))continue;
-      const key=name.toLocaleLowerCase("en");
-      const existing=byPlayer.get(key);
-      if(!existing || page.ms>existing.ms || page.ms===existing.ms &&
-          String(page.responseEventId||"")>String(existing.eventId||"")){
-        byPlayer.set(key,{...member,player:name,ms:page.ms,
-          eventId:page.responseEventId||null});
+  // Full file history and recent observations must be kept separate. A historical
+  // value is NEVER copied into the live/current leaderboard.
+  function latestByPlayer(collection){
+    const chosen=new Map();
+    for(const page of collection){
+      for(const member of page.members){
+        const name=String(member.player||"").trim();
+        if(!playerName(name))continue;
+        const key=name.toLocaleLowerCase("en");
+        const old=chosen.get(key);
+        if(!old||page.ms>=old.ms){
+          chosen.set(key,{...member,player:name,
+            capturedAt:page.capturedAt,ms:page.ms,
+            stale:page.ms<newest.ms-maxWindowMs});
+        }
       }
     }
+    return chosen;
   }
-  const members=[...byPlayer.values()].sort((a,b)=>{
-    const av=a.points??a.might??0,bv=b.points??b.might??0;
-    return bv-av||a.player.localeCompare(b.player,"pt-BR");
-  }).map((m,i)=>({
-    player:m.player,rank:i+1,
-    ...(m.points!=null?{points:m.points}:{}),
-    ...(m.might!=null?{might:m.might}:{})
-  }));
-  // rank here means position among OBSERVED members, not a confirmed global rank
-  // when coverage is incomplete. We never fabricate missing players as zero.
-  const observedMembers=members.length;
+  const current=latestByPlayer(recent);
+  const historical=latestByPlayer(entries);
+  function sortRanks(items){
+    return [...items].sort((a,b)=>
+      (b.points??b.might??0)-(a.points??a.might??0) ||
+      a.player.localeCompare(b.player,"pt-BR"))
+      .map((m,i)=>({
+        player:m.player,rank:i+1,capturedAt:m.capturedAt,
+        stale:m.stale,
+        ...(m.points!=null?{points:m.points}:{}),
+        ...(m.might!=null?{might:m.might}:{})
+      }));
+  }
+  const members=sortRanks(current.values());
+  const historicalMembers=sortRanks([...historical.entries()]
+    .filter(([key])=>!current.has(key)).map(([,member])=>({...member,stale:true})));
   return {
-    members,totalMembers:newest.totalMembers,observedMembers,
-    complete:observedMembers===newest.totalMembers,
-    missingCount:Math.max(0,newest.totalMembers-observedMembers),
-    missingRanges:[], // obsolete when positions are recalculated by player
-    ranksRecalculated:true,
-    pages:selected.length,capturedAt:newest.capturedAt,
-    categoryCode:newest.categoryCode||null
+    members,currentMembers:members,historicalMembers,
+    totalMembers:newest.totalMembers,
+    observedMembers:members.length,
+    historicalObservedMembers:historical.size,
+    complete:members.length===newest.totalMembers,
+    missingCount:Math.max(0,newest.totalMembers-members.length),
+    pages:recent.length,historicalPages:entries.length,
+    capturedAt:newest.capturedAt,
+    recentWindowStart:new Date(newest.ms-maxWindowMs).toISOString(),
+    categoryCode:newest.categoryCode||null,
+    ranksRecalculated:true
   };
 }
 
-module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,parseChallengeResponse,
+module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,parseChallengeResponse,
   parseMightContributionResponse,parseMightOverviewResponse,assemblePages};
