@@ -268,6 +268,129 @@ function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
   };
 }
 
+
+/**
+ * Might sweeps are not equivalent to same-marker Photon instants.
+ * A sweep uses ONE observer device, stable roster size, all rank slots,
+ * unique player identities and a bounded elapsed time. Its purpose is
+ * roster coverage and confirmed departures, not exact value reconciliation.
+ */
+function assembleMightPages(pages,{seasonStartAt=null,asOf=null,sweepMinutes=5}={}){
+  const begin=seasonStartAt==null?-Infinity:Date.parse(seasonStartAt);
+  const now=asOf==null?Date.now():Date.parse(asOf);
+  const currentTime=Number.isFinite(now)?now:Date.now();
+  const maxMs=Math.min(15,Math.max(1,Number(sweepMinutes)||5))*60000;
+  const entries=(pages||[]).map(p=>({...p,ms:Date.parse(p.capturedAt||p.captured_at||0)}))
+    .filter(p=>Number.isFinite(p.ms)&&p.ms>=begin&&
+      Number.isSafeInteger(p.pageOffset)&&p.pageOffset>=0&&
+      Number.isSafeInteger(p.totalMembers)&&p.totalMembers>0&&
+      Array.isArray(p.members)&&p.members.length>0&&
+      p.pageOffset+p.members.length<=p.totalMembers)
+    .sort((a,b)=>a.ms-b.ms||a.pageOffset-b.pageOffset);
+  if(!entries.length)return {members:[],historicalMembers:[],observedMembers:0,
+    totalMembers:null,complete:false,sweepComplete:false,
+    sweepCoverage:null,lastCompleteAt:null,oldestMemberAt:null,
+    observedMight:0,coverage:null,pages:0,historicalPages:0};
+  const keyOf=p=>String(p||"").trim().toLowerCase();
+  const active=new Map(),full=[];
+  for(const page of entries){
+    const id=String(page.deviceId||"");
+    // Unknown/missing source identity can be included in the season's
+    // consolidated scores, but cannot certify membership departures.
+    if(!id)continue;
+    const rankZero=page.pageOffset===0;
+    if(rankZero)active.delete(id);
+    let sweep=active.get(id);
+    if(!sweep && rankZero){
+      sweep={start:page.ms,last:page.ms,total:page.totalMembers,
+        ranks:new Map(),names:new Map(),device:id,count:0};
+      active.set(id,sweep);
+    }
+    if(!sweep)continue;
+    if(page.ms-sweep.start>maxMs||page.totalMembers!==sweep.total){
+      active.delete(id);continue;
+    }
+    let conflict=false;
+    for(let i=0;i<page.members.length;i++){
+      const member=page.members[i],player=String(member.player||"").trim();
+      const rank=page.pageOffset+i,normalized=keyOf(player);
+      const existing=sweep.ranks.get(rank),otherRank=sweep.names.get(normalized);
+      // member.rank from storage must match the original Photon page slot.
+      // Historical snapshots without that metadata may be scored, not certified.
+      if(!player||!/^\S/.test(player)||
+        !Number.isFinite(Number(member.might))||Number(member.might)<0||
+        !Number.isSafeInteger(member.rank)||member.rank!==rank+1||
+        (existing&&keyOf(existing.player)!==normalized)||
+        (otherRank!=null&&otherRank!==rank)){conflict=true;break;}
+    }
+    if(conflict){active.delete(id);continue;}
+    for(let i=0;i<page.members.length;i++){
+      const m=page.members[i],rank=page.pageOffset+i,key=keyOf(m.player);
+      sweep.ranks.set(rank,{...m,capturedAt:page.capturedAt,ms:page.ms});
+      sweep.names.set(key,rank);
+    }
+    sweep.last=page.ms;sweep.count++;
+    if(sweep.ranks.size===sweep.total&&sweep.names.size===sweep.total){
+      full.push({...sweep,members:[...sweep.ranks.values()]});
+      active.delete(id);
+    }
+  }
+  full.sort((a,b)=>a.last-b.last);
+  const latestFull=full.at(-1)||null,cutoff=latestFull?.last??-Infinity;
+  const eligible=latestFull?new Set(latestFull.members.map(m=>keyOf(m.player))):null;
+  const latestSeen=new Map(),floors=new Map();
+  for(const page of entries){
+    for(const m of page.members){
+      const name=String(m.player||"").trim(),key=keyOf(name),value=Number(m.might);
+      if(!name||!Number.isFinite(value)||value<0)continue;
+      const earlier=floors.get(key);
+      if(!earlier||value>=earlier.might)
+        floors.set(key,{player:name,might:value,capturedAt:page.capturedAt,ms:page.ms});
+      latestSeen.set(key,{player:name,ms:page.ms});
+    }
+  }
+  const current=new Map(),historical=new Map();
+  for(const [key,row] of floors){
+    let seenAfter=false;
+    if(latestFull&&!eligible.has(key)){
+      // Check only subsequent pages; not a previous observation.
+      for(let i=entries.length-1;i>=0;i--){
+        const p=entries[i];if(p.ms<=cutoff)break;
+        if(p.members.some(m=>keyOf(m.player)===key)){seenAfter=true;break;}
+      }
+    }
+    const live=!latestFull||eligible.has(key)||seenAfter;
+    const lastSeenAt=latestSeen.get(key)?.ms;
+    const record={...row,lastSeenAt:lastSeenAt==null?null:new Date(lastSeenAt).toISOString(),
+      stale:currentTime-row.ms>24*3600000,
+      ...(live?{}:{removedByComplete:true})};
+    (live?current:historical).set(key,record);
+  }
+  const rank=(iter)=>[...iter].sort((a,b)=>b.might-a.might||a.player.localeCompare(b.player,"pt-BR"))
+    .map((m,i)=>({...m,rank:i+1}));
+  const members=rank(current.values()),history=rank(historical.values());
+  const last=entries.at(-1);
+  const timestamps=members.map(m=>m.ms);
+  const latestTotal=last.totalMembers;
+  const certified=!!latestFull&&latestFull.total===latestTotal&&members.length===latestTotal;
+  return {members,currentMembers:members,historicalMembers:history,
+    totalMembers:latestTotal,observedMembers:members.length,
+    historicalObservedMembers:members.length+history.length,
+    complete:certified,sweepComplete:!!latestFull,
+    sweepCoverage:latestFull?latestFull.total+"/"+latestFull.total:null,
+    sweepStartedAt:latestFull?new Date(latestFull.start).toISOString():null,
+    sweepDurationMs:latestFull?latestFull.last-latestFull.start:null,
+    lastCompleteAt:latestFull?new Date(latestFull.last).toISOString():null,
+    oldestMemberAt:timestamps.length?new Date(Math.min(...timestamps)).toISOString():null,
+    oldestMemberAgeMs:timestamps.length?Math.max(0,currentTime-Math.min(...timestamps)):null,
+    coverage:members.length+"/"+latestTotal,
+    missingCount:Math.max(0,latestTotal-members.length),
+    pages:latestFull?.count||0,historicalPages:entries.length,
+    capturedAt:last.capturedAt,
+    observedMight:members.reduce((n,m)=>n+m.might,0),
+    sweepMethod:"one_device_5min_stable_total_unique_positions"};
+}
+
 /**
  * Correlate actual server snapshots. Only report a numerical residue when all
  * member ranks are covered by ONE exact Photon snapshotMarker.
@@ -306,4 +429,4 @@ function reconcileCategoryAtServerInstant(overview, contributionPages, categoryC
 }
 
 module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,IMORTAIS_GUILD_ID_BASE64,validImortaisGuild,parseGuildSeasonResponse,parseChallengeResponse,
-  parseMightContributionResponse,parseMightOverviewResponse,assemblePages,reconcileCategoryAtServerInstant};
+  parseMightContributionResponse,parseMightOverviewResponse,assemblePages,assembleMightPages,reconcileCategoryAtServerInstant};
