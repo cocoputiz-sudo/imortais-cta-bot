@@ -2,6 +2,7 @@
 const crypto=require("node:crypto");
 const {extractChallengeSnapshots,assemblePages}=require("./guildChallenge");
 const {getSeasonEpoch}=require("./guildSeason");
+const {approvedDeviceIds}=require("./guildRankingAuth");
 
 async function initSchema(pool){
   await pool.query("CREATE TABLE IF NOT EXISTS guild_challenge_snapshots ("+
@@ -92,10 +93,11 @@ async function materialize(pool,rows){
 async function getDashboard(pool,{days=90}={}){
   const safeDays=Math.max(1,Math.min(365,Number(days)||90));
   const epoch=await getSeasonEpoch(pool);
+  const devices=[...approvedDeviceIds()];
   const [latest,stats,probes]=await Promise.all([
     pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members,snapshot_marker,guild_total_points FROM guild_challenge_snapshots "+
       "WHERE members_complete=true AND captured_at >= COALESCE($2::timestamptz,now()-($1::text || ' days')::interval) "+
-      "AND total_members IS NOT NULL ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays,epoch.startAt]),
+      "AND total_members IS NOT NULL AND device_id=ANY($3::text[]) ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays,epoch.startAt,devices]),
     pool.query("SELECT COUNT(*)::int AS n,MAX(captured_at) AS newest FROM guild_challenge_snapshots WHERE members_complete=true"),
     pool.query("SELECT COUNT(*)::int AS total,"+
       "COUNT(*) FILTER(WHERE lower(COALESCE(payload->>'direction','response'))='response')::int AS responses,"+
@@ -112,8 +114,9 @@ async function getDashboard(pool,{days=90}={}){
       "SELECT id,response_event_id,page_offset,total_members,captured_at,observer,snapshot_marker,guild_total_points "+
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
       "AND captured_at BETWEEN COALESCE($3::timestamptz,now()-($2::text || ' days')::interval) AND $1::timestamptz "+
+      "AND device_id=ANY($4::text[]) "+
       "ORDER BY captured_at DESC,id DESC",
-      [top.captured_at,safeDays,epoch.startAt]
+      [top.captured_at,safeDays,epoch.startAt,devices]
     );
     const ids=selected.rows.map(x=>x.id);
     let members=[];
