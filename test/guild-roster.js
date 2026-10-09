@@ -124,16 +124,24 @@ function testClassifyScenario() {
 }
 
 function testExemptRolesAreConfigurable() {
-  const members = gr.parseGuildRoster('"Alfa"\t"Online"\t"CONTRIBUINTE"\n"Bravo"\t"Online"\t"Bomb"\n"Charlie"\t"Online"\t"contribuinte"').members;
+  const members = gr.parseGuildRoster([
+    '"Alfa"\t"Online"\t"CONTRIBUINTE"',          // cargo legado
+    '"Bravo"\t"Online"\t"Bomb"',
+    '"Charlie"\t"Online"\t"CONTRIBUINTE 1"',
+    '"Delta"\t"Online"\t"Contribuinte 2"',
+    '"Echo"\t"Online"\t"contribuinte 3"',
+    '"Foxtrot"\t"Online"\t"CONTRIBUINTE 4"',        // nao autorizado
+  ].join("\n")).members;
+  const names = (g, result) => result.groups[g].map((x) => x.name);
   const base = gr.classifyRoster({ members });
-  assert.deepEqual(base.groups.contribuinte.map((x) => x.name), ["Alfa", "Charlie"], "padrão ignora maiúsculas/minúsculas");
-  assert.deepEqual(base.groups.equipando.map((x) => x.name), ["Bravo"]);
-  const custom = gr.classifyRoster({ members, exemptRoles: ["contribuinte", "bomb"] });
-  assert.deepEqual(custom.groups.equipando.map((x) => x.name), []);
-  assert.equal(custom.groups.contribuinte.length, 3);
+  assert.deepEqual(names("contribuinte", base), ["Alfa", "Charlie", "Delta", "Echo"], "tres novos cargos e legado, sem diferenciar caixa");
+  assert.deepEqual(names("equipando", base), ["Bravo", "Foxtrot"], "nome parecido nao autoriza isencao");
+  const custom = gr.classifyRoster({ members, exemptRoles: ["contribuinte 2", "bomb"] });
+  assert.deepEqual(names("contribuinte", custom), ["Bravo", "Delta"], "configuracao explicita de cargos isentos");
+  assert.equal(custom.groups.equipando.length, 4);
   const none = gr.classifyRoster({ members, exemptRoles: [] });
-  assert.equal(none.groups.equipando.length, 3, "sem cargos isentos, todos contam");
-  ok("cargos isentos: CONTRIBUINTE por padrão, sem diferenciar caixa, e configurável");
+  assert.equal(none.groups.equipando.length, 6, "sem cargos isentos, todos contam");
+  ok("cargos isentos: CONTRIBUINTE 1/2/3 e legado, sem aceitar categorias nao previstas");
 }
 
 function testContributorWhoParticipatesIsNotExemptGroup() {
