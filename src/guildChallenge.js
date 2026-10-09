@@ -4,7 +4,7 @@
 // "5" = player names, "6" = Challenge Points, "4" = 0-based page offset
 // (omitted on first page), "3" = number of ranks reported by the game.
 // Do not interpret arbitrary scalars as guild level/Season Points.
-const {parseChallengeResponse,assemblePages}=require("./guildPhotonVerified");
+const {parseChallengeResponse,assemblePages,validImortaisGuild}=require("./guildPhotonVerified");
 
 function extractChallengeSnapshots(rows) {
   const pages=[];
@@ -12,6 +12,7 @@ function extractChallengeSnapshots(rows) {
     const payload=row.payload||{};
     if(payload.operationName!=="GetGuildChallengePoints" ||
       String(payload.direction||"").toLowerCase()!=="response")continue;
+    if(!validImortaisGuild(payload.parameters,"GetGuildChallengePoints"))continue;
     const decoded=parseChallengeResponse(payload.parameters);
     if(!decoded||!decoded.members.length)continue;
     pages.push({
