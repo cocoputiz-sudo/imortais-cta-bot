@@ -103,10 +103,10 @@ async function getDashboard(pool,{days=90}={}){
     // Always pick the most recent page at each offset, not simply the latest 16 players.
     // A two-hour window avoids mixing historical seasons; report incomplete coverage explicitly.
     const selected=await pool.query(
-      "SELECT DISTINCT ON (page_offset) id,page_offset,total_members,captured_at,observer "+
+      "SELECT id,response_event_id,page_offset,total_members,captured_at,observer "+
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members=$1 "+
       "AND captured_at BETWEEN ($2::timestamptz - interval '2 hours') AND $2::timestamptz "+
-      "ORDER BY page_offset,captured_at DESC,id DESC",
+      "ORDER BY captured_at ASC,id ASC",
       [top.total_members,top.captured_at]
     );
     const ids=selected.rows.map(x=>x.id);
