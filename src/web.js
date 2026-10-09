@@ -3189,6 +3189,8 @@ const PAGE = `<!doctype html>
       +'<div class="stat g"><div class="k">Categorias mapeadas</div><div class="v">'+fmtS(meta.mappedCategoryCount||0)+'</div></div>'
       +'<div class="stat a"><div class="k">Jogadores observados</div><div class="v">'+fmtS(meta.playerCount||0)+'</div></div>'
       +'<div class="stat p"><div class="k">Snapshots persistidos</div><div class="v">'+fmtS(meta.storedSnapshots||0)+'</div></div></div>'
+      +(meta.configurationNotices&&meta.configurationNotices.length
+        ?'<div class="note gm-config-warning" role="alert"><strong>⚠ Guild Might aguardando configuração</strong><p>'+meta.configurationNotices.map(function(msg){return esc(msg);}).join('</p><p>')+'</p>O ranking não será publicado até essas verificações serem concluídas. Nenhum dado foi apagado.</div>':'')
       +'<div class="gm-controls"><button class="gm-action" id="gm-all">Ranking geral</button>'
       +'<button class="gm-action" id="gm-export-html">📄 Emitir relatório HTML</button>'
       +'<button class="gm-action" id="gm-export-csv">📥 Exportar CSV</button>'
@@ -3202,7 +3204,7 @@ const PAGE = `<!doctype html>
           +'<span class="gm-name">'+esc(c.name)+'</span>'+'<span class="gm-sub">ID técnico: '+esc(snap&&snap.layout&&snap.layout.code||'não capturado')+(snap&&snap.category&&snap.category.nameTentative?' · NOME A CONFIRMAR':'')+'</span>'
           +'<span class="gm-value">'+(guildTotal==null?'Overview indisponível':fmtS(guildTotal))+'</span>'
           +'<span class="gm-sub">Soma jogadores: '+fmtS(total)+' · diferença: '+(guildTotal==null?'—':fmtS(total-guildTotal))+'</span>'
-          +'<span class="gm-sub">'+(snap?(players.length+'/'+(snap.totalMembers||'?')+' consolidados · '+gmAge(snap.oldestMemberAt)+' · '+(snap.complete?'estado completo':'estado parcial')+' · '+esc(gmDate(snap.capturedAt))):'Aguardando captura da categoria')+'</span>'
+          +'<span class="gm-sub">'+(snap?(players.length+'/'+(snap.totalMembers||'?')+' consolidados · '+gmAge(snap.oldestMemberAt)+' · '+(snap.complete?'Cobertura integral · varredura '+(snap.sweepDurationMs==null?'?':Math.round(snap.sweepDurationMs/1000)+'s'):(snap.sweepComplete?'Última varredura integral '+esc(snap.sweepCoverage||'?'):'Varredura integral não comprovada'))+' · '+esc(gmDate(snap.capturedAt))):'Aguardando captura da categoria')+'</span>'
           +'</button>';
       }).join('')+'</div>';
     if(selected){
@@ -3217,8 +3219,8 @@ const PAGE = `<!doctype html>
       html+='<div class="panel"><div class="gm-panel-title"><h3>'+esc(selected.name)+' · ranking individual</h3>'
         +'<span class="pill '+(snap&&snap.category&&snap.category.mapped?'ok':'')+'">'+(snap?'CAPTURADO':'SEM DADOS')+'</span></div>'
         +'<div class="note">'+esc(reconcileText)+'</div>'
-        +'<div class="note">Nível: '+(progress&&progress.level!=null?fmtS(progress.level):'não capturado')+' · SP: '+(progress&&progress.seasonPoints!=null?fmtS(progress.seasonPoints):'não capturado')+(progress?' · fonte: ADMIN MANUAL':'')+'</div>'+(catCode&&authState.isSiteAdmin?'<button class="gm-action" id="gm-edit-progress" type="button">Editar nível / SP</button>':'')+'<div class="note">Ranking consolidado: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' jogadores · '+gmAge(snap&&snap.oldestMemberAt)+' · último estado: '+(snap&&snap.complete?'COMPLETO':'PARCIAL')+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
-        +(snap?gmRows(members,'might')+'<div class="note">Capturas anteriores permanecem no ranking da mesma temporada; só uma captura completa posterior comprova saída de jogadores.</div>'+(snap.historicalMembers&&snap.historicalMembers.length?'<h4>Histórico desatualizado ('+snap.historicalMembers.length+')</h4>'+gmRows(snap.historicalMembers,'might'):''):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
+        +'<div class="note">Nível: '+(progress&&progress.level!=null?fmtS(progress.level):'não capturado')+' · SP: '+(progress&&progress.seasonPoints!=null?fmtS(progress.seasonPoints):'não capturado')+(progress?' · fonte: ADMIN MANUAL':'')+'</div>'+(catCode&&authState.isSiteAdmin?'<button class="gm-action" id="gm-edit-progress" type="button">Editar nível / SP</button>':'')+'<div class="note">Ranking consolidado: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' jogadores · '+gmAge(snap&&snap.oldestMemberAt)+' · '+(snap&&snap.complete?'COBERTURA INTEGRAL POR VARREDURA':snap&&snap.sweepComplete?'Última varredura integral '+esc(snap.sweepCoverage||'?')+' · atualização parcial posterior':'Varredura integral ainda não comprovada')+' · última varredura completa '+esc(gmDate(snap&&snap.lastCompleteAt))+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
+        +(snap?gmRows(members,'might')+'<div class="note">Marcadores diferentes na mesma varredura não invalidam cobertura. Apenas uma varredura integral posterior, do mesmo dispositivo e com total de membros estável, comprova saídas. Isso não é reconciliação de um único instante Photon.</div>'+(snap.historicalMembers&&snap.historicalMembers.length?'<h4>Histórico desatualizado ('+snap.historicalMembers.length+')</h4>'+gmRows(snap.historicalMembers,'might'):''):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
         +'</div>';
     } else {
       html+='<div class="panel"><h3>🏆 Ranking geral de Might observado</h3>'
