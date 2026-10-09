@@ -2986,7 +2986,21 @@ const PAGE = `<!doctype html>
 
 
 
-  var guildMightDashboard=null, guildChallengeDashboard=null, guildSelectedMightCategory='all', guildMightCards=[];
+  var guildMightDashboard=null, guildChallengeDashboard=null, guildProgressRows=[], guildSelectedMightCategory='all', guildMightCards=[];
+  function gmManual(code){return guildProgressRows.find(function(p){return p.categoryCode===code;})||null;}
+  function gmEditManual(code){
+    if(!authState.isSiteAdmin)return;
+    var old=gmManual(code)||{}, level=window.prompt('Nível (vazio = não informado)',old.level==null?'':String(old.level));
+    if(level===null)return;
+    var sp=window.prompt('Season Points (vazio = não informado)',old.seasonPoints==null?'':String(old.seasonPoints));
+    if(sp===null)return;
+    var payload={categoryCode:code,level:level,seasonPoints:sp};
+    fetch('/api/telemetry/guild-progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      .then(function(r){if(!r.ok)throw Error('Permissão negada ou dado inválido ('+r.status+')');return r.json();})
+      .then(function(){renderGuildMight();})
+      .catch(function(e){alert(e.message);});
+  }
+
   var guildMightCatalog=[
     {name:'PvE (Outlands e Roads)',aliases:['PvE']},
     {name:'Coleta',aliases:['Coleta']},
@@ -3112,9 +3126,10 @@ const PAGE = `<!doctype html>
       }).join('')+'</div>';
     if(selected){
       var snap=selected.snapshot,members=snap&&snap.members||[];
+      var catCode=snap&&snap.layout&&snap.layout.code||null, progress=catCode?gmManual(catCode):null;
       html+='<div class="panel"><div class="gm-panel-title"><h3>'+esc(selected.name)+' · ranking individual</h3>'
         +'<span class="pill '+(snap&&snap.category&&snap.category.mapped?'ok':'')+'">'+(snap?'CAPTURADO':'SEM DADOS')+'</span></div>'
-        +'<div class="note">Snapshot: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' posições · '+(snap&&snap.complete?'COMPLETO':'PARCIAL')+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
+        +'<div class="note">Nível: '+(progress&&progress.level!=null?fmtS(progress.level):'não capturado')+' · SP: '+(progress&&progress.seasonPoints!=null?fmtS(progress.seasonPoints):'não capturado')+(progress?' · fonte: ADMIN MANUAL':'')+'</div>'+(catCode&&authState.isSiteAdmin?'<button class="gm-action" id="gm-edit-progress" type="button">Editar nível / SP</button>':'')+'<div class="note">Snapshot: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' posições · '+(snap&&snap.complete?'COMPLETO':'PARCIAL')+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
         +(snap?gmRows(members,'might')+'<div class="note">Cobertura histórica: '+fmtS(snap.historicalObservedMembers||members.length)+' jogadores · capturas anteriores não entram no ranking atual.</div>'+(snap.historicalMembers&&snap.historicalMembers.length?'<h4>Histórico desatualizado ('+snap.historicalMembers.length+')</h4>'+gmRows(snap.historicalMembers,'might'):''):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
         +'</div>';
     } else {
@@ -3132,11 +3147,18 @@ const PAGE = `<!doctype html>
         :'<div class="empty-note">'+(ch.meta&&ch.meta.rawResponses3d?'Operação detectada, mas ainda sem classificação individual confiável. Conferir diagnostics de Guild Might.':'Aguardando abrir Guild Challenge no Albion com Combat Client conectado.')+'</div>')
       +(ch.meta&&ch.meta.note?'<div class="note">'+esc(ch.meta.note)+'</div>':'')+'</div>';
     if(meta.materializationError)html+='<div class="note">Erro ao materializar Might: '+esc(meta.materializationError)+'</div>';
+    var challengeProg=gmManual('GUILD_CHALLENGE');
+    html+='<div class="note">Guild Challenge: Nível '+(challengeProg&&challengeProg.level!=null?fmtS(challengeProg.level):'não capturado')+' · SP '+(challengeProg&&challengeProg.seasonPoints!=null?fmtS(challengeProg.seasonPoints):'não capturado')+(challengeProg?' · ADMIN MANUAL':'')+'</div>';
+    if(authState.isSiteAdmin)html+='<button class="gm-action" id="gm-edit-challenge-progress">Editar nível / SP Challenge</button>';
     if(ch.error)html+='<div class="note">Guild Challenge indisponível: '+esc(ch.error)+'</div>';
     setView('view-might',html);
     Array.prototype.forEach.call(document.querySelectorAll('[data-gm-card]'),function(btn){
       btn.addEventListener('click',function(){guildSelectedMightCategory=btn.getAttribute('data-gm-card');drawGuildMight();});
     });
+    var editProgress=document.getElementById('gm-edit-progress');
+    if(editProgress)editProgress.onclick=function(){var sc=guildMightCards.find(function(c){return c.id===guildSelectedMightCategory;});if(sc&&sc.snapshot&&sc.snapshot.layout)gmEditManual(sc.snapshot.layout.code);};
+    var editChallenge=document.getElementById('gm-edit-challenge-progress');
+    if(editChallenge)editChallenge.onclick=function(){gmEditManual('GUILD_CHALLENGE');};
     document.getElementById('gm-all').onclick=function(){guildSelectedMightCategory='all';drawGuildMight();};
     document.getElementById('gm-refresh').onclick=function(){renderGuildMight();};
     document.getElementById('gm-export-html').onclick=function(){gmExport('html');};
@@ -3147,8 +3169,9 @@ const PAGE = `<!doctype html>
     Promise.all([
       fetch('/api/telemetry/guild-might?days=90',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Might HTTP '+r.status);return r.json();}),
       fetch('/api/telemetry/guild-challenge?days=90',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Challenge HTTP '+r.status);return r.json();})
-        .catch(function(e){return {available:false,members:[],error:e.message||String(e)};})
-    ]).then(function(data){guildMightDashboard=data[0];guildChallengeDashboard=data[1];drawGuildMight();})
+        .catch(function(e){return {available:false,members:[],error:e.message||String(e)};}),
+      fetch('/api/telemetry/guild-progress',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Progress HTTP '+r.status);return r.json();}).catch(function(){return {rows:[]};})
+    ]).then(function(data){guildMightDashboard=data[0];guildChallengeDashboard=data[1];guildProgressRows=data[2].rows||[];drawGuildMight();})
       .catch(function(e){setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao consultar Might: '+esc(e.message)+'</div>');});
   }
 
