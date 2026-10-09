@@ -71,6 +71,7 @@ function parseMightContributionResponse(p) {
   return {
     operation:"GetGuildMightCategoryContribution",
     categoryCode:code,
+    snapshotMarker:p["2"]==null?null:String(p["2"]),
     categoryName:KNOWN_CATEGORY_LABELS[code] || code,
     categoryNameTentative:TENTATIVE_CODES.has(code),
     pageOffset,totalMembers,
@@ -85,6 +86,7 @@ function parseMightOverviewResponse(p) {
     p["2"].length !== p["3"].length || !p["2"].every(x=>typeof x==="string")) return null;
   return {
     operation:"GetGuildMightCategoryOverview",
+    snapshotMarker:p["1"]==null?null:String(p["1"]),
     guildIdBytes:p["0"]?.kind==="bytes"?p["0"]:null,
     seasonOrGuildReference:p["1"]??null,
     responseOperationCode:p["253"]??null,
@@ -165,5 +167,42 @@ function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
   };
 }
 
+/**
+ * Correlate actual server snapshots. Only report a numerical residue when all
+ * member ranks are covered by ONE exact Photon snapshotMarker.
+ * Cross-marker sums are deliberately not compared to an Overview aggregate.
+ */
+function reconcileCategoryAtServerInstant(overview, contributionPages, categoryCode) {
+ const marker=overview?.snapshotMarker;
+ const category=(overview?.categories||[]).find(c=>c.code===categoryCode);
+ if(!marker||!category)return {matched:false,reason:"overview_missing"};
+ const pages=(contributionPages||[]).filter(p=>p?.snapshotMarker===marker &&
+   p.categoryCode===categoryCode);
+ if(!pages.length)return {matched:false,reason:"no_matching_pages",snapshotMarker:marker};
+ const totalMembers=pages[0].totalMembers;
+ const players=new Map();
+ const coveredRanks=new Set();
+ for(const p of pages) {
+   if(p.totalMembers!==totalMembers)return {matched:false,reason:"roster_changed",snapshotMarker:marker};
+   p.members.forEach((m,i)=>{
+     const rank=p.pageOffset+i+1;
+     coveredRanks.add(rank);
+     const key=m.player.toLowerCase();
+     const existing=players.get(key);
+     if(!existing||String(p.capturedAt||"")>=String(existing.capturedAt||""))
+       players.set(key,{might:m.might,capturedAt:p.capturedAt});
+   });
+ }
+ const complete=coveredRanks.size===totalMembers&&players.size===totalMembers;
+ if(!complete)return {matched:true,complete:false,snapshotMarker:marker,
+   observedMembers:players.size,expectedMembers:totalMembers,
+   guildMight:category.guildMight,difference:null};
+ const sum=[...players.values()].reduce((a,p)=>a+p.might,0);
+ return {matched:true,complete:true,snapshotMarker:marker,
+   observedMembers:players.size,expectedMembers:totalMembers,
+   observedMight:sum,guildMight:category.guildMight,
+   difference:sum-category.guildMight};
+}
+
 module.exports={KNOWN_CATEGORY_LABELS,TENTATIVE_CODES,USER_CONFIRMED_CODES,parseChallengeResponse,
-  parseMightContributionResponse,parseMightOverviewResponse,assemblePages};
+  parseMightContributionResponse,parseMightOverviewResponse,assemblePages,reconcileCategoryAtServerInstant};
