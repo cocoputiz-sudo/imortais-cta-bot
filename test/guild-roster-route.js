@@ -103,7 +103,9 @@ async function testRouteAccessAndResponses() {
     '"Alfa"\t"Online"\t""',
     '"Bravo"\t"Online"\t""',
     '"Charlie"\t"09/24/2026 00:10:00"\t""',
-    '"Delta"\t"Online"\t"CONTRIBUINTE"',
+    '"Delta"\t"Online"\t"CONTRIBUINTE 1"',
+    '"Golf"\t"Online"\t"Contribuinte 2"',
+    '"Hotel"\t"Online"\t"CONTRIBUINTE 3"',
     '"Echo"\t"Online"\t""',
     '"Foxtrot"\t"Online"\t""',
   ].join("\n");
@@ -135,16 +137,53 @@ async function testRouteAccessAndResponses() {
     assert.deepEqual(names("pronto"), ["Alfa"]);
     assert.deepEqual(names("naCallSemPing"), ["Bravo"]);
     assert.deepEqual(names("pingouOffline"), ["Charlie"]);
-    assert.deepEqual(names("contribuinte"), ["Delta"]);
+    assert.deepEqual(names("contribuinte"), ["Delta", "Golf", "Hotel"]);
     assert.deepEqual(names("equipando"), ["Echo"]);
     assert.deepEqual(names("pingouForaDaCall"), ["Foxtrot"]);
     assert.equal(good.json.groups.pronto[0].weapon, "JURADOR");
-    assert.equal(good.json.totals.roster, 6);
-    assert.equal(good.json.totals.online, 5);
+    assert.equal(good.json.totals.roster, 8);
+    assert.equal(good.json.totals.online, 7);
     assert.equal(good.json.totals.pinged, 3);
     assert.equal(good.json.totals.inCall, 2);
 
-    ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos");
+    ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos"); 
+    // Regressao: staff move a jogadora da vaga Nature para um slot Support
+    // e precisa trocar POSTULENTO por PÚTRIDO sem perder a vaga nem receber falso sucesso.
+    await db.upsertSignup({
+      eventId: ev.id, userId: "camile-test", username: "[IM] CAMILEVEGANA",
+      weapon: "POSTULENTO", presence: "online",
+      partyIndex: 0, slotIndex: 7, manual: true,
+    });
+    async function changeWeapon(cookie, userId, weapon) {
+      const response = await fetch(base + "/api/setweapon", {
+        method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify({ event: ev.id, userId, weapon }),
+      });
+      return { status: response.status, json: await response.json() };
+    }
+    const noPermission = await changeWeapon(cookieFor({ canEdit: false }), "camile-test", "PÚTRIDO");
+    assert.equal(noPermission.status, 403, "somente a staff pode editar armas");
+    const invalid = await changeWeapon(cookieFor({ canEdit: true }), "camile-test", "ARMA INVENTADA");
+    assert.equal(invalid.status, 400, "arma inexistente nao deve ser aceita");
+    const missingPlayer = await changeWeapon(cookieFor({ canEdit: true }), "inexistente", "PÚTRIDO");
+    assert.equal(missingPlayer.status, 404, "nao deve responder sucesso se o UPDATE afetar zero linhas");
+    const updated = await changeWeapon(cookieFor({ canEdit: true }), "camile-test", "PÚTRIDO");
+    assert.equal(updated.status, 200);
+    assert.equal(updated.json.ok, true);
+    assert.equal(updated.json.weapon, "PÚTRIDO");
+    const stored = (await db.getSignups(ev.id)).find((x) => x.user_id === "camile-test");
+    assert.equal(stored.weapon, "PÚTRIDO", "escolha da staff precisa estar persistida");
+    assert.equal(stored.manual, true, "vaga manual deve permanecer travada");
+    assert.equal(stored.party_index, 0);
+    assert.equal(stored.slot_index, 7);
+    const rosterResponse = await fetch(base + "/api/roster?event=" + ev.id, {
+      headers: { Cookie: cookieFor({ canEdit: true }) },
+    });
+    assert.equal(rosterResponse.status, 200);
+    const rosterData = await rosterResponse.json();
+    assert.equal(rosterData.parties[0].slots[7].weapon, "PÚTRIDO");
+    ok("troca POSTULENTO -> PÚTRIDO: verifica permissao, valida, persiste e devolve roster atualizado");
+
   } finally {
     await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
   }

@@ -1,6 +1,9 @@
 name: Scout regression
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
     paths:
       - "src/scout.js"
@@ -9,6 +12,11 @@ on:
       - "src/guildroster.js"
       - "src/telemetry.js"
       - "src/guildMight.js"
+      - "src/guildPhotonVerified.js"
+      - "src/guildChallenge.js"
+      - "src/guildChallengeStore.js"
+      - "src/guildManualProgress.js"
+      - "src/homolog.js"
       - "src/ctatime.js"
       - "src/consolidation-state.js"
       - "src/killFame.js"
@@ -28,6 +36,10 @@ on:
       - "test/ingest-route.js"
       - "test/guild-might-discovery.js"
       - "test/guild-might-worker.js"
+      - "test/guild-challenge.js"
+      - "test/guild-might-page.js"
+      - "test/guild-manual-progress.js"
+      - "test/guild-photon-capture.js"
       - "test/pair-route.js"
       - "test/cta-time.js"
       - "test/cta-freeze.js"
@@ -94,6 +106,12 @@ jobs:
         run: node test/guild-might-discovery.js
       - name: Guild Might worker e snapshots em Postgres
         run: node test/guild-might-worker.js
+      - name: Guild Might e Challenge - testes especificos do PR 66
+        run: |
+          node test/guild-photon-capture.js
+          node test/guild-challenge.js
+          node test/guild-might-page.js
+          node test/guild-manual-progress.js
       - name: Telemetry pair security
         run: node test/pair-route.js
       - name: CTA time rollover

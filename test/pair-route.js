@@ -7,7 +7,9 @@ const { once } = require("node:events");
 process.env.PGSSL = "disable";
 process.env.GUILD_ID = "guild-test";
 process.env.TELEMETRY_INGEST_KEY = "pair-route-test-master";
-process.env.PORT = String(41000 + (process.pid % 1000));
+// Each mutation test starts its own server: let the OS allocate a free port.
+// A PID-derived fixed port can collide with another live worker on GitHub Actions.
+process.env.PORT = "0";
 
 const db = require("../src/db");
 const telemetry = require("../src/telemetry");
