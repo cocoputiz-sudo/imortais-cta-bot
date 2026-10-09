@@ -32,8 +32,16 @@ function numArray(v) { return Array.isArray(v) && v.every(nonnegativeInteger); }
 function namesArray(v) { return Array.isArray(v) && v.every(playerName); }
 
 function parseChallengeResponse(p) {
-  if (!p || !namesArray(p["5"]) || !numArray(p["6"]) ||
-    p["5"].length !== p["6"].length || !nonnegativeInteger(p["3"])) return null;
+  if (!p || !namesArray(p["5"]) || !nonnegativeInteger(p["3"])) return null;
+  let points=p["6"];
+  // Observed 2026-10-09 final page: five zero-valued bytes instead of number array.
+  if (points?.kind==="bytes" && points.length===p["5"].length &&
+    typeof points.base64==="string" && /^[A-Za-z0-9+/=]+$/.test(points.base64)) {
+    const octets=Buffer.from(points.base64,"base64");
+    if(octets.length===points.length && octets.every(x=>x===0))
+      points=Array(octets.length).fill(0);
+  }
+  if(!numArray(points) || points.length!==p["5"].length) return null;
   const pageOffset = p["4"] == null ? 0 : p["4"];
   const totalMembers = p["3"];
   if (!nonnegativeInteger(pageOffset) || pageOffset + p["5"].length > totalMembers ||
@@ -42,7 +50,7 @@ function parseChallengeResponse(p) {
     operation: "GetGuildChallengePoints",
     pageOffset, totalMembers,
     // 1/2 appear to be server markers/aggregates; semantics not verified.
-    members: p["5"].map((player,i) => ({player,points:p["6"][i],rank:pageOffset+i+1})),
+    members: p["5"].map((player,i) => ({player,points:points[i],rank:pageOffset+i+1})),
     level: null,
     seasonPoints: null
   };
