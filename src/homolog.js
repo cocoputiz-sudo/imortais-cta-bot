@@ -26,7 +26,7 @@ app.use((req,res,next)=>{
   if(req.method==="POST"&&req.path==="/api/telemetry/ingest")return next();
   return readAuth(req,res,next);
 });
-telemetry.installRoutes(app,{db,requireMember:permit,requireEditor:permit,requireDeviceManager:permit});
+// Initialized inside boot after the staging schema is ready.
 app.post("/api/homolog/materialize",async(req,res)=>{
  try{const r=await telemetry.materializeGuildMightRecent({minutes:5000,limit:10000});res.json(r)}
  catch(e){console.error("materialize",e.message);res.status(500).json({error:"materialize"})}
@@ -75,4 +75,4 @@ function renderRank(){
 }
 load();
 </script></body></html>`;
-(async()=>{await db.init();await telemetry.initSchema(db.pool);const port=Number(process.env.PORT||3000);app.listen(port,"0.0.0.0",()=>console.log("isolated homolog listening",port))})().catch(e=>{console.error("homolog boot:",e.message);process.exit(1)});
+(async()=>{await db.init();await telemetry.initSchema(db.pool);telemetry.installRoutes(app,{db,requireMember:permit,requireEditor:permit,requireDeviceManager:permit});const port=Number(process.env.PORT||3000);app.listen(port,"0.0.0.0",()=>console.log("isolated homolog listening",port))})().catch(e=>{console.error("homolog boot:",e.message);process.exit(1)});
