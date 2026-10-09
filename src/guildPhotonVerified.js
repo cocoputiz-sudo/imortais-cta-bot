@@ -23,7 +23,7 @@ const KNOWN_CATEGORY_LABELS = Object.freeze({
   DRAGON_AREA: "Terras Ancestrais",
   GVGSEASON: "Magos Engarrafadores"
 });
-const TENTATIVE_CODES = new Set(["DRAGON_AREA", "GVGSEASON", "HELLDUNGEON"]);
+const TENTATIVE_CODES = new Set(["DRAGON_AREA", "GVGSEASON", "HELLDUNGEON", "ENERGYCRYSTAL", "SPIDERS", "POWERCORE", "CASTLE", "CORRUPTED", "DRAGON_HUNT", "SMUGGLERS", "TREASURES"]);
 
 function nonnegativeInteger(v) { return typeof v === "number" && Number.isSafeInteger(v) && v >= 0; }
 function playerName(v) { return typeof v === "string" && /^[\p{L}\p{N}_-]{2,32}$/u.test(v); }
@@ -73,6 +73,10 @@ function parseMightOverviewResponse(p) {
     p["2"].length !== p["3"].length || !p["2"].every(x=>typeof x==="string")) return null;
   return {
     operation:"GetGuildMightCategoryOverview",
+    guildIdBytes:p["0"]?.kind==="bytes"?p["0"]:null,
+    seasonOrGuildReference:p["1"]??null,
+    responseOperationCode:p["253"]??null,
+    requestCorrelationId:p["255"]??null,
     categories:p["2"].map((code,i)=>({
       code,
       name:KNOWN_CATEGORY_LABELS[code] || code,
