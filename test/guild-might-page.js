@@ -15,6 +15,12 @@ assert(page.includes("guild-might?days=90"), "Might API");
 const scriptMatch = page.match(/<script>([\s\S]*?)<\/script>/);
 assert(scriptMatch, "embedded script exists");
 new vm.Script(scriptMatch[1], { filename: "embedded-WarRoom.js" });
+
+// Capture times must be explicit and deterministic in both timezones.
+assert(page.includes("America/Sao_Paulo"),"Might timestamps must use Brasília timezone");
+assert(page.includes("(Brasília)"),"Might timestamps must label Brasília");
+assert(page.includes("fmtUtcDateTime(d,true)"),"Might timestamps must preserve UTC comparison");
+
 const sources = ["PvE (Outlands e Roads)", "Coleta", "Magos Engarrafadores",
   "Núcleos de Esconderijo", "Cristais de Território", "Tesouros das Outlands",
   "Criaturas de Cristal", "Contrabandistas", "Hellgates", "As Profundezas",
