@@ -18,7 +18,7 @@ function resolveEpoch(observations,{manualStartAt=null}={}){
   const newest=accepted[accepted.length-1];
   const manualMs=manualStartAt?Date.parse(manualStartAt):NaN;
   if(!newest)return {seasonId:null,startAt:Number.isFinite(manualMs)?new Date(manualMs).toISOString():null,
-    verified:false,source:"season_not_observed"};
+    verified:Number.isFinite(manualMs),source:Number.isFinite(manualMs)?"staff_approved_start":"season_not_observed"};
   const lastOther=[...accepted].reverse().find(x=>x.id!==newest.id);
   let startAt=null,verified=false,source="initial_season_unverified";
   if(lastOther){
@@ -45,4 +45,9 @@ async function getSeasonEpoch(pool){
     "ORDER BY occurred_at DESC LIMIT 250",[[...approvedDeviceIds()]]);
   return resolveEpoch(r.rows,{manualStartAt:process.env.GUILD_SEASON_START_AT||null});
 }
-module.exports={resolveEpoch,getSeasonEpoch};
+function canPublishRankings(epoch,env=process.env){
+  // Only QA can display provisional season data. Production must be bound
+  // to a verified transition or a staff-approved start timestamp.
+  return !!epoch?.verified || env.HOMOLOG_MODE==="1";
+}
+module.exports={resolveEpoch,getSeasonEpoch,canPublishRankings};

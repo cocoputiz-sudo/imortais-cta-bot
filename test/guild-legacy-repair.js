@@ -1,5 +1,6 @@
 "use strict";
 const assert=require("node:assert/strict");
+process.env.HOMOLOG_MODE="1";
 const {classifyLegacyRows,applyLegacyRepair}=require("../src/guildLegacyRepair");
 const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 const good={

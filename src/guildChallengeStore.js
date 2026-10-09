@@ -1,8 +1,9 @@
 "use strict";
 const crypto=require("node:crypto");
 const {extractChallengeSnapshots,assemblePages}=require("./guildChallenge");
-const {getSeasonEpoch}=require("./guildSeason");
+const {getSeasonEpoch,canPublishRankings}=require("./guildSeason");
 const {approvedDeviceIds}=require("./guildRankingAuth");
+const {IMORTAIS_GUILD_ID_BASE64}=require("./guildPhotonVerified");
 
 async function initSchema(pool){
   await pool.query("CREATE TABLE IF NOT EXISTS guild_challenge_snapshots ("+
@@ -93,11 +94,19 @@ async function materialize(pool,rows){
 async function getDashboard(pool,{days=90}={}){
   const safeDays=Math.max(1,Math.min(365,Number(days)||90));
   const epoch=await getSeasonEpoch(pool);
+  if(!canPublishRankings(epoch))return {available:false,verified:false,season:epoch,
+    members:[],totalPoints:null,observedPoints:0,observedMembers:0,expectedMembers:null,
+    complete:false,meta:{error:"season_boundary_not_verified"}};
   const devices=[...approvedDeviceIds()];
+  const expectedGuild=IMORTAIS_GUILD_ID_BASE64;
   const [latest,stats,probes]=await Promise.all([
     pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members,snapshot_marker,guild_total_points FROM guild_challenge_snapshots "+
       "WHERE members_complete=true AND captured_at >= COALESCE($2::timestamptz,now()-($1::text || ' days')::interval) "+
-      "AND total_members IS NOT NULL AND device_id=ANY($3::text[]) ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays,epoch.startAt,devices]),
+      "AND total_members IS NOT NULL AND device_id=ANY($3::text[]) "+
+      "AND (layout->>'guildVerified'='true' OR EXISTS(SELECT 1 FROM albion_telemetry_events e WHERE e.event_id=guild_challenge_snapshots.response_event_id "+
+      "AND e.payload#>>'{parameters,0,kind}'='bytes' AND e.payload#>>'{parameters,0,length}'='16' "+
+      "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$4)) "+
+      "ORDER BY captured_at DESC,id DESC LIMIT 1",[safeDays,epoch.startAt,devices,expectedGuild]),
     pool.query("SELECT COUNT(*)::int AS n,MAX(captured_at) AS newest FROM guild_challenge_snapshots WHERE members_complete=true"),
     pool.query("SELECT COUNT(*)::int AS total,"+
       "COUNT(*) FILTER(WHERE lower(COALESCE(payload->>'direction','response'))='response')::int AS responses,"+
@@ -115,8 +124,11 @@ async function getDashboard(pool,{days=90}={}){
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
       "AND captured_at BETWEEN COALESCE($3::timestamptz,now()-($2::text || ' days')::interval) AND $1::timestamptz "+
       "AND device_id=ANY($4::text[]) "+
+      "AND (layout->>'guildVerified'='true' OR EXISTS(SELECT 1 FROM albion_telemetry_events e WHERE e.event_id=guild_challenge_snapshots.response_event_id "+
+      "AND e.payload#>>'{parameters,0,kind}'='bytes' AND e.payload#>>'{parameters,0,length}'='16' "+
+      "AND COALESCE(e.payload#>>'{parameters,0,base64}',e.payload#>>'{parameters,0,previewBase64}')=$5)) "+
       "ORDER BY captured_at DESC,id DESC",
-      [top.captured_at,safeDays,epoch.startAt,devices]
+      [top.captured_at,safeDays,epoch.startAt,devices,expectedGuild]
     );
     const ids=selected.rows.map(x=>x.id);
     let members=[];
