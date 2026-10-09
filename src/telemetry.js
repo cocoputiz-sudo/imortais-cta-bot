@@ -8,6 +8,7 @@ const guildMight = require("./guildMight");
 const guildChallengeStore = require("./guildChallengeStore");
 const guildManualProgress = require("./guildManualProgress");
 const guildSeason = require("./guildSeason");
+const guildRankingAuth = require("./guildRankingAuth");
 // Production may collect raw Challenge probes, but never expose this feature.
 const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
 
@@ -3782,9 +3783,10 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
      ORDER BY occurred_at ASC, received_at ASC
   `, [safeMinutes, safeLimit]);
 
-  // Guild Challenge é um ranking independente; persistir mesmo sem snapshots de Might.
-  const challenge = await guildChallengeStore.materialize(pool, rows);
-  const snapshots = guildMight.buildContributionSnapshots(rows, { minConfidence: 0.85 });
+  // Pairing grants telemetry access, not authorization for official rankings.
+  const trustedRows=rows.filter(x=>guildRankingAuth.isApprovedDevice(x.device_id));
+  const challenge = await guildChallengeStore.materialize(pool, trustedRows);
+  const snapshots = guildMight.buildContributionSnapshots(trustedRows, { minConfidence: 0.85 });
   if (!snapshots.length) {
     return { probes: rows.length, snapshots: 0, stored: 0, challengeStored: challenge.stored };
   }
@@ -3893,6 +3895,7 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
 async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
   const epoch=await guildSeason.getSeasonEpoch(pool);
+  const approvedDevices=[...guildRankingAuth.approvedDeviceIds()];
   // Leitura rápida e isolada: jamais reprocessar histórico na requisição HTTP.
   // A rotina de background cuida do backfill e dos novos lotes.
   if (!guildMightWorkerPromise && !guildMightWorkerTimer && !guildMightWorkerState.lastRunAt) {
@@ -3906,9 +3909,10 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     "FROM guild_might_snapshots s "+
     "WHERE s.members_complete=true AND s.category_mapped=true "+
     "AND COALESCE(s.layout->>'code','') <> '' "+
+    "AND s.device_id=ANY($3::text[]) "+
     "AND s.captured_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
     "ORDER BY s.captured_at ASC,s.id ASC",
-    [epoch.startAt,safeDays]);
+    [epoch.startAt,safeDays,approvedDevices]);
 
   const ids = snapshotRows.map(x => Number(x.id)).filter(Number.isFinite);
   let members = [];
@@ -3965,7 +3969,8 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
     "AND payload->>'operationName'='GetGuildMightCategoryOverview' "+
     "AND payload->>'direction'='response' "+
     "AND occurred_at>=COALESCE($1::timestamptz,now()-($2::text||' days')::interval) "+
-    "ORDER BY occurred_at DESC LIMIT 1500",[epoch.startAt,safeDays]);
+    "AND device_id=ANY($3::text[]) "+
+    "ORDER BY occurred_at DESC LIMIT 1500",[epoch.startAt,safeDays,approvedDevices]);
   const overviewByMarker=new Map();
   for(const row of rawOverview.rows){
     if(!validImortaisGuild(row.params,"GetGuildMightCategoryOverview"))continue;
