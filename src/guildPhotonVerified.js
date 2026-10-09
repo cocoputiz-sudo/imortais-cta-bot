@@ -109,67 +109,140 @@ function parseMightOverviewResponse(p) {
 }
 
 /** Reconstruct rank slots, never treat a single paginated response as a full leaderboard. */
-function assemblePages(pages,{maxWindowMs=2*60*60*1000}={}){
-  const entries=(pages||[])
-    .filter(p=>p && nonnegativeInteger(p.pageOffset) &&
+function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
+  const started=seasonStartAt==null?Number.NEGATIVE_INFINITY:Date.parse(seasonStartAt);
+  const entries=(pages||[]).filter(p=>p && nonnegativeInteger(p.pageOffset) &&
       nonnegativeInteger(p.totalMembers) && Array.isArray(p.members))
     .map(p=>({...p,ms:Date.parse(p.capturedAt||p.captured_at||0)}))
-    .filter(p=>Number.isFinite(p.ms))
+    .filter(p=>Number.isFinite(p.ms) && p.ms>=started)
     .sort((a,b)=>a.ms-b.ms);
-  if(!entries.length)return {members:[],currentMembers:[],historicalMembers:[],totalMembers:null,
-    observedMembers:0,historicalObservedMembers:0,complete:false,missingCount:0,pages:0};
+  const empty={members:[],currentMembers:[],historicalMembers:[],totalMembers:null,
+    observedMembers:0,historicalObservedMembers:0,complete:false,missingCount:0,
+    pages:0,historicalPages:0,lastCompleteAt:null,oldestMemberAt:null};
+  if(!entries.length)return empty;
   const newest=entries[entries.length-1];
-  const recent=entries.filter(p=>p.ms>=newest.ms-maxWindowMs && p.totalMembers===newest.totalMembers &&
-    (!newest.categoryCode||p.categoryCode===newest.categoryCode) &&
-    (!newest.snapshotMarker||p.snapshotMarker===newest.snapshotMarker));
-  // Full file history and recent observations must be kept separate. A historical
-  // value is NEVER copied into the live/current leaderboard.
-  function latestByPlayer(collection){
-    const chosen=new Map();
-    for(const page of collection){
-      for(const member of page.members){
-        const name=String(member.player||"").trim();
-        if(!playerName(name))continue;
-        const key=name.toLocaleLowerCase("en");
-        const old=chosen.get(key);
-        if(!old||page.ms>=old.ms){
-          chosen.set(key,{...member,player:name,
-            capturedAt:page.capturedAt,ms:page.ms,
-            stale:page.ms<newest.ms-maxWindowMs});
+  const now=asOf==null?Date.now():Date.parse(asOf);
+  const validNow=Number.isFinite(now)?now:Date.now();
+  const normalize=name=>String(name||"").trim().toLocaleLowerCase("en");
+  // A complete capture must cover ALL positions in one exact server marker.
+  // If Photon gives no marker, only a full single page can be trusted.
+  const groups=new Map();
+  for(const p of entries){
+    const marker=p.snapshotMarker==null?null:String(p.snapshotMarker);
+    const groupKey=marker==null
+      ? "unmarked:"+String(p.responseEventId||p.ms)+":"+p.pageOffset
+      : [p.categoryCode||"",marker,p.totalMembers].join("\u001f");
+    if(!groups.has(groupKey))groups.set(groupKey,[]);
+    groups.get(groupKey).push(p);
+  }
+  const completed=[];
+  for(const group of groups.values()){
+    const size=group[0].totalMembers;
+    if(group.some(p=>p.totalMembers!==size))continue;
+    const ranks=new Map();
+    let conflict=false;
+    for(const p of group){
+      for(let i=0;i<p.members.length;i++){
+        const name=normalize(p.members[i]?.player);
+        const rank=p.pageOffset+i;
+        if(!playerName(String(p.members[i]?.player||"")) || rank<0 || rank>=size){conflict=true;break;}
+        const old=ranks.get(rank);
+        if(old && normalize(old.member.player)!==name)conflict=true;
+        if(!old||p.ms>old.ms)ranks.set(rank,{member:p.members[i],ms:p.ms,capturedAt:p.capturedAt});
+      }
+      if(conflict)break;
+    }
+    const keys=new Set([...ranks.values()].map(x=>normalize(x.member.player)));
+    if(!conflict && ranks.size===size && keys.size===size && size>0){
+      const at=Math.max(...group.map(p=>p.ms));
+      completed.push({at,members:[...ranks.values()],marker:group[0].snapshotMarker??null,totalMembers:size});
+    }
+  }
+  completed.sort((a,b)=>a.at-b.at);
+  const latestComplete=completed[completed.length-1]||null;
+  const start=latestComplete?.at??Number.NEGATIVE_INFINITY;
+  const current=new Map(),deleted=new Map();
+  if(latestComplete){
+    for(const {member,ms,capturedAt} of latestComplete.members){
+      const key=normalize(member.player);
+      current.set(key,{...member,capturedAt,ms});
+    }
+    // Older valid increases are floors only for members still present in
+    // the complete capture. Their older timestamps are not used as 'fresh'.
+    for(const p of entries){
+      if(p.ms>start)break;
+      for(const m of p.members){
+        const key=normalize(m.player),existing=current.get(key);
+        if(existing && (m.might??m.points??0)>(existing.might??existing.points??0)){
+          const value=m.might??m.points;
+          if(m.might!=null)existing.might=value; else existing.points=value;
         }
       }
     }
-    return chosen;
+    const departed=new Map();
+    for(const p of entries){
+      if(p.ms>=start)break;
+      for(const m of p.members)if(!current.has(normalize(m.player))) departed.set(normalize(m.player),{
+        ...m,player:m.player,capturedAt:p.capturedAt,ms:p.ms,stale:true,removedByComplete:true});
+    }
+    for(const [k,v] of departed)deleted.set(k,v);
   }
-  const current=latestByPlayer(recent);
-  const historical=latestByPlayer(entries);
-  function sortRanks(items){
-    return [...items].sort((a,b)=>
-      (b.points??b.might??0)-(a.points??a.might??0) ||
-      a.player.localeCompare(b.player,"pt-BR"))
-      .map((m,i)=>({
-        player:m.player,rank:i+1,capturedAt:m.capturedAt,
-        stale:m.stale,
-        ...(m.points!=null?{points:m.points}:{}),
-        ...(m.might!=null?{might:m.might}:{})
-      }));
+  for(const p of entries){
+    if(p.ms<=start)continue;
+    for(const m of p.members){
+      const name=String(m.player||"").trim(),key=normalize(name);
+      if(!playerName(name))continue;
+      const prev=current.get(key);
+      // Might and Challenge are monotonic within the same season. A lower
+      // reading never overwrites a trusted higher prior observation.
+      const oldValue=prev?.might??prev?.points??-1;
+      const value=m.might??m.points??0;
+      const row={...(prev||{}),...m,player:name,capturedAt:p.capturedAt,ms:p.ms};
+      if(value<oldValue){
+        if(prev.might!=null)row.might=prev.might;
+        else row.points=prev.points;
+        row.lowerReadingIgnored=true;
+      }
+      current.set(key,row);
+      deleted.delete(key);
+    }
   }
+  const sortRanks=items=>[...items].sort((a,b)=>
+    (b.points??b.might??0)-(a.points??a.might??0) ||
+    a.player.localeCompare(b.player,"pt-BR"))
+    .map((m,i)=>({
+      player:m.player,rank:i+1,capturedAt:m.capturedAt,
+      stale:validNow-m.ms>24*60*60*1000,
+      ...(m.lowerReadingIgnored?{lowerReadingIgnored:true}:{}),
+      ...(m.removedByComplete?{removedByComplete:true}:{}),
+      ...(m.points!=null?{points:m.points}:{}),
+      ...(m.might!=null?{might:m.might}:{})
+    }));
   const members=sortRanks(current.values());
-  const historicalMembers=sortRanks([...historical.entries()]
-    .filter(([key])=>!current.has(key)).map(([,member])=>({...member,stale:true})));
+  const historicalMembers=sortRanks(deleted.values());
+  const newestMarker=String(newest.snapshotMarker??"");
+  const latestIsComplete=completed.some(c=>c.at===newest.ms &&
+    String(c.marker??"")===newestMarker);
+  const times=[...current.values()].map(x=>x.ms);
   return {
     members,currentMembers:members,historicalMembers,
-    totalMembers:newest.totalMembers,
-    observedMembers:members.length,
-    historicalObservedMembers:historical.size,
-    complete:members.length===newest.totalMembers,
+    totalMembers:newest.totalMembers,observedMembers:members.length,
+    historicalObservedMembers:current.size+deleted.size,
+    complete:latestIsComplete,
+    lastCompleteAt:latestComplete?new Date(latestComplete.at).toISOString():null,
+    oldestMemberAt:times.length?new Date(Math.min(...times)).toISOString():null,
+    oldestMemberAgeMs:times.length?Math.max(0,validNow-Math.min(...times)):null,
     missingCount:Math.max(0,newest.totalMembers-members.length),
-    pages:recent.length,historicalPages:entries.length,
+    coverage:members.length+"/"+newest.totalMembers,
+    pages:entries.filter(p=>String(p.snapshotMarker??"")===newestMarker).length,
+    historicalPages:entries.length,
     capturedAt:newest.capturedAt,
-    recentWindowStart:new Date(newest.ms-maxWindowMs).toISOString(),
+    recentWindowStart:seasonStartAt,
     categoryCode:newest.categoryCode||null,
     snapshotMarker:newest.snapshotMarker||null,
     guildTotalPoints:newest.guildTotalPoints??null,
+    observedPoints:members.reduce((total,m)=>total+(m.points??0),0),
+    observedMight:members.reduce((total,m)=>total+(m.might??0),0),
     ranksRecalculated:true
   };
 }
