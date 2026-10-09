@@ -1,13 +1,15 @@
 "use strict";
 const {buildContributionSnapshots}=require("./guildMight");
 const {validImortaisGuild}=require("./guildPhotonVerified");
+const {isApprovedDevice}=require("./guildRankingAuth");
 // Read-only planning. A legacy row lacking layout.code is NOT deleted, used
 // in the public ranking, or silently rewritten at application startup.
 function classifyLegacyRows(rows){
   const eligible=[],quarantined=[];
   for(const row of rows||[]){
     const raw=row.payload?.parameters||{};
-    const reason=!validImortaisGuild(raw,row.payload?.operationName)
+    const reason=!isApprovedDevice(row.device_id)?"device_not_approved":
+      !validImortaisGuild(raw,row.payload?.operationName)
       ?"guild_not_verified":null;
     const fake={event_id:row.response_event_id,device_id:row.device_id,
       player_name:row.player_name,occurred_at:row.occurred_at,payload:row.payload};
