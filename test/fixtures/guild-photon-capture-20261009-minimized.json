@@ -1,0 +1,105 @@
+{
+  "source": "amostra minimizada de guild-probes-20261009-00.ndjson; campos de identidade da guilda e request ids removidos; arrays reduzidos ao topo real",
+  "challengeFirst": {
+    "3": 482,
+    "5": [
+      "GiganteCarrara",
+      "ESTHER9950",
+      "JnK1"
+    ],
+    "6": [
+      5905587,
+      5179919,
+      4996374
+    ]
+  },
+  "challengeFirstLater": {
+    "3": 482,
+    "5": [
+      "GiganteCarrara",
+      "ESTHER9950",
+      "JnK1"
+    ],
+    "6": [
+      5906593,
+      5193634,
+      5009631
+    ]
+  },
+  "challengePage19": {
+    "3": 482,
+    "4": 19,
+    "5": [
+      "HYPNOSBR01",
+      "GoldVex"
+    ],
+    "6": [
+      1769816,
+      1734612
+    ]
+  },
+  "mightOverview": {
+    "2": [
+      "CASTLE",
+      "CORRUPTED",
+      "DRAGON_AREA",
+      "DRAGON_HUNT",
+      "ENERGYCRYSTAL",
+      "GATHERING",
+      "GVGSEASON",
+      "HELLDUNGEON",
+      "HELLGATE",
+      "POWERCORE",
+      "PVE",
+      "SMUGGLERS",
+      "SPIDERS",
+      "TREASURES"
+    ],
+    "3": [
+      200180630894,
+      1115060430,
+      25462052000,
+      4693532190,
+      263103707483,
+      21854670330,
+      422358686,
+      12309719323,
+      2793358436,
+      153508588840,
+      271616420356,
+      140466820035,
+      51392948154,
+      57819850047
+    ]
+  },
+  "mightCastleFirst": {
+    "1": "CASTLE",
+    "3": 200180630894,
+    "4": 328,
+    "6": [
+      "BadMack",
+      "ZendsXD",
+      "HJR6"
+    ],
+    "7": [
+      4869656034,
+      4081404282,
+      4034899669
+    ]
+  },
+  "mightPveFirst": {
+    "1": "PVE",
+    "3": 271616420356,
+    "4": 465,
+    "6": [
+      "ESTHER9950",
+      "GiganteCarrara",
+      "Baldur157"
+    ],
+    "7": [
+      11556080475,
+      9893320504,
+      8775404406
+    ]
+  }
+}
