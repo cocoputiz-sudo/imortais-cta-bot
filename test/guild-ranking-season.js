@@ -44,6 +44,15 @@ const lower={...partial,capturedAt:"2026-10-09T21:31:00Z",
 const lowerDash=assemblePages([...baseline,partial,lower],{asOf:"2026-10-09T22:00:00Z"});
 assert.equal(lowerDash.members.find(x=>x.player==="Member001").points,1200,
   "single lower reading cannot decrease season floor");
+const attributed=assemblePages([
+ {...baseline[0],deviceId:"DEVICE-A",observer:"Observer A"},
+ {...partial,deviceId:"DEVICE-B",observer:"Observer B"},
+ {...lower,deviceId:"DEVICE-C",observer:"Observer C"}
+]);
+assert.equal(attributed.members.find(m=>m.player==="Member001").points,1200);
+assert.equal(attributed.members.find(m=>m.player==="Member001").sourceDeviceId,"DEVICE-B",
+  "lower later observation must not steal high-score attribution");
+assert.equal(attributed.members.find(m=>m.player==="Member001").sourceObserver,"Observer B");
 const oldMember=assemblePages([
  {pageOffset:0,totalMembers:1,snapshotMarker:"old",capturedAt:"2026-10-09T01:00:00Z",members:[{player:"Departed",points:50}]},
  {pageOffset:0,totalMembers:1,snapshotMarker:"new",capturedAt:after,members:[{player:"Current",points:70}]}
