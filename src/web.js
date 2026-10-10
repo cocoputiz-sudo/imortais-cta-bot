@@ -3049,6 +3049,13 @@ const PAGE = `<!doctype html>
 
   var guildChallengeVisible=__CHALLENGE_VISIBILITY__;
   var guildMightDashboard=null, guildChallengeDashboard=null, guildMightIngestStatus=null, guildProgressRows=[], guildSelectedMightCategory='all', guildMightCards=[];
+  var guildMightSearchTerm='';
+  function gmFilterPlayers(value){
+    guildMightSearchTerm=String(value||'').trim().toLocaleLowerCase();
+    Array.prototype.forEach.call(document.querySelectorAll('[data-gm-player]'),function(row){
+      row.style.display=String(row.getAttribute('data-gm-player')||'').toLocaleLowerCase().includes(guildMightSearchTerm)?'':'none';
+    });
+  }
   function gmManual(code){return guildProgressRows.find(function(p){return p.categoryCode===code;})||null;}
   function gmEditManual(code){
     if(!authState.isSiteAdmin)return;
@@ -3137,7 +3144,7 @@ const PAGE = `<!doctype html>
     return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+(type==='challenge'?'Chavinhas':'Might')+'</th><th>Capturado em</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+extra+'</tr></thead><tbody>'
       +(members&&members.length?members.map(function(m,i){
         var v=Number(type==='challenge'?m.points:m.might)||0;
-        return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+esc(gmDate(m.capturedAt))+(m.stale?' · DESATUALIZADO':'')+'</td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
+        return '<tr data-gm-player="'+esc(m.player||'?')+'"><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+esc(gmDate(m.capturedAt))+(m.stale?' · DESATUALIZADO':'')+'</td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
           +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')
           +(authState.isSiteAdmin?'<td>'+esc(m.sourceDeviceId||'não informado')+'</td><td>'+esc(m.sourceObserver||'não informado')+'</td>':'')+'</tr>';
       }).join(''):'<tr><td colspan="'+(authState.isSiteAdmin?'8':'6')+'" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
@@ -3217,6 +3224,7 @@ const PAGE = `<!doctype html>
       +'<button class="gm-action" id="gm-export-html">📄 Emitir relatório HTML</button>'
       +'<button class="gm-action" id="gm-export-csv">📥 Exportar CSV</button>'
       +'<button class="gm-action" id="gm-refresh">↻ Atualizar dados</button></div>'
+      +'<div class="panel" style="padding:12px;margin:12px 0"><label for="gm-player-search"><b>🔎 Buscar jogador em Might e Chavinhas</b></label><input id="gm-player-search" type="search" autocomplete="off" placeholder="Digite o nome do jogador..." style="display:block;width:100%;max-width:430px;padding:10px;margin-top:7px" /></div>'
       +'<div class="note">Ranking CONSOLIDADO da temporada · última captura '+esc(gmDate(meta.newestAt))+' · temporada '+esc(meta.season&&meta.season.seasonId||'não identificada')+(meta.season&&!meta.season.verified?' (início ainda não verificado)':'')+'. Um valor com mais de 24h continua na soma e aparece identificado. Season Points oficiais não estão presentes nesses pacotes.</div>'
       +'<h3>Escolha uma fonte de Might</h3><div class="gm-card-grid">'
       +guildMightCards.map(function(c){
@@ -3248,7 +3256,7 @@ const PAGE = `<!doctype html>
       html+='<div class="panel"><h3>🏆 Ranking geral de Might observado</h3>'
         +'<div class="note">Soma dos maiores valores verificados por jogador em cada categoria da temporada. Fontes com idade maior que 24h permanecem incluídas e identificadas nos cards.</div>'
         +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>Might observado</th><th>SP estimado</th><th>Categorias</th></tr></thead><tbody>'
-        +(ranking.length?ranking.map(function(m,i){return '<tr><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td>'+fmtS(m.might||0)+'</td><td>'+gmSp(m.estimatedSp)+'</td><td>'+fmtS(m.categories||0)+'</td></tr>';}).join(''):'<tr><td colspan="5">Aguardando snapshots.</td></tr>')
+        +(ranking.length?ranking.map(function(m,i){return '<tr data-gm-player="'+esc(m.player||'?')+'"><td>'+(i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td>'+fmtS(m.might||0)+'</td><td>'+gmSp(m.estimatedSp)+'</td><td>'+fmtS(m.categories||0)+'</td></tr>';}).join(''):'<tr><td colspan="5">Aguardando snapshots.</td></tr>')
         +'</tbody></table></div></div>';
     }
     if(guildChallengeVisible)html+='<div class="panel"><div class="gm-panel-title"><h3>🔑 Guild Challenge · ranking das chavinhas</h3><span class="pill '+(ch.available?'ok':'')+'">'+(ch.available?'SNAPSHOT CAPTURADO':'AGUARDANDO CAPTURA')+'</span></div>'
@@ -3271,6 +3279,9 @@ const PAGE = `<!doctype html>
     if(editProgress)editProgress.onclick=function(){var sc=guildMightCards.find(function(c){return c.id===guildSelectedMightCategory;});if(sc&&sc.snapshot&&sc.snapshot.layout)gmEditManual(sc.snapshot.layout.code);};
     var editChallenge=document.getElementById('gm-edit-challenge-progress');
     if(editChallenge)editChallenge.onclick=function(){gmEditManual('GUILD_CHALLENGE');};
+    var playerSearch=document.getElementById('gm-player-search');
+    if(playerSearch){playerSearch.value=guildMightSearchTerm;playerSearch.addEventListener('input',function(){gmFilterPlayers(playerSearch.value);});}
+    gmFilterPlayers(guildMightSearchTerm);
     document.getElementById('gm-all').onclick=function(){guildSelectedMightCategory='all';drawGuildMight();};
     document.getElementById('gm-refresh').onclick=function(){renderGuildMight();};
     document.getElementById('gm-export-html').onclick=function(){gmExport('html');};
