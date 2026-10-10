@@ -14,6 +14,7 @@ const crypto = require("crypto");
 const telemetry = require("./telemetry");
 const scout = require("./scout");
 const guildroster = require("./guildroster");
+const contributorWeekly = require("./contributorWeekly");
 const path = require("path");
 // Challenge appears only when explicitly enabled by the dedicated feature flag.
 const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
@@ -216,7 +217,10 @@ function startWebServer(client, opts) {
     try {
       const body = req.body || {};
       const result = await guildroster.analyze(db, { text: body.text, eventId: body.eventId });
-      if (result && result.ok) return res.json(result);
+      if (result && result.ok) {
+        result.savedRoster=await contributorWeekly.saveRoster(db.pool,body.text,sess.id);
+        return res.json(result);
+      }
 
       const error = result && result.error ? String(result.error) : "server";
       if (["empty", "unknown_format", "too_large", "too_many_lines", "no_members"].includes(error)) {
@@ -227,6 +231,37 @@ function startWebServer(client, opts) {
     } catch (e) {
       console.error("/api/guild-roster/analyze:", e?.message || e);
       return res.status(500).json({ error: "server" });
+    }
+  });
+
+  // Persistent guild paste can also be saved when there is no open CTA.
+  app.post("/api/guild-roster/save", async (req,res)=>{
+    const sess=requireEditor(req,res);if(!sess)return;
+    try{
+      const saved=await contributorWeekly.saveRoster(db.pool,req.body?.text,sess.id);
+      return res.json({ok:true,saved});
+    }catch(e){
+      const error=String(e.message||"server");
+      return res.status(["empty","unknown_format","too_large","too_many_lines","no_members"].includes(error)?400:500).json({error});
+    }
+  });
+  // Officers may view; thresholds and weekly reminder may only be changed by admins.
+  app.get("/api/contributors/weekly",async(req,res)=>{
+    if(!requireEditor(req,res))return;
+    try{res.json(await contributorWeekly.getReport(db.pool));}
+    catch(e){console.error("[contributor report]",e);res.status(500).json({error:"report_failed"});}
+  });
+  app.get("/api/contributors/settings",async(req,res)=>{
+    if(!requireEditor(req,res))return;
+    try{res.json(await contributorWeekly.getSettings(db.pool));}
+    catch(e){res.status(500).json({error:"settings_failed"});}
+  });
+  app.post("/api/contributors/settings",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    try{res.json(await contributorWeekly.saveSettings(db.pool,req.body||{},sess.id));}
+    catch(e){
+      const err=String(e.message||"");
+      res.status(["minima_invalidos","horario_invalido","lembrete_invalido"].includes(err)?400:500).json({error:err||"settings_failed"});
     }
   });
 
@@ -3334,6 +3369,7 @@ const PAGE = `<!doctype html>
       +'<label style="min-width:190px"><span class="note">CTA</span><select id="guild-roster-event" class="brief-select" style="width:100%">'+guildRosterCtaOptions()+'</select></label>'
       +'<button type="button" class="btn primary" id="guild-roster-analyze">Analisar</button>'
       +'<span id="guild-roster-status" class="note"></span></div>'
+      +'<button type="button" class="btn ghost" id="guild-roster-save" style="margin:8px 0">Salvar lista de cargos sem CTA aberto</button>'
       +'<textarea id="guild-roster-text" class="brief-input" rows="9" autocomplete="off" spellcheck="false" placeholder="Cole aqui a lista exportada da Guild..." style="width:100%;margin-top:10px;resize:vertical"></textarea>'
       +'<div id="guild-roster-result" style="margin-top:14px"></div>'
       +'</div></details>';
@@ -3425,6 +3461,16 @@ const PAGE = `<!doctype html>
     if(!authState.canEdit) return;
     var btn=document.getElementById('guild-roster-analyze');
     if(!btn) return;
+    var saveBtn=document.getElementById('guild-roster-save');
+    if(saveBtn)saveBtn.onclick=function(){
+      var box=document.getElementById('guild-roster-text'),status=document.getElementById('guild-roster-status');
+      saveBtn.disabled=true;status.textContent='Salvando lista da guilda…';
+      fetch('/api/guild-roster/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:box?box.value:''})})
+       .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(guildRosterErrorText(x.error));return x;});})
+       .then(function(x){status.textContent='Lista salva em '+new Date(x.saved.imported_at).toLocaleString('pt-BR')+' · '+x.saved.member_count+' membros · '+x.saved.contributors+' contribuintes';})
+       .catch(function(e){status.textContent='Erro: '+e.message;})
+       .finally(function(){saveBtn.disabled=false;});
+    };
     btn.onclick=function(){
       var textEl=document.getElementById('guild-roster-text');
       var eventEl=document.getElementById('guild-roster-event');
@@ -3447,10 +3493,10 @@ const PAGE = `<!doctype html>
         }
         result.innerHTML=guildRosterResultHtml(x.data);
         bindGuildRosterResult(x.data);
+        if(x.data.savedRoster) status.textContent='Lista e cargos salvos: '+x.data.savedRoster.contributors+' contribuintes';
       }).catch(function(e){
         result.innerHTML='<div class="empty-note">Erro ao analisar: '+esc(e.message)+'</div>';
       }).finally(function(){
-        status.textContent='';
         btn.disabled=false;
       });
     };
