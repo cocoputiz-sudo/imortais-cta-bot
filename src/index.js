@@ -22,7 +22,7 @@ const navigation = require("./navigation");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
 const locale = require("./locale");
-const { ctaPingTime } = require("./ctatime");
+const { ctaPingTime, timeForCtaLabelUTC: timeToTodayUTC, sortCtaTimes } = require("./ctatime");
 const { parseConsolidationSteps, isCtaFrozen, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
@@ -67,20 +67,6 @@ function localizedWeaponOptions(weapons, target) {
 }
 function isMasterOfWar(interaction) {
   return !!interaction.member?.roles?.cache?.has(MASTER_OF_WAR_ROLE_ID);
-}
-
-function timeToTodayUTC(label) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(label.trim());
-  if (!m) return null;
-  const now = new Date();
-  let target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-    parseInt(m[1], 10), parseInt(m[2], 10), 0, 0));
-  // Se o horario ja passou hoje (ex.: CTA 01:20 aberto as 22:00 UTC), o alvo e amanha.
-  // Margem de 2h para nao empurrar um CTA que acabou de comecar para o dia seguinte.
-  if (target.getTime() < now.getTime() - 2 * 60 * 60000) {
-    target = new Date(target.getTime() + 24 * 60 * 60000);
-  }
-  return target;
 }
 
 // contexto de encaixe do CTA: quem é core confirmado + se ainda falta >10min pro início
@@ -662,14 +648,8 @@ async function onTimeConfirm(interaction) {
   const [, callerId, csv] = interaction.customId.split("|");
   if (interaction.user.id !== callerId)
     return interaction.reply({ content: "Só quem chamou confirma.", flags: MessageFlags.Ephemeral });
-  const times = csv.split(",").filter(Boolean);
+  const times = sortCtaTimes(csv.split(",").filter(Boolean));
   if (!times.length) return interaction.reply({ content: "Marca um horário.", flags: MessageFlags.Ephemeral });
-
-  times.sort((a, b) => {
-    const [ha, ma] = a.split(":").map(Number);
-    const [hb, mb] = b.split(":").map(Number);
-    return (ha * 60 + ma) - (hb * 60 + mb);
-  });
 
   await interaction.update({ content: `⏳ Criando ${times.length} planilha(s)...`, components: [] });
 
