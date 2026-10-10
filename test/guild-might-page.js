@@ -29,15 +29,16 @@ const stagedPage=execFileSync(process.execPath,
    env:{...process.env,HOMOLOG_MODE:"1",IMORTAIS_CHALLENGE_UI:"1"},
    encoding:"utf8"});
 assert(stagedPage.includes("var guildChallengeVisible=true;"),
-  "Challenge is available only in explicitly opted-in homolog");
+  "Challenge is independently enabled by feature flag");
 const productionWithOverride=execFileSync(process.execPath,
   ["-e","process.stdout.write(require('./src/web').renderWarRoomPage())"],
   {cwd:require("node:path").join(__dirname,".."),
    env:{...process.env,HOMOLOG_MODE:"0",IMORTAIS_CHALLENGE_UI:"1"},
    encoding:"utf8"});
-assert(productionWithOverride.includes("var guildChallengeVisible=false;"),
-  "Challenge cannot be enabled outside homolog even if a flag is accidentally set");
+assert(productionWithOverride.includes("var guildChallengeVisible=true;"),
+  "Challenge is enabled by its own flag in production");
 const telemetrySource=fs.readFileSync(require.resolve("../src/telemetry"),"utf8");
+assert(telemetrySource.includes('const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1"'), "telemetry must use the independent feature flag");
 assert(telemetrySource.includes('if(!CHALLENGE_UI_ENABLED)return res.status(404)'),
   "Ranking API must refuse access when Challenge is hidden");
 assert(telemetrySource.includes('r.categoryCode!=="GUILD_CHALLENGE"'),
@@ -64,7 +65,7 @@ assert(page.includes("authState.isSiteAdmin?'<button"),
 assert(page.includes('id="gm-edit-progress"'),
   "Might edit level / season points button must exist");
 assert(page.includes('id="gm-edit-challenge-progress"'),
-  "Challenge editor must exist only in authorized homolog");
+  "Challenge editor remains admin-only and flag-dependent");
 assert(page.includes("gmEditManual(sc.snapshot.layout.code)"),
   "Might button must open the real editing flow with category code");
 assert(page.includes("gmEditManual('GUILD_CHALLENGE')"),
