@@ -43,6 +43,26 @@ assert.equal(after.historicalMembers[0].player,"Player329");
 assert.equal(after.sweepCoverage,"329/329");
 const mixed=sweep(names).map((p,i)=>({...p,deviceId:i%2?"SECOND":"FIRST"}));
 assert.equal(assembleMightPages(mixed).sweepComplete,false);
+
+ // Two simultaneous observers can sweep the same category independently,
+ // but a stitched mixture of one device's first page + another device's
+ // later pages NEVER certifies coverage or a member's departure.
+ const onlineA=sweep(names.slice(0,329),8*3600000,"OBSERVER-A");
+ const onlineB=sweep(names,8*3600000+20000,"OBSERVER-B");
+ const concurrent=assembleMightPages([...first,...onlineA,...onlineB]);
+ assert.equal(concurrent.sweepComplete,true);
+ assert.equal(concurrent.observedMembers,330,
+   "B still confirms all 330; an A sweep of 329 cannot wrongly remove Player329");
+ assert.equal(concurrent.historicalMembers.length,0);
+ const splitAcrossDevices=[
+   ...onlineA.slice(0,2),
+   ...onlineB.slice(2)
+ ];
+ const noStitch=assembleMightPages([...first,...splitAcrossDevices]);
+ assert.equal(noStitch.observedMembers,330);
+ assert.equal(noStitch.lastCompleteAt,r.lastCompleteAt,
+   "new pages from separate observers cannot certify a newer joint sweep");
+
 const tooSlow=sweep(names).map((p,i)=>({...p,capturedAt:new Date(base+i*130000).toISOString()}));
 assert.equal(assembleMightPages(tooSlow).sweepComplete,false);
 const unstable=sweep(names).map((p,i)=>i===2?{...p,totalMembers:331}:p);
