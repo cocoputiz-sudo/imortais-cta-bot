@@ -88,4 +88,26 @@ const sources = ["PvE (Outlands e Roads)", "Coleta", "Magos Engarrafadores",
   "Masmorras Corrompidas", "Castelos e Postos Avançados",
   "Caça aos Dragões", "Terras Ancestrais"];
 sources.forEach(name => assert(page.includes(name), "missing Might source: " + name));
+
+// Regression: loading() mutates innerHTML outside setView's cache. Even when
+// the next API response has identical HTML, a second draw must restore buttons.
+const view={innerHTML:""};
+const ctx={document:{getElementById(){return view;}}};
+const setViewSource=page.match(/function setView\(id,html\)\{[^\n]*\}/);
+const loadingSource=page.match(/function loading\(id,title\)\{[^\n]*\}/);
+assert(setViewSource && loadingSource,"view functions must exist");
+vm.runInNewContext("var _viewCache={};\n"+setViewSource[0]+"\n"+loadingSource[0],ctx);
+const unchangedMight='<button id="gm-refresh">Atualizar dados</button>';
+ctx.setView("view-might",unchangedMight);
+ctx.loading("view-might","Guild Might");
+assert(!view.innerHTML.includes('gm-refresh'),"loading must replace the view");
+ctx.setView("view-might",unchangedMight);
+assert(view.innerHTML.includes('gm-refresh'),"cached HTML must redraw after loading");
+assert(page.includes("gmIngestPanel(guildMightIngestStatus)"),
+  "admin ingest diagnostics must render alongside Might without replacing ranking");
+assert(page.includes("if(!authState.isSiteAdmin)return '';"),
+  "members must never see admin ingest data");
+assert(page.includes("/api/telemetry/guild-might-ingest-status"),
+  "admin-only diagnostics must be fetched by the Might page");
+
 console.log("guild might War Room: 14 cards, exports and JS syntax ok");
