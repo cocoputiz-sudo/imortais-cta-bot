@@ -46,6 +46,27 @@ async function main(){
 
  const repeat=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(repeat.stored,0,"idempotência");
+ // Prior parser marked a page complete without preserving its Photon category
+ // code. Repair must be driven by the authenticated raw response, not guesses.
+ await db.pool.query(
+   "UPDATE guild_might_snapshots SET category_key='name:pve',category_name='PvE',"+
+   "layout='{\"namesPath\":\"6\",\"mightPath\":\"7\"}'::jsonb,members_complete=true WHERE id=$1",[sid]);
+ await db.pool.query("UPDATE guild_might_snapshot_members SET member_rank=NULL WHERE snapshot_id=$1",[sid]);
+ const restoredLegacy=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(restoredLegacy.stored,1,"verified response repairs complete-but-uncoded PvE page");
+ const restoredRow=await db.pool.query(
+   "SELECT category_name,category_key,layout->>'code' AS code,layout->>'guildVerified' AS guild_verified,members_complete "+
+   "FROM guild_might_snapshots WHERE id=$1",[sid]);
+ assert.equal(restoredRow.rows[0].code,"PVE");
+ assert.equal(restoredRow.rows[0].guild_verified,"true");
+ assert.equal(restoredRow.rows[0].category_name,"PvE (Outlands e Roads)");
+ assert.equal(restoredRow.rows[0].members_complete,true);
+ const restoredRanks=await db.pool.query(
+   "SELECT member_rank FROM guild_might_snapshot_members WHERE snapshot_id=$1 ORDER BY member_rank",[sid]);
+ assert.deepEqual(restoredRanks.rows.map(r=>r.member_rank),[1,2,3]);
+ assert.equal((await telemetry.materializeGuildMightRecent({minutes:10,limit:100})).stored,0,
+   "verified migrated page must become idempotent again");
+
 
  // Two observers can receive identical data with distinct event IDs.
  // Each observer's evidence must remain separately reversible after revocation.
