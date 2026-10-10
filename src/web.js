@@ -15,8 +15,8 @@ const telemetry = require("./telemetry");
 const scout = require("./scout");
 const guildroster = require("./guildroster");
 const path = require("path");
-// Challenge must never become visible through the production War Room.
-const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
+// Challenge appears only when explicitly enabled by the dedicated feature flag.
+const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
 
 // ---- config do login (OAuth2 Discord) ----
 const CLIENT_ID     = process.env.DISCORD_CLIENT_ID || "1541617852056862801";
