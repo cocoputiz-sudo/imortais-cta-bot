@@ -1,14 +1,14 @@
 "use strict";
 const {buildContributionSnapshots}=require("./guildMight");
 const {validImortaisGuild}=require("./guildPhotonVerified");
-const {isApprovedDevice}=require("./guildRankingAuth");
+const {approvedDeviceIds}=require("./guildRankingAuth");
 // Read-only planning. A legacy row lacking layout.code is NOT deleted, used
 // in the public ranking, or silently rewritten at application startup.
-function classifyLegacyRows(rows){
+function classifyLegacyRows(rows,{approvedIds=new Set()}={}){
   const eligible=[],quarantined=[];
   for(const row of rows||[]){
     const raw=row.payload?.parameters||{};
-    const reason=!isApprovedDevice(row.device_id)?"device_not_approved":
+    const reason=!approvedIds.has(String(row.device_id||""))?"device_not_approved":
       !validImortaisGuild(raw,row.payload?.operationName)
       ?"guild_not_verified":null;
     const fake={event_id:row.response_event_id,device_id:row.device_id,
@@ -32,7 +32,7 @@ async function planLegacyRepair(pool,{limit=5000}={}){
     "WHERE s.members_complete=true AND "+
     "(s.category_mapped=false OR COALESCE(s.layout->>'code','')='') "+
     "ORDER BY s.id ASC LIMIT $1",[n]);
-  return classifyLegacyRows(result.rows);
+  return classifyLegacyRows(result.rows,{approvedIds:await approvedDeviceIds(pool)});
 }
 // A caller must opt in explicitly. A copy of old snapshot metadata + member
 // rows is journaled before each transactionally applied correction.
