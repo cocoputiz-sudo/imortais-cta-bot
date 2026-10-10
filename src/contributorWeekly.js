@@ -264,17 +264,17 @@ async function tick(pool,client,{channelId,now=new Date()}={}){
     const cfg=await getSettings(pool);
     if(!cfg.reminderEnabled)return {skipped:"disabled"};
     const schedule=scheduledForWeek(now,cfg),ms=new Date(now).getTime()-schedule.getTime();
-    if(ms<0||ms>DAY_MS)return {skipped:"not_due"};
+    if(ms<0||ms>=7*DAY_MS)return {skipped:"not_due"};
     if(!channelId)return {skipped:"staff_channel_unconfigured"};
     const channel=await client.channels.fetch(channelId).catch(()=>null);
-    if(!channel||!channel.send||channel.guildId!==process.env.GUILD_ID)return {skipped:"staff_channel_missing"};
+    if(!channel||!channel.send||String(channel.guildId)!==String(process.env.GUILD_ID||"683411304408416285"))return {skipped:"staff_channel_missing"};
     const week=mondayUtc(now).toISOString().slice(0,10);
     await pool.query("INSERT INTO contributor_weekly_notifications(week_key) VALUES($1::date) ON CONFLICT DO NOTHING",[week]);
     const claim=async(prefix)=>pool.query(
       "UPDATE contributor_weekly_notifications SET "+prefix+"_claimed_at=now() "+
       "WHERE week_key=$1::date AND "+prefix+"_sent_at IS NULL "+
       "AND ("+prefix+"_claimed_at IS NULL OR "+prefix+"_claimed_at<now()-interval '10 minutes') RETURNING week_key",[week]);
-    const reminder=await claim("reminder");
+    const reminder=ms<=DAY_MS?await claim("reminder"):{rowCount:0};
     if(reminder.rowCount){
       try{
         await channel.send({content:"📋 **VARREDURA SEMANAL DE MIGHT — IMORTAIS**\nHoje é dia de varredura INTEGRAL do Guild Might: percorram todas as páginas, especialmente PvE e Coleta, com o Combat Client pareado. A classificação de contribuintes só utiliza duas varreduras integrais com pelo menos 6 dias entre elas. Confira o relatório no War Room.",allowedMentions:{parse:[]}});
