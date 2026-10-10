@@ -44,6 +44,7 @@ on:
       - "test/guild-might-sweep.js"
       - "test/guild-legacy-repair.js"
       - "test/guild-might-page.js"
+      - "test/guild-might-ingest-diagnostics.js"
       - "test/guild-manual-progress.js"
       - "test/guild-photon-capture.js"
       - "test/pair-route.js"
@@ -126,6 +127,7 @@ jobs:
           node test/guild-photon-capture.js
           node test/guild-challenge.js
           node test/guild-might-page.js
+          node test/guild-might-ingest-diagnostics.js
           node test/guild-manual-progress.js
       - name: Telemetry pair security
         run: node test/pair-route.js

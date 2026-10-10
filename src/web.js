@@ -15,8 +15,8 @@ const telemetry = require("./telemetry");
 const scout = require("./scout");
 const guildroster = require("./guildroster");
 const path = require("path");
-// Challenge must never become visible through the production War Room.
-const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
+// Challenge appears only when explicitly enabled by the dedicated feature flag.
+const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
 
 // ---- config do login (OAuth2 Discord) ----
 const CLIENT_ID     = process.env.DISCORD_CLIENT_ID || "1541617852056862801";
@@ -1223,7 +1223,7 @@ const PAGE = `<!doctype html>
   var lootSelectedEvent=null;
   var lootSelectedDay=null;
   var _viewCache={};
-  function setView(id,html){ if(_viewCache[id]===html) return; _viewCache[id]=html; var el=document.getElementById(id); if(el) el.innerHTML=html; }
+  function setView(id,html){ var el=document.getElementById(id); if(!el)return; if(_viewCache[id]===html && el.innerHTML===html)return; _viewCache[id]=html; el.innerHTML=html; }
   var combatSelectedEvent=null;
   var combatSelectedDay=null;
   var confirmPartySelection={};
@@ -3048,7 +3048,7 @@ const PAGE = `<!doctype html>
 
 
   var guildChallengeVisible=__CHALLENGE_VISIBILITY__;
-  var guildMightDashboard=null, guildChallengeDashboard=null, guildProgressRows=[], guildSelectedMightCategory='all', guildMightCards=[];
+  var guildMightDashboard=null, guildChallengeDashboard=null, guildMightIngestStatus=null, guildProgressRows=[], guildSelectedMightCategory='all', guildMightCards=[];
   function gmManual(code){return guildProgressRows.find(function(p){return p.categoryCode===code;})||null;}
   function gmEditManual(code){
     if(!authState.isSiteAdmin)return;
@@ -3098,6 +3098,25 @@ const PAGE = `<!doctype html>
     return 'mais antigo há '+Math.floor(age/86400000)+'d';
   }
   function gmSp(x){return x==null?'—':fmtS(Math.round(Number(x)||0));}
+  function gmIngestPanel(report){
+    if(!authState.isSiteAdmin)return '';
+    if(!report)return '<div class="panel"><h3>Recebimento de Might · últimas 24h (admin)</h3><div class="note">Verificando dispositivos...</div></div>';
+    if(report.error)return '<div class="panel"><h3>Recebimento de Might · últimas 24h (admin)</h3><div class="note">Diagnóstico indisponível: '+esc(report.error)+'</div></div>';
+    var devices=report.devices||[];
+    return '<div class="panel"><h3>Recebimento de Might · últimas 24h (admin)</h3>'
+      +'<div class="note">Eventos brutos recebidos: '+fmtS(report.totalEvents||0)
+      +' · sem token de pareamento ativo: '+fmtS(report.excludedNoPairing||0)
+      +' · pareados mas fora da lista autorizada: '+fmtS(report.excludedByRestriction||0)
+      +' · elegíveis para processamento: '+fmtS(report.eligibleEvents||0)+'</div>'
+      +'<div class="note">Elegibilidade é recalculada com os tokens ATUAIS. Isso não significa que cada evento virou um snapshot. O método de autenticação original não é armazenado por evento.</div>'
+      +'<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Dispositivo</th><th>Eventos</th><th>Respostas</th><th>Última recepção</th><th>Situação</th></tr></thead><tbody>'
+      +(devices.length?devices.map(function(d){
+        var state=d.status==='sem_pareamento'?'SEM PAREAMENTO':d.status==='restrito'?'RESTRITO':'ELEGÍVEL';
+        return '<tr><td>'+esc(d.deviceId||'desconhecido')+'</td><td>'+fmtS(d.eventCount||0)
+          +'</td><td>'+fmtS(d.responseCount||0)+'</td><td>'+esc(gmDate(d.lastReceivedAt))
+          +'</td><td>'+state+'</td></tr>';
+      }).join(''):'<tr><td colspan="5">Nenhum evento recebido nas últimas 24 horas.</td></tr>')+'</tbody></table></div></div>';
+  }
   function gmCards(categories){
     var found={};
     var cards=guildMightCatalog.map(function(info,i){
@@ -3191,6 +3210,7 @@ const PAGE = `<!doctype html>
       +'<div class="stat g"><div class="k">Categorias mapeadas</div><div class="v">'+fmtS(meta.mappedCategoryCount||0)+'</div></div>'
       +'<div class="stat a"><div class="k">Jogadores observados</div><div class="v">'+fmtS(meta.playerCount||0)+'</div></div>'
       +'<div class="stat p"><div class="k">Snapshots persistidos</div><div class="v">'+fmtS(meta.storedSnapshots||0)+'</div></div></div>'
+      +gmIngestPanel(guildMightIngestStatus)
       +(meta.configurationNotices&&meta.configurationNotices.length
         ?'<div class="note gm-config-warning" role="alert"><strong>⚠ Guild Might aguardando configuração</strong><p>'+meta.configurationNotices.map(function(msg){return esc(msg);}).join('</p><p>')+'</p>O ranking não será publicado até essas verificações serem concluídas. Nenhum dado foi apagado.</div>':'')
       +'<div class="gm-controls"><button class="gm-action" id="gm-all">Ranking geral</button>'
@@ -3262,8 +3282,10 @@ const PAGE = `<!doctype html>
       fetch('/api/telemetry/guild-might?days=90',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Might HTTP '+r.status);return r.json();}),
       (guildChallengeVisible?fetch('/api/telemetry/guild-challenge?days=90',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Challenge HTTP '+r.status);return r.json();}):Promise.resolve({available:false,members:[]}))
         .catch(function(e){return {available:false,members:[],error:e.message||String(e)};}),
-      fetch('/api/telemetry/guild-progress',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Progress HTTP '+r.status);return r.json();}).catch(function(){return {rows:[]};})
-    ]).then(function(data){guildMightDashboard=data[0];guildChallengeDashboard=data[1];guildProgressRows=data[2].rows||[];drawGuildMight();})
+      fetch('/api/telemetry/guild-progress',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Progress HTTP '+r.status);return r.json();}).catch(function(){return {rows:[]};}),
+      (authState.isSiteAdmin?fetch('/api/telemetry/guild-might-ingest-status',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Diagnóstico HTTP '+r.status);return r.json();}):Promise.resolve(null))
+        .catch(function(e){return {error:e.message||String(e)};})
+    ]).then(function(data){guildMightDashboard=data[0];guildChallengeDashboard=data[1];guildProgressRows=data[2].rows||[];guildMightIngestStatus=data[3];drawGuildMight();})
       .catch(function(e){setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao consultar Might: '+esc(e.message)+'</div>');});
   }
 

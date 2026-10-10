@@ -29,15 +29,16 @@ const stagedPage=execFileSync(process.execPath,
    env:{...process.env,HOMOLOG_MODE:"1",IMORTAIS_CHALLENGE_UI:"1"},
    encoding:"utf8"});
 assert(stagedPage.includes("var guildChallengeVisible=true;"),
-  "Challenge is available only in explicitly opted-in homolog");
+  "Challenge is independently enabled by feature flag");
 const productionWithOverride=execFileSync(process.execPath,
   ["-e","process.stdout.write(require('./src/web').renderWarRoomPage())"],
   {cwd:require("node:path").join(__dirname,".."),
    env:{...process.env,HOMOLOG_MODE:"0",IMORTAIS_CHALLENGE_UI:"1"},
    encoding:"utf8"});
-assert(productionWithOverride.includes("var guildChallengeVisible=false;"),
-  "Challenge cannot be enabled outside homolog even if a flag is accidentally set");
+assert(productionWithOverride.includes("var guildChallengeVisible=true;"),
+  "Challenge is enabled by its own flag in production");
 const telemetrySource=fs.readFileSync(require.resolve("../src/telemetry"),"utf8");
+assert(telemetrySource.includes('const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1"'), "telemetry must use the independent feature flag");
 assert(telemetrySource.includes('if(!CHALLENGE_UI_ENABLED)return res.status(404)'),
   "Ranking API must refuse access when Challenge is hidden");
 assert(telemetrySource.includes('r.categoryCode!=="GUILD_CHALLENGE"'),
@@ -64,7 +65,7 @@ assert(page.includes("authState.isSiteAdmin?'<button"),
 assert(page.includes('id="gm-edit-progress"'),
   "Might edit level / season points button must exist");
 assert(page.includes('id="gm-edit-challenge-progress"'),
-  "Challenge editor must exist only in authorized homolog");
+  "Challenge editor remains admin-only and flag-dependent");
 assert(page.includes("gmEditManual(sc.snapshot.layout.code)"),
   "Might button must open the real editing flow with category code");
 assert(page.includes("gmEditManual('GUILD_CHALLENGE')"),
@@ -88,4 +89,26 @@ const sources = ["PvE (Outlands e Roads)", "Coleta", "Magos Engarrafadores",
   "Masmorras Corrompidas", "Castelos e Postos Avançados",
   "Caça aos Dragões", "Terras Ancestrais"];
 sources.forEach(name => assert(page.includes(name), "missing Might source: " + name));
+
+// Regression: loading() mutates innerHTML outside setView's cache. Even when
+// the next API response has identical HTML, a second draw must restore buttons.
+const view={innerHTML:""};
+const ctx={document:{getElementById(){return view;}}};
+const setViewSource=page.match(/function setView\(id,html\)\{[^\n]*\}/);
+const loadingSource=page.match(/function loading\(id,title\)\{[^\n]*\}/);
+assert(setViewSource && loadingSource,"view functions must exist");
+vm.runInNewContext("var _viewCache={};\n"+setViewSource[0]+"\n"+loadingSource[0],ctx);
+const unchangedMight='<button id="gm-refresh">Atualizar dados</button>';
+ctx.setView("view-might",unchangedMight);
+ctx.loading("view-might","Guild Might");
+assert(!view.innerHTML.includes('gm-refresh'),"loading must replace the view");
+ctx.setView("view-might",unchangedMight);
+assert(view.innerHTML.includes('gm-refresh'),"cached HTML must redraw after loading");
+assert(page.includes("gmIngestPanel(guildMightIngestStatus)"),
+  "admin ingest diagnostics must render alongside Might without replacing ranking");
+assert(page.includes("if(!authState.isSiteAdmin)return '';"),
+  "members must never see admin ingest data");
+assert(page.includes("/api/telemetry/guild-might-ingest-status"),
+  "admin-only diagnostics must be fetched by the Might page");
+
 console.log("guild might War Room: 14 cards, exports and JS syntax ok");

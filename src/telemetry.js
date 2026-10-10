@@ -9,8 +9,9 @@ const guildChallengeStore = require("./guildChallengeStore");
 const guildManualProgress = require("./guildManualProgress");
 const guildSeason = require("./guildSeason");
 const guildRankingAuth = require("./guildRankingAuth");
-// Production may collect raw Challenge probes, but never expose this feature.
-const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
+const guildMightIngestDiagnostics = require("./guildMightIngestDiagnostics");
+// Challenge API and manual-progress editing are controlled by the dedicated production flag.
+const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
@@ -671,6 +672,9 @@ async function initSchema(dbPool) {
       ON albion_telemetry_events(device_id, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_albion_tel_type_time
       ON albion_telemetry_events(type, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_albion_tel_might_received
+      ON albion_telemetry_events(received_at DESC)
+      WHERE type='guild_might_probe';
 
     CREATE TABLE IF NOT EXISTS albion_guild_presence (
       player_key      TEXT PRIMARY KEY,
@@ -4286,9 +4290,16 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       // client pode saltar para 17:20. Ao finalizar 15:20, 17:20 vira o primeiro.
       const cta = await resolveEarliestOpenCta();
 
+      // Verified on each context refresh; a master key can ingest but never
+      // grants ranking eligibility to the device.
+      const deviceRestriction = guildRankingAuth.optionalDeviceRestriction();
+      const rankingEligible = auth.kind === "agent" && !!deviceId &&
+        (!deviceRestriction || deviceRestriction.has(deviceId));
       res.json({
         ok: true,
         playerName: playerName || null,
+        credentialMode: auth.kind === "agent" ? "paired" : "master",
+        rankingEligible,
         cta: cta ? { id: String(cta.id), time: cta.time_label, status: cta.status } : null,
       });
     } catch (e) {
@@ -4650,6 +4661,17 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
       const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);
     }
     catch(e){const bad=/^invalid_/.test(e.message);res.status(bad?400:500).json({error:bad?e.message:"server"});}
+  });
+
+  app.get("/api/telemetry/guild-might-ingest-status", async (req, res) => {
+    const admin=requireAdmin?.(req,res);
+    if(!admin){if(!res.headersSent)res.status(403).json({error:"site_admin_only"});return;}
+    try {
+      res.json(await guildMightIngestDiagnostics.recentGuildMightIngest(pool));
+    } catch (e) {
+      console.error("/api/telemetry/guild-might-ingest-status:",e);
+      res.status(500).json({error:"server"});
+    }
   });
 
   app.get("/api/telemetry/guild-might", async (req, res) => {
