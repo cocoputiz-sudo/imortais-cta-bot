@@ -10,8 +10,8 @@ const guildManualProgress = require("./guildManualProgress");
 const guildSeason = require("./guildSeason");
 const guildRankingAuth = require("./guildRankingAuth");
 const guildMightIngestDiagnostics = require("./guildMightIngestDiagnostics");
-// Production may collect raw Challenge probes, but never expose this feature.
-const CHALLENGE_UI_ENABLED = process.env.HOMOLOG_MODE === "1" && process.env.IMORTAIS_CHALLENGE_UI === "1";
+// Challenge API and manual-progress editing are controlled by the dedicated production flag.
+const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
 
 const telemetryStreams = new Map(); // eventId -> Set(res)
 let pool = null;
