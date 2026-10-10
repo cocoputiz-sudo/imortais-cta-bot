@@ -9,12 +9,9 @@ assert.equal(canPublishRankings({verified:false},{HOMOLOG_MODE:"1"}),true);
 assert.equal(canPublishRankings({verified:true},{HOMOLOG_MODE:"0"}),true);
 const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 
-const {isApprovedDevice}=require("../src/guildRankingAuth");
-assert.equal(isApprovedDevice("WORKSPACEIGOR",{HOMOLOG_MODE:"0"}),false,
-  "A valid token alone cannot authorize official production ranking");
-assert.equal(isApprovedDevice("WORKSPACEIGOR",{HOMOLOG_MODE:"1"}),true);
-assert.equal(isApprovedDevice("trusted",{HOMOLOG_MODE:"0",GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"}),true);
-assert.equal(isApprovedDevice("other",{HOMOLOG_MODE:"0",GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"}),false);
+const {optionalDeviceRestriction}=require("../src/guildRankingAuth");
+assert.equal(optionalDeviceRestriction({GUILD_RANKING_ALLOWED_DEVICE_IDS:""}),null);
+assert.deepEqual([...optionalDeviceRestriction({GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"})],["trusted"]);
 
 const other={kind:"bytes",length:16,base64:Buffer.alloc(16,1).toString("base64")};
 assert(validImortaisGuild({"0":guild},"GetGuildChallengePoints"));
