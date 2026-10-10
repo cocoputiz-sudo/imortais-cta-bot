@@ -11,7 +11,12 @@ async function main(){
  if(!process.env.DATABASE_URL||!/127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL))throw Error("Recusado fora do Postgres local");
  await db.init();
  await telemetry.initSchema(db.pool);
- await db.pool.query("TRUNCATE TABLE guild_challenge_snapshots, guild_might_snapshots, albion_telemetry_events RESTART IDENTITY CASCADE");
+ await db.pool.query("TRUNCATE TABLE guild_challenge_snapshots, guild_might_snapshots, albion_telemetry_events, albion_telemetry_agent_tokens, albion_telemetry_devices RESTART IDENTITY CASCADE");
+ // Pairing, not static environment settings, authorizes a ranking observer.
+ for(const id of ["might-test","might-other-device","challenge-test","different-device"]){
+   await db.pool.query("INSERT INTO albion_telemetry_devices(device_id,player_name,version) VALUES($1,$2,'qa')",[id,id]);
+   await db.pool.query("INSERT INTO albion_telemetry_agent_tokens(token_hash,label,device_id,player_name) VALUES($1,$2,$2,$2)",["test-token-"+id,id]);
+ }
  const ms=Date.now()-5000;
  for(const [id,direction,at,parameters] of [
    ["req-async","request",new Date(ms).toISOString(),{"0":"PvE (Outlands and Roads)"}],
@@ -43,7 +48,7 @@ async function main(){
  assert.equal(repeat.stored,0,"idempotência");
 
  // Two observers can receive identical data with distinct event IDs.
- // Content fingerprint must keep only one materialized leaderboard per UTC day.
+ // Each observer's evidence must remain separately reversible after revocation.
  for(const [id,direction,parameters] of [
    ["req-same-content","request",{"0":"PvE (Outlands and Roads)"}],
    ["res-same-content","response",{"0":guild,"1":"PVE","2":"sample-marker","3":2086795,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[550000,450000,1086795]}]
@@ -55,9 +60,9 @@ async function main(){
    );
  }
  const crossDevice=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
- assert.equal(crossDevice.stored,0,"identical content from another device must not create a second Might snapshot");
+ assert.equal(crossDevice.stored,1,"independent observer evidence must remain available after revocation");
  const countSameContent=await db.pool.query("SELECT count(*)::int AS n FROM guild_might_snapshots");
- assert.equal(countSameContent.rows[0].n,1,"one content-fingerprint per day");
+ assert.equal(countSameContent.rows[0].n,2,"keep one identical snapshot per device, not across devices");
 
  await db.pool.query("UPDATE guild_might_snapshots SET members_complete=false WHERE id=$1",[sid]);
  await db.pool.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1 AND player_key='badmack'",[sid]);
@@ -72,12 +77,12 @@ async function main(){
  assert.equal(dashboard.meta.categoryCount,1);
  assert.equal(dashboard.meta.playerCount,3);
  assert.equal(dashboard.ranking[0].player,"ESTHER9950"); 
- // Production must show a clear configuration warning, not an empty mystery.
+ // No static list must be required when paired devices exist.
  const approvedIds=process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS;
  delete process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS;
- const noDevices=await telemetry.getGuildMightDashboard({days:1});
- assert.equal(noDevices.meta.deviceAuthorizationMissing,true);
- assert(noDevices.meta.configurationNotices.some(x=>x.includes("GUILD_RANKING_ALLOWED_DEVICE_IDS")));
+ const dynamic=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(dynamic.meta.deviceAuthorizationMissing,undefined);
+ assert.equal(dynamic.meta.categoryCount,1);
  process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS=approvedIds;
  const seasonStart=process.env.GUILD_SEASON_START_AT;
  delete process.env.GUILD_SEASON_START_AT;
@@ -129,12 +134,39 @@ async function main(){
    }})]
  );
  const contentReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
- assert.equal(contentReplay.challengeStored,0,"identical content from another device must not duplicate Challenge page");
+ assert.equal(contentReplay.challengeStored,1,"distinct device evidence must survive token revocation");
  const challengePageCount=await db.pool.query("SELECT count(*)::int AS n FROM guild_challenge_snapshots");
- assert.equal(challengePageCount.rows[0].n,2,"two distinct page offsets, no duplicates");
+ assert.equal(challengePageCount.rows[0].n,3,"two offsets, one repeated by another device");
 
  const challengeReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(challengeReplay.challengeStored,0,"Challenge snapshots idempotent");
+
+ // Revocation must immediately filter out ALL past values from that device.
+ // Raw snapshots remain in the database for audit and may be used again if
+ // the same device is paired in a new, explicitly approved session.
+ const beforeRevocation=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(beforeRevocation.ranking[0].player,"ESTHER9950");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='might-test'");
+ const revokedMight=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(revokedMight.meta.categoryCount,1);
+ assert.equal(revokedMight.ranking[0].player,"ESTHER9950",
+   "independent observer must continue supporting ranking after revocation");
+ assert(revokedMight.categories[0].members.every(m=>m.sourceDeviceId==="might-other-device"),
+   "all values from revoked device must disappear, including historical maxima");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='challenge-test'");
+ const revokedChallenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(revokedChallenge.available,true);
+ assert(revokedChallenge.members.every(m=>m.sourceDeviceId==="different-device"),
+   "Challenge values from revoked device must leave current leaderboard");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='different-device'");
+ const emptyChallenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(emptyChallenge.available,false,"last paired Challenge observer revoked");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='might-other-device'");
+ const emptyMight=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(emptyMight.meta.deviceAuthorizationMissing,true);
+ assert.equal(emptyMight.ranking.length,0);
+ assert(emptyMight.meta.configurationNotices.some(x=>x.includes("pareamento")));
+
  console.log("✅ Guild Challenge: persistence, separation, rank and idempotency");
 
  console.log("✅ Guild Might: lote atômico, recuperação, idempotência e painel responsivo");
