@@ -1148,6 +1148,7 @@ const PAGE = `<!doctype html>
   <div class="nav" data-view="loot">📦 Loot</div>
   <div class="nav" data-view="combat">⚔️ Combate</div>
   <div class="nav" data-view="might">🏅 Guild Might</div>
+  <div class="nav" data-view="contributors">📅 Contribuintes – semana</div>
   <div class="nav" data-view="guild">🟢 Guilda</div>
   <div class="nav" data-view="devices">🖥️ Dispositivos</div>
 </nav>
@@ -1164,6 +1165,7 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
     <div class="nav" data-view="might">🏅 Guild Might</div>
+    <div class="nav" data-view="contributors">📅 Contribuintes – semana</div>
     <div class="nav" data-view="guild">🟢 Guilda online</div>
     <div class="nav" data-view="devices">🖥️ Dispositivos</div>
     <div class="navtitle">EM BREVE</div>
@@ -1203,6 +1205,7 @@ const PAGE = `<!doctype html>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
     <div id="view-might" style="display:none"></div>
+    <div id="view-contributors" style="display:none"></div>
     <div id="view-devices" style="display:none"></div>
     <div id="view-guild" style="display:none"></div>
   </main>
@@ -1295,7 +1298,7 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',might:'view-might',devices:'view-devices',guild:'view-guild'};
+    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',might:'view-might',contributors:'view-contributors',devices:'view-devices',guild:'view-guild'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='navigation') renderNavigation();
@@ -1304,6 +1307,7 @@ const PAGE = `<!doctype html>
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
     if(v==='might') renderGuildMight();
+    if(v==='contributors') renderContributors();
     if(v==='devices') renderDevices();
     if(v==='guild') renderGuild();
   }
@@ -3350,6 +3354,128 @@ const PAGE = `<!doctype html>
       .catch(function(e){setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao consultar Might: '+esc(e.message)+'</div>');});
   }
 
+
+  var contributorReport=null,contributorSettings=null;
+  function contribNumber(x){return x==null?'SEM DADOS':fmtS(x);}
+  function contribDelta(x){return x==null?'—':(Number(x)>0?'+':'')+fmtS(x);}
+  function contribDisplayDate(x){return x?gmDate(x):'sem varredura integral';}
+  function contribStatus(x){
+    var label=String(x||'SEM DADOS');
+    return '<span class="pill '+(label==='ATIVO'?'ok':label==='SEM DADOS'?'':'miss')+'">'+esc(label)+'</span>';
+  }
+  function contribSummaryDate(p){
+    return 'Anterior: '+esc(contribDisplayDate(p&&p.previous&&p.previous.capturedAt))+
+      ' · Última: '+esc(contribDisplayDate(p&&p.latest&&p.latest.capturedAt))+
+      (p&&p.ready?' · intervalo válido (≥ 6 dias)':' · <b>faltam varreduras integrais com intervalo de 6 dias</b>');
+  }
+  function contribCsvCell(x){
+    var q=String.fromCharCode(34),v=String(x==null?'':x);
+    // Spreadsheet formula injection: names from pasted rosters are untrusted.
+    if(/^\s*[=+\-@]/.test(v))v="'"+v;
+    return q+v.replaceAll(q,q+q)+q;
+  }
+  function exportContributors(format){
+    var d=contributorReport;
+    if(!d)return;
+    var header=['Jogador','Cargo','PvE ganho','Coleta ganho','Demais categorias ganho','Outras categorias comparadas','Status','PvE anterior UTC','PvE último UTC','Coleta anterior UTC','Coleta último UTC','Lista salva UTC','Desatualizado'];
+    var dates=d.categories||{},p=dates.PVE||{},g=dates.GATHERING||{};
+    var records=(d.rows||[]).map(function(x){
+      return [x.player,'CONTRIBUINTE '+x.level,x.pveMight,x.gatheringMight,x.otherMight,
+        x.otherCategoriesCompared+'/'+x.otherCategoriesTotal,x.status,
+        p.previous&&p.previous.capturedAt,p.latest&&p.latest.capturedAt,
+        g.previous&&g.previous.capturedAt,g.latest&&g.latest.capturedAt,
+        d.roster&&d.roster.importedAt,d.stale?'SIM':'NÃO'];
+    });
+    if(format==='csv'){
+      var lines=[header.map(contribCsvCell).join(';')].concat(records.map(function(r){return r.map(contribCsvCell).join(';');}));
+      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+lines.join('\r\n'),'text/csv;charset=utf-8');
+      return;
+    }
+    var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Contribuintes semana</title><style>body{font:14px Arial;margin:24px;color:#20232a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.warning{background:#ffeded;padding:16px;color:#8c1414;font-weight:bold}</style></head><body>';
+    html+='<h1>IMORTAIS · Contribuintes – semana</h1><p>Gerado: '+esc(contribDisplayDate(d.generatedAt))+'</p>';
+    if(d.stale)html+='<div class="warning">DESATUALIZADO: a última varredura integral de PvE ou Coleta tem mais de 7 dias ou não existe. Não tratar estes valores como atuais.</div>';
+    html+='<p>Ativos: '+fmtS(d.counts.active)+' · Abaixo (inclui sem evolução): '+fmtS(d.counts.below)+' · Sem dados: '+fmtS(d.counts.noData)+'</p>';
+    html+='<p>PvE: '+contribSummaryDate(p)+'</p><p>Coleta: '+contribSummaryDate(g)+'</p>';
+    html+='<table><thead><tr>'+header.map(function(x){return '<th>'+esc(x)+'</th>';}).join('')+'</tr></thead><tbody>';
+    html+=records.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+esc(x==null?'SEM DADOS':x)+'</td>';}).join('')+'</tr>';}).join('');
+    html+='</tbody></table><p>Critério: somente varreduras INTEGRAIS, do mesmo dispositivo por varredura, separadas por pelo menos 6 dias. Dados ausentes não valem zero; outras categorias são soma apenas das comparáveis.</p></body></html>';
+    gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
+  }
+  function renderContributors(){
+    if(!authState.canEdit&&!authState.isSiteAdmin){setView('view-contributors','<div class="empty-note">Acesso exclusivo de administradores e oficiais.</div>');return;}
+    loading('view-contributors','📅 Contribuintes – semana');
+    Promise.all([
+      fetch('/api/contributors/weekly',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Relatório HTTP '+r.status);return r.json();}),
+      fetch('/api/contributors/settings',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Configuração HTTP '+r.status);return r.json();})
+    ]).then(function(results){
+      contributorReport=results[0];contributorSettings=results[1];
+      drawContributors();
+    }).catch(function(e){setView('view-contributors','<div class="empty-note">Erro ao carregar relatório: '+esc(e.message)+'</div>');});
+  }
+  function drawContributors(){
+    var d=contributorReport||{},cfg=contributorSettings||{},count=d.counts||{},cats=d.categories||{},p=cats.PVE||{},g=cats.GATHERING||{};
+    var html='<div class="modhead">📅 Contribuintes – semana</div>'+
+      '<div class="note">Acesso exclusivo da administração e oficiais. Somente registros Photon verificados de varreduras integrais e dispositivos pareados.</div>';
+    if(d.stale)html+='<div class="panel" role="alert" style="background:#3b181c;border:2px solid #e95757;color:#ffb6b6;padding:20px;font-weight:bold;font-size:16px">⚠️ DESATUALIZADO. Última varredura integral de PvE/Coleta há mais de 7 dias ou ausente. Os números abaixo são históricos, NÃO são resultados atuais.</div>';
+    if(d.warnings&&d.warnings.length)html+='<div class="panel" style="padding:12px;margin:10px 0">'+d.warnings.map(function(w){return '<div class="note">⚠️ '+esc(w)+'</div>';}).join('')+'</div>';
+    html+='<div class="statgrid" style="margin:12px 0">'+
+      '<div class="stat g"><div class="k">ATIVOS</div><div class="v">'+fmtS(count.active||0)+'</div></div>'+
+      '<div class="stat a"><div class="k">ABAIXO (inclui sem evolução)</div><div class="v">'+fmtS(count.below||0)+'</div></div>'+
+      '<div class="stat b"><div class="k">SEM DADOS</div><div class="v">'+fmtS(count.noData||0)+'</div></div>'+
+      '</div>';
+    html+='<div class="panel"><b>Última lista salva em Guilda Online:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
+      '<div class="note">Somente cargos CONTRIBUINTE 1, 2 e 3 do último arquivo colado. Atualize a lista após mudanças de cargos.</div>'+
+      '<p><b>PvE:</b> '+contribSummaryDate(p)+'</p><p><b>Coleta:</b> '+contribSummaryDate(g)+'</p>'+
+      '<div class="note">Diferença = Might na última varredura integral menos Might na varredura integral anterior (≥ 6 dias). Demais categorias: somente pares completos comparáveis. SEM DADOS não significa zero.</div></div>';
+    html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">'+
+      '<button class="btn primary" id="cw-refresh">↻ Atualizar relatório</button>'+
+      '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
+      '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
+    if(authState.isSiteAdmin){
+      var minimum=(cfg.minima||{});
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (somente admin)</summary>'+
+        '<div class="note">Padrão: pelo menos +1 Might em PvE OU +1 em Coleta. Os mínimos podem ser ajustados individualmente; a comparação sempre exige os dois pares de varreduras.</div>'+
+        '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Cargo</th><th>Mínimo PvE</th><th>Mínimo Coleta</th></tr></thead><tbody>'+
+        ['1','2','3'].map(function(tier){var row=minimum[tier]||{pve:1,gathering:1};return '<tr><td>CONTRIBUINTE '+tier+'</td>'+
+          '<td><input id="cw-pve-'+tier+'" type="number" min="0" step="1" value="'+Number(row.pve)+'" style="width:150px"></td>'+
+          '<td><input id="cw-gather-'+tier+'" type="number" min="0" step="1" value="'+Number(row.gathering)+'" style="width:150px"></td></tr>';}).join('')+
+        '</tbody></table></div>'+
+        '<label><input type="checkbox" id="cw-enabled"'+(cfg.reminderEnabled?' checked':'')+'> Ativar lembrete semanal na staff</label>'+
+        '<div style="margin-top:10px">Dia (UTC): <select id="cw-weekday">'+['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'].map(function(x,i){return '<option value="'+i+'"'+(Number(cfg.weekday)===i?' selected':'')+'>'+x+'</option>';}).join('')+'</select>'+
+        ' · Hora (UTC): <input id="cw-time" type="time" value="'+esc(cfg.timeUtc||'18:00')+'"></div>'+
+        '<div class="note">Canal: staff configurada no bot (STAFF_LOG_CHANNEL_ID). O resumo só será enviado quando PvE e Coleta tiverem novas varreduras integrais válidas após o lembrete. Desativado até você salvar a programação.</div>'+
+        '<button class="btn primary" id="cw-save" style="margin-top:10px">Salvar configurações</button> <span id="cw-settings-status" class="note"></span></details>';
+    }
+    html+='<div class="panel" style="overflow-x:auto"><table class="dtable"><thead><tr>'+
+      '<th>Jogador</th><th>Cargo</th><th>Ganho PvE</th><th>Ganho Coleta</th><th>Demais categorias</th><th>Comparadas</th><th>Situação</th></tr></thead><tbody>'+
+      ((d.rows||[]).length?d.rows.map(function(x){return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
+        '<td>'+contribDelta(x.pveMight)+'</td><td>'+contribDelta(x.gatheringMight)+'</td><td>'+contribDelta(x.otherMight)+'</td>'+
+        '<td>'+fmtS(x.otherCategoriesCompared)+'/'+fmtS(x.otherCategoriesTotal)+'</td><td>'+contribStatus(x.status)+'</td></tr>';}).join(''):
+        '<tr><td colspan="7">Sem lista de contribuintes salva. Cole uma lista atualizada em Guilda Online e clique em Salvar.</td></tr>')+
+      '</tbody></table></div>';
+    setView('view-contributors',html);
+    document.getElementById('cw-refresh').onclick=renderContributors;
+    document.getElementById('cw-csv').onclick=function(){exportContributors('csv');};
+    document.getElementById('cw-html').onclick=function(){exportContributors('html');};
+    if(authState.isSiteAdmin){
+      document.getElementById('cw-save').onclick=function(){
+        var minima={};
+        ['1','2','3'].forEach(function(tier){minima[tier]={
+          pve:Number(document.getElementById('cw-pve-'+tier).value),
+          gathering:Number(document.getElementById('cw-gather-'+tier).value)
+        };});
+        var btn=document.getElementById('cw-save'),status=document.getElementById('cw-settings-status');
+        btn.disabled=true;status.textContent='Salvando…';
+        fetch('/api/contributors/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({minima:minima,reminderEnabled:document.getElementById('cw-enabled').checked,
+            weekday:Number(document.getElementById('cw-weekday').value),timeUtc:document.getElementById('cw-time').value})})
+        .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(x.error||'falha');return x;});})
+        .then(function(x){contributorSettings=x;status.textContent='Configuração salva em '+new Date().toLocaleString('pt-BR');})
+        .catch(function(e){status.textContent='Erro: '+e.message;}).finally(function(){btn.disabled=false;});
+      };
+    }
+  }
+
   var guildRefreshTimer=null;
   function guildRosterCtaOptions(){
     var list=openEventsCache||[];
@@ -3623,6 +3749,7 @@ const PAGE = `<!doctype html>
       renderAuthHeader();
       var devicesNav=document.querySelector('.nav[data-view="devices"]');
       if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
+      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=(authState.canEdit||authState.isSiteAdmin)?'':'none';});
       var navBomb=document.getElementById('nav-bomb');
       var navCastelo=document.getElementById('nav-castelo');
       var navRoaming=document.getElementById('nav-roaming');
