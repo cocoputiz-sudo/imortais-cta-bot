@@ -2,21 +2,29 @@
 const assert = require("assert/strict");
 process.env.PGSSL="disable";
 process.env.GUILD_ID="guild-test";
+process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS="might-test,might-other-device,challenge-test,different-device";
+process.env.GUILD_SEASON_START_AT=new Date(Date.now()-86400000).toISOString();
+const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 const db=require("../src/db");
 const telemetry=require("../src/telemetry");
 async function main(){
  if(!process.env.DATABASE_URL||!/127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL))throw Error("Recusado fora do Postgres local");
  await db.init();
  await telemetry.initSchema(db.pool);
- await db.pool.query("TRUNCATE TABLE guild_might_snapshots, albion_telemetry_events RESTART IDENTITY CASCADE");
+ await db.pool.query("TRUNCATE TABLE guild_challenge_snapshots, guild_might_snapshots, albion_telemetry_events, albion_telemetry_agent_tokens, albion_telemetry_devices RESTART IDENTITY CASCADE");
+ // Pairing, not static environment settings, authorizes a ranking observer.
+ for(const id of ["might-test","might-other-device","challenge-test","different-device"]){
+   await db.pool.query("INSERT INTO albion_telemetry_devices(device_id,player_name,version) VALUES($1,$2,'qa')",[id,id]);
+   await db.pool.query("INSERT INTO albion_telemetry_agent_tokens(token_hash,label,device_id,player_name) VALUES($1,$2,$2,$2)",["test-token-"+id,id]);
+ }
  const ms=Date.now()-5000;
  for(const [id,direction,at,parameters] of [
    ["req-async","request",new Date(ms).toISOString(),{"0":"PvE (Outlands and Roads)"}],
-   ["res-async","response",new Date(ms+250).toISOString(),{"0":["BadMack","RagnaldoKun","ESTHER9950"],"1":[550000,450000,1086795]}]
+   ["res-async","response",new Date(ms+250).toISOString(),{"0":guild,"1":"PVE","2":"sample-marker","3":2086795,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[550000,450000,1086795]}]
  ]){
    await db.pool.query(
      "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) VALUES($1,'might-test','guild_might_probe',$2,'BadMack',$3::jsonb)",
-     [id,at,JSON.stringify({direction,operationName:"GetGuildMightCategoryOverview",operationCode:333,parameters})]
+     [id,at,JSON.stringify({direction,operationName:"GetGuildMightCategoryContribution",operationCode:333,parameters})]
    );
  }
  const first=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -25,12 +33,37 @@ async function main(){
  const {rows}=await db.pool.query("SELECT id,members_complete,category_name FROM guild_might_snapshots WHERE response_event_id='res-async'");
  assert.equal(rows.length,1);
  assert.equal(rows[0].members_complete,true);
- assert.equal(rows[0].category_name,"PvE");
+ assert.equal(rows[0].category_name,"PvE (Outlands e Roads)");
  const sid=rows[0].id;
  const members=await db.pool.query("SELECT player_name FROM guild_might_snapshot_members WHERE snapshot_id=$1 ORDER BY might DESC",[sid]);
- assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]);
+ assert.deepEqual(members.rows.map(x=>x.player_name),["ESTHER9950","BadMack","RagnaldoKun"]); 
+ const persistedRank=await db.pool.query(
+   "SELECT player_name,member_rank FROM guild_might_snapshot_members "+
+   "WHERE snapshot_id=$1 ORDER BY member_rank",[sid]);
+ assert.deepEqual(persistedRank.rows.map(x=>[x.player_name,x.member_rank]),
+   [["BadMack",1],["RagnaldoKun",2],["ESTHER9950",3]],
+   "Persist exact Photon rank position regardless of sorting by Might");
+
  const repeat=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
  assert.equal(repeat.stored,0,"idempotência");
+
+ // Two observers can receive identical data with distinct event IDs.
+ // Each observer's evidence must remain separately reversible after revocation.
+ for(const [id,direction,parameters] of [
+   ["req-same-content","request",{"0":"PvE (Outlands and Roads)"}],
+   ["res-same-content","response",{"0":guild,"1":"PVE","2":"sample-marker","3":1800000,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[500000,400000,900000]}]
+ ]){
+   await db.pool.query(
+     "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
+     "VALUES($1,'might-other-device','guild_might_probe',now(),'Observer2',$2::jsonb)",
+     [id,JSON.stringify({direction,operationName:"GetGuildMightCategoryContribution",operationCode:333,parameters})]
+   );
+ }
+ const crossDevice=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(crossDevice.stored,1,"independent observer evidence must remain available after revocation");
+ const countSameContent=await db.pool.query("SELECT count(*)::int AS n FROM guild_might_snapshots");
+ assert.equal(countSameContent.rows[0].n,2,"keep one identical snapshot per device, not across devices");
+
  await db.pool.query("UPDATE guild_might_snapshots SET members_complete=false WHERE id=$1",[sid]);
  await db.pool.query("DELETE FROM guild_might_snapshot_members WHERE snapshot_id=$1 AND player_key='badmack'",[sid]);
  const repaired=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
@@ -40,10 +73,107 @@ async function main(){
  const now=Date.now();
  const dashboard=await telemetry.getGuildMightDashboard({days:1});
  assert(Date.now()-now<4000,"painel não pode aguardar backfill");
- assert.equal(dashboard.meta.rawProbes3d,2);
+ assert.equal(dashboard.meta.rawProbes3d,4,"raw events include repeat observations; dedup only affects materialized snapshots");
  assert.equal(dashboard.meta.categoryCount,1);
  assert.equal(dashboard.meta.playerCount,3);
- assert.equal(dashboard.ranking[0].player,"ESTHER9950");
+ assert.equal(dashboard.ranking[0].player,"ESTHER9950"); 
+ // No static list must be required when paired devices exist.
+ const approvedIds=process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS;
+ delete process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS;
+ const dynamic=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(dynamic.meta.deviceAuthorizationMissing,undefined);
+ assert.equal(dynamic.meta.categoryCount,1);
+ process.env.GUILD_RANKING_ALLOWED_DEVICE_IDS=approvedIds;
+ const seasonStart=process.env.GUILD_SEASON_START_AT;
+ delete process.env.GUILD_SEASON_START_AT;
+ const noSeason=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(noSeason.meta.seasonUnverified,true);
+ assert(noSeason.meta.configurationNotices.some(x=>x.includes("GUILD_SEASON_START_AT")));
+ process.env.GUILD_SEASON_START_AT=seasonStart;
+
+ // Guild Challenge is a separate points ranking. Its snapshot must survive even
+ // when the batch includes no new Guild Might snapshots.
+ await db.pool.query(
+   "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) " +
+   "VALUES('challenge-res-1','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
+   [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
+     "0":guild,"3":482,"5":["GiganteCarrara","ESTHER9950","JnK1"],"6":[5905587,5179919,4996374]
+   }})]
+ );
+ const challengeBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(challengeBatch.challengeStored,1,"Challenge must store independently of Might");
+ const challengeStore=require("../src/guildChallengeStore");
+ const challenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(challenge.available,true);
+ assert.equal(challenge.members.length,3);
+ assert.deepEqual(challenge.members.map(m=>m.player),["GiganteCarrara","ESTHER9950","JnK1"]);
+ assert.equal(challenge.members[0].points,5905587);
+ assert.equal(challenge.verified,true,"real Photon field positions validated");
+ assert.equal(challenge.complete,false,"a single page must never be presented as complete");
+ assert.equal(challenge.expectedMembers,482);
+ assert.equal(challenge.observedMembers,3);
+ await db.pool.query(
+   "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
+   "VALUES('challenge-res-19','challenge-test','guild_might_probe',now(),'BadMack',$1::jsonb)",
+   [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
+     "0":guild,"3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
+   }})]
+ );
+ const pageBatch=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(pageBatch.challengeStored,1,"only new page should be stored");
+ const combinedChallenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(combinedChallenge.members.length,5,"two pages must be merged");
+ assert.deepEqual(combinedChallenge.members.map(m=>m.rank),[1,2,3,4,5]);
+ assert.equal(combinedChallenge.complete,false);
+ // Identical Challenge page observed again with a distinct response event ID.
+ await db.pool.query(
+   "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
+   "VALUES('challenge-page-duplicate','different-device','guild_might_probe',now(),'Observer2',$1::jsonb)",
+   [JSON.stringify({direction:"response",operationName:"GetGuildChallengePoints",parameters:{
+     "0":guild,"3":482,"4":19,"5":["HYPNOSBR01","GoldVex"],"6":[1769816,1734612]
+   }})]
+ );
+ const contentReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(contentReplay.challengeStored,1,"distinct device evidence must survive token revocation");
+ const challengePageCount=await db.pool.query("SELECT count(*)::int AS n FROM guild_challenge_snapshots");
+ assert.equal(challengePageCount.rows[0].n,3,"two offsets, one repeated by another device");
+
+ const challengeReplay=await telemetry.materializeGuildMightRecent({minutes:10,limit:100});
+ assert.equal(challengeReplay.challengeStored,0,"Challenge snapshots idempotent");
+
+ // Revocation must immediately filter out ALL past values from that device.
+ // Raw snapshots remain in the database for audit and may be used again if
+ // the same device is paired in a new, explicitly approved session.
+ const beforeRevocation=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(beforeRevocation.ranking[0].player,"ESTHER9950");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='might-test'");
+ const revokedMight=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(revokedMight.meta.categoryCount,1);
+ assert.equal(revokedMight.ranking[0].player,"ESTHER9950",
+   "independent observer must continue supporting ranking after revocation");
+ assert.equal(beforeRevocation.ranking[0].might,1086795);
+ assert.equal(revokedMight.ranking[0].might,900000,
+   "revocation must subtract the revoked observer's previous season maximum");
+ assert(revokedMight.categories[0].members.every(m=>m.sourceDeviceId==="might-other-device"),
+   "all values from revoked device must disappear, including historical maxima");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='challenge-test'");
+ const revokedChallenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(revokedChallenge.available,true);
+ assert(!revokedChallenge.members.some(m=>m.player==="GiganteCarrara"),
+   "revoking a device must remove its unique Challenge values");
+ assert(revokedChallenge.members.every(m=>m.sourceDeviceId==="different-device"),
+   "Challenge values from revoked device must leave current leaderboard");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='different-device'");
+ const emptyChallenge=await challengeStore.getDashboard(db.pool,{days:1});
+ assert.equal(emptyChallenge.available,false,"last paired Challenge observer revoked");
+ await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='might-other-device'");
+ const emptyMight=await telemetry.getGuildMightDashboard({days:1});
+ assert.equal(emptyMight.meta.deviceAuthorizationMissing,true);
+ assert.equal(emptyMight.ranking.length,0);
+ assert(emptyMight.meta.configurationNotices.some(x=>x.includes("pareamento")));
+
+ console.log("✅ Guild Challenge: persistence, separation, rank and idempotency");
+
  console.log("✅ Guild Might: lote atômico, recuperação, idempotência e painel responsivo");
 }
 main().then(()=>db.pool.end()).catch(async e=>{

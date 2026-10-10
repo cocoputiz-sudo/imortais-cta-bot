@@ -1,0 +1,79 @@
+{
+  "source": "Segundo dump do usuário 2026-10-09, extrato minimizado e sem identificadores de guilda",
+  "challengeTop": {
+    "capturedAtUtc": "2026-10-09T04:42:06.9150552Z",
+    "parameters": {
+      "3": 483,
+      "5": [
+        "GiganteCarrara",
+        "ESTHER9950",
+        "JnK1",
+        "Baldur157"
+      ],
+      "6": [
+        5930046,
+        5203391,
+        5018288,
+        3951489
+      ]
+    }
+  },
+  "challengeFinal": {
+    "capturedAtUtc": "2026-10-09T04:43:12.5477985Z",
+    "parameters": {
+      "3": 483,
+      "4": 478,
+      "5": [
+        "facjj",
+        "Yamadha",
+        "GivisTabua",
+        "GDFP9C12",
+        "TestMember"
+      ],
+      "6": {
+        "kind": "bytes",
+        "length": 5,
+        "base64": "AAAAAAA="
+      }
+    }
+  },
+  "overview": {
+    "capturedAtUtc": "2026-10-09T04:53:13.4316141Z",
+    "parameters": {
+      "1": 639271183566560000,
+      "2": [
+        "CASTLE",
+        "CORRUPTED",
+        "DRAGON_AREA",
+        "DRAGON_HUNT",
+        "ENERGYCRYSTAL",
+        "GATHERING",
+        "GVGSEASON",
+        "HELLDUNGEON",
+        "HELLGATE",
+        "POWERCORE",
+        "PVE",
+        "SMUGGLERS",
+        "SPIDERS",
+        "TREASURES"
+      ],
+      "3": [
+        200352048074,
+        1115060430,
+        25653397000,
+        4693532190,
+        263103707483,
+        21937245941,
+        422358686,
+        12312239530,
+        2825823911,
+        153508588840,
+        272449874570,
+        141053295893,
+        51395879404,
+        58002247559
+      ],
+      "253": 450
+    }
+  }
+}

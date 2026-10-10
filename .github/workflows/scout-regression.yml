@@ -12,6 +12,13 @@ on:
       - "src/guildroster.js"
       - "src/telemetry.js"
       - "src/guildMight.js"
+      - "src/guildPhotonVerified.js"
+      - "src/guildChallenge.js"
+      - "src/guildChallengeStore.js"
+      - "src/guildSeason.js"
+      - "src/guildLegacyRepair.js"
+      - "src/guildManualProgress.js"
+      - "src/homolog.js"
       - "src/ctatime.js"
       - "src/consolidation-state.js"
       - "src/killFame.js"
@@ -31,6 +38,14 @@ on:
       - "test/ingest-route.js"
       - "test/guild-might-discovery.js"
       - "test/guild-might-worker.js"
+      - "test/guild-challenge.js"
+      - "test/guild-ranking-season.js"
+      - "test/guild-ranking-auth.js"
+      - "test/guild-might-sweep.js"
+      - "test/guild-legacy-repair.js"
+      - "test/guild-might-page.js"
+      - "test/guild-manual-progress.js"
+      - "test/guild-photon-capture.js"
       - "test/pair-route.js"
       - "test/cta-time.js"
       - "test/cta-freeze.js"
@@ -42,7 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub anonymous pulls can be rate-limited on hosted runners.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: scout
           POSTGRES_PASSWORD: scout
@@ -95,8 +111,22 @@ jobs:
         run: node test/ingest-route.js
       - name: Guild Might discovery
         run: node test/guild-might-discovery.js
+      - name: Guild ranking season monotonic and guild ID
+        run: node test/guild-ranking-season.js
+      - name: Dynamic paired-device authorization and token revocation
+        run: node test/guild-ranking-auth.js
+      - name: Might certified cross-marker sweep regression
+        run: node test/guild-might-sweep.js
+      - name: Legacy guild snapshot repair dry-run
+        run: node test/guild-legacy-repair.js
       - name: Guild Might worker e snapshots em Postgres
         run: node test/guild-might-worker.js
+      - name: Guild Might e Challenge - testes especificos do PR 66
+        run: |
+          node test/guild-photon-capture.js
+          node test/guild-challenge.js
+          node test/guild-might-page.js
+          node test/guild-manual-progress.js
       - name: Telemetry pair security
         run: node test/pair-route.js
       - name: CTA time rollover

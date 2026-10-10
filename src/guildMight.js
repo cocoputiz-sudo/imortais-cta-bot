@@ -1,26 +1,28 @@
 "use strict";
+const {KNOWN_CATEGORY_LABELS,parseMightContributionResponse,parseMightOverviewResponse,assembleMightPages,validImortaisGuild}=require("./guildPhotonVerified");
 
 const CATEGORY_ALIASES = Object.freeze({
   "pveoutlandsandroads": "PvE",
-  "smugglers": "Contrabandistas"
+  "gatheringoutlandsandroads": "Coleta",
+  "siphoningmages": "Magos Engarrafadores",
+  "hideoutpowercores": "Núcleos de Esconderijo",
+  "territorypowercrystals": "Cristais de Território",
+  "outlandstreasures": "Tesouros",
+  // "Aranhas" é a chave legada do nosso coletor para Crystal Creatures.
+  // Não mudamos a chave para evitar duplicar Might entre snapshots antigos e novos.
+  "crystalcreatures": "Aranhas",
+  "smugglers": "Contrabandistas",
+  "thedepths": "As Profundezas",
+  "corrupteddungeons": "Masmorras Corrompidas",
+  "castlescastleoutposts": "Castelos e Postos",
+  "castlesandcastleoutposts": "Castelos e Postos",
+  "dragonhunt": "Caça aos Dragões",
+  "ancientlands": "Terras Ancestrais"
 });
 
-const REFERENCE_CATEGORIES_2026_10_07 = Object.freeze({
-  "PvE": { level: 49, targetMight: 26000000, seasonPoints: 200 },
-  "Coleta": { level: 39, targetMight: 2000000, seasonPoints: 200 },
-  "Magos Engarrafadores": { level: 10, targetMight: 43000, seasonPoints: 180 },
-  "Núcleos de Esconderijo": { level: 42, targetMight: 15000000, seasonPoints: 660 },
-  "Cristais de Território": { level: 58, targetMight: 26000000, seasonPoints: 1200 },
-  "Tesouros": { level: 44, targetMight: 5600000, seasonPoints: 368 },
-  "Aranhas": { level: 68, targetMight: 5000000, seasonPoints: 700 },
-  "Contrabandistas": { level: 51, targetMight: 14000000, seasonPoints: 424 },
-  "Hellgates": { level: 17, targetMight: 256000, seasonPoints: 100 },
-  "As Profundezas": { level: 56, targetMight: 1200000, seasonPoints: 200 },
-  "Masmorras Corrompidas": { level: 28, targetMight: 109000, seasonPoints: 50 },
-  "Castelos e Postos": { level: 38, targetMight: 18000000, seasonPoints: 1200 },
-  "Caça aos Dragões": { level: 5, targetMight: 594000, seasonPoints: 280 },
-  "Terras Ancestrais": { level: 48, targetMight: 2400000, seasonPoints: 200 }
-});
+// Historical screenshot-derived SP weights are intentionally disabled.
+// The validated Photon operations do not expose level, threshold or Season Points.
+const REFERENCE_CATEGORIES_2026_10_07 = Object.freeze({});
 
 function spPerMight({ level, targetMight, seasonPoints }) {
   const n = Number(level);
@@ -86,12 +88,12 @@ function inferContributionLayout(parameters) {
   const { arrays, scalars } = flattenPhoton(parameters || {});
   const stringArrays = arrays.filter(entry =>
     entry.value.length >= 2 &&
-    entry.value.length <= 500 &&
+    entry.value.length <= 1200 &&
     entry.value.every(v => typeof v === "string")
   );
   const numericArrays = arrays.filter(entry =>
     entry.value.length >= 2 &&
-    entry.value.length <= 500 &&
+    entry.value.length <= 1200 &&
     entry.value.every(isMightNumber)
   );
 
@@ -150,7 +152,8 @@ function correlateProbeRows(rows, { windowMs = 10000 } = {}) {
     const deviceId = String(row.device_id || row.deviceId || "");
     const at = new Date(row.occurred_at || row.occurredAt || 0);
     const atMs = at.getTime();
-    const key = deviceId + "\u001f" + operationName;
+    const reqSerial = payload.parameters?.["255"];
+    const key = deviceId + "\u001f" + operationName + "\u001f" + (reqSerial == null ? "" : String(reqSerial));
 
     if (direction === "request") {
       pending.set(key, row);
@@ -234,11 +237,24 @@ function getByPath(root, path) {
 }
 
 function inferCategoryIdentity(pair) {
+  // Actual 449 response includes the stable category code in parameter "1".
+  const rawCode=pair?.responseParameters?.["1"];
+  if(pair?.operationName==="GetGuildMightCategoryContribution" &&
+    typeof rawCode==="string" && KNOWN_CATEGORY_LABELS[rawCode]){
+    const name=KNOWN_CATEGORY_LABELS[rawCode];
+    return {key:"name:"+normalizeCategoryLabel(name),name,mapped:true,
+      source:"photon-category-code",rawLabel:rawCode,
+      sourcePath:"1",nameTentative:false};
+  }
   const sources = [
     ...(flattenPhoton(pair?.requestParameters || {}).scalars || []),
     ...(flattenPhoton(pair?.responseParameters || {}).scalars || [])
   ];
-  const refs = Object.keys(REFERENCE_CATEGORIES_2026_10_07);
+  const refs = [...new Set([...Object.values(KNOWN_CATEGORY_LABELS),
+    "PvE","Coleta","Magos Engarrafadores","Aranhas","Tesouros",
+    "Castelos e Postos","Núcleos de Esconderijo","Cristais de Território",
+    "As Profundezas","Masmorras Corrompidas","Caça aos Dragões",
+    "Terras Ancestrais","Hellgates","Contrabandistas"])];
   const byNorm = new Map(refs.map(name => [normalizeCategoryLabel(name), name]));
 
   for (const entry of sources) {
@@ -292,6 +308,30 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
 
   for (const pair of correlation.pairs) {
     if (!/^GetGuildMightCategory(?:Contribution|Overview)$/.test(String(pair.operationName || ""))) continue;
+    if(!validImortaisGuild(pair.responseParameters,pair.operationName))continue;
+    if(pair.operationName==="GetGuildMightCategoryOverview" &&
+      parseMightOverviewResponse(pair.responseParameters)) {
+      // Values here are GUILD category totals, never player names.
+      continue;
+    }
+    if(pair.operationName==="GetGuildMightCategoryContribution"){
+      const decoded=parseMightContributionResponse(pair.responseParameters);
+      if(decoded){
+        const category=inferCategoryIdentity(pair);
+        snapshots.push({
+          responseEventId:pair.responseEventId,requestEventId:pair.requestEventId,
+          deviceId:pair.deviceId,observer:pair.observer,
+          operationName:pair.operationName,category,
+          capturedAt:pair.responseAt,confidence:1,
+          requestParameters:pair.requestParameters||{},
+          layout:{namesPath:"6",mightPath:"7",pageOffset:decoded.pageOffset,
+            totalMembers:decoded.totalMembers,guildMight:decoded.guildMight,code:decoded.categoryCode,snapshotMarker:decoded.snapshotMarker,guildVerified:true},
+          reference:null,
+          members:decoded.members.map(m=>({...m,estimatedSp:null}))
+        });
+        continue;
+      }
+    }
     const candidate = (pair.discovery?.candidates || [])[0];
     if (!candidate || Number(candidate.confidence) < minConfidence) continue;
 
@@ -309,8 +349,9 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
     if (!members.length) continue;
 
     const category = inferCategoryIdentity(pair);
-    const reference = category.mapped ? REFERENCE_CATEGORIES_2026_10_07[category.name] || null : null;
-    const perMight = reference ? spPerMight(reference) : 0;
+    // Legacy non-standard payloads are kept for diagnostics only.
+    // No level/SP calculation is valid without explicit Photon fields.
+    const reference = null;
 
     snapshots.push({
       responseEventId: pair.responseEventId,
@@ -327,11 +368,11 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
         mightPath: candidate.mightPath,
         count: candidate.count
       },
-      reference: reference ? { ...reference, referenceDate: "2026-10-07" } : null,
+      reference: null,
       members: members
         .map(m => ({
           ...m,
-          estimatedSp: reference ? m.might * perMight : null
+          estimatedSp: null
         }))
         .sort((a,b) => b.might - a.might || a.player.localeCompare(b.player, "pt-BR"))
     });
@@ -340,52 +381,64 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
   return snapshots.sort((a,b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0));
 }
 
-function buildDashboardFromLatestSnapshots(snapshots) {
-  const latestByCategory = new Map();
-  for (const snapshot of snapshots || []) {
-    const key = String(snapshot?.category?.key || "");
-    if (!key) continue;
-    const previous = latestByCategory.get(key);
-    if (!previous || new Date(snapshot.capturedAt || 0) > new Date(previous.capturedAt || 0)) {
-      latestByCategory.set(key, snapshot);
-    }
+function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
+  const byCategory=new Map();
+  for(const snap of snapshots||[]){
+    const code=snap?.layout?.code;
+    // Old heuristic records are useful as diagnostics, not authenticated
+    // leaderboard rows. Reprocessing is a separate, auditable operation.
+    if(!code||!KNOWN_CATEGORY_LABELS[code]||snap.category?.mapped!==true)continue;
+    if(!byCategory.has(code))byCategory.set(code,[]);
+    byCategory.get(code).push(snap);
   }
-
-  const categories = [...latestByCategory.values()]
-    .sort((a,b) =>
-      Number(b.category?.mapped) - Number(a.category?.mapped) ||
-      new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0)
-    );
-
-  const ranking = new Map();
-  for (const category of categories) {
-    for (const member of category.members || []) {
-      const key = String(member.player || "").trim().toLowerCase();
-      if (!key) continue;
-      if (!ranking.has(key)) {
-        ranking.set(key, { player: member.player, might: 0, estimatedSp: 0, mappedCategories: 0, categories: 0 });
-      }
-      const row = ranking.get(key);
-      row.might += Number(member.might) || 0;
+  const categories=[];
+  for(const [code,list] of byCategory){
+    list.sort((a,b)=>new Date(a.capturedAt||0)-new Date(b.capturedAt||0));
+    const latest=list[list.length-1];
+    const pages=list.filter(s=>Number.isInteger(Number(s.layout?.pageOffset))&&
+      Number.isInteger(Number(s.layout?.totalMembers))&&Number(s.layout.totalMembers)>0)
+      .map(s=>({...s,pageOffset:Number(s.layout.pageOffset),
+        totalMembers:Number(s.layout.totalMembers),
+        categoryCode:code,snapshotMarker:s.layout.snapshotMarker??null,
+        members:s.members||[]}));
+    if(!pages.length)continue;
+    const merged=assembleMightPages(pages,{seasonStartAt});
+    categories.push({...latest,
+      category:{key:"name:"+normalizeCategoryLabel(KNOWN_CATEGORY_LABELS[code]),
+        name:KNOWN_CATEGORY_LABELS[code],mapped:true,nameTentative:false},
+      capturedAt:merged.capturedAt||latest.capturedAt,
+      members:merged.members.map(m=>({...m,estimatedSp:null})),
+      totalMembers:merged.totalMembers,observedMembers:merged.observedMembers,
+      historicalObservedMembers:merged.historicalObservedMembers,
+      historicalMembers:merged.historicalMembers,
+      oldestMemberAt:merged.oldestMemberAt,
+      oldestMemberAgeMs:merged.oldestMemberAgeMs,
+      lastCompleteAt:merged.lastCompleteAt,coverage:merged.coverage,
+      sweepComplete:merged.sweepComplete,sweepCoverage:merged.sweepCoverage,
+      sweepStartedAt:merged.sweepStartedAt,sweepDurationMs:merged.sweepDurationMs,
+      sweepMethod:merged.sweepMethod,
+      recentWindowStart:seasonStartAt,
+      complete:merged.complete,missingCount:merged.missingCount,
+      pages:merged.pages,guildMight:null,
+      observedMight:merged.observedMight,
+      level:null,seasonPoints:null,threshold:null});
+  }
+  categories.sort((a,b)=>a.category.name.localeCompare(b.category.name,"pt-BR"));
+  const ranking=new Map();
+  for(const category of categories){
+    for(const member of category.members||[]){
+      const key=String(member.player||"").trim().toLowerCase();
+      if(!key)continue;
+      if(!ranking.has(key))ranking.set(key,{player:member.player,might:0,estimatedSp:null,categories:0});
+      const row=ranking.get(key);
+      row.might+=Number(member.might)||0;
       row.categories++;
-      if (member.estimatedSp != null && Number.isFinite(Number(member.estimatedSp))) {
-        row.estimatedSp += Number(member.estimatedSp);
-        row.mappedCategories++;
-      }
     }
   }
-
-  return {
-    categories,
-    ranking: [...ranking.values()]
-      .sort((a,b) => b.might - a.might || b.estimatedSp - a.estimatedSp || a.player.localeCompare(b.player, "pt-BR")),
-    meta: {
-      categoryCount: categories.length,
-      mappedCategoryCount: categories.filter(x => x.category?.mapped).length,
-      playerCount: ranking.size,
-      newestAt: categories.reduce((latest, x) =>
-        !latest || new Date(x.capturedAt || 0) > new Date(latest) ? x.capturedAt : latest, null),
-      referenceDate: "2026-10-07"
-    }
-  };
+  return {categories,ranking:[...ranking.values()]
+    .sort((a,b)=>b.might-a.might||a.player.localeCompare(b.player,"pt-BR")),
+    meta:{categoryCount:categories.length,mappedCategoryCount:categories.length,
+      playerCount:ranking.size,seasonStartAt,
+      newestAt:categories.reduce((last,c)=>!last||new Date(c.capturedAt)>new Date(last)?c.capturedAt:last,null),
+      referenceDate:null}};
 }
