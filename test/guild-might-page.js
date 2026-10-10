@@ -111,4 +111,8 @@ assert(page.includes("if(!authState.isSiteAdmin)return '';"),
 assert(page.includes("/api/telemetry/guild-might-ingest-status"),
   "admin-only diagnostics must be fetched by the Might page");
 
-console.log("guild might War Room: 14 cards, exports and JS syntax ok");
+assert(page.includes('id="gm-player-search"'),"War Room Must include player search");
+assert(page.includes('data-gm-player'),"search must cover Might and Challenge rows");
+assert(page.includes('gmFilterPlayers(guildMightSearchTerm)'),"search persists across redraw and category switches");
+assert(page.includes("gmFilterPlayers(playerSearch.value)"),"search filters without re-requesting network data");
+console.log("guild might War Room: 14 cards, exports, live player search and JS syntax ok");
