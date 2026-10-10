@@ -70,6 +70,12 @@ function requireMember(req, res) {
   if (!sess.isMember) { res.status(403).json({ error: "not_member" }); return null; }
   return sess;
 }
+function requireContributorViewer(req,res){
+  const sess=requireMember(req,res);
+  if(!sess)return null;
+  if(!sess.canViewContributors&&!sess.isSiteAdmin){res.status(403).json({error:"officer_or_admin_only"});return null;}
+  return sess;
+}
 function requireSiteAdmin(req,res) {
   const sess=requireMember(req,res);
   if(!sess)return null;
@@ -81,6 +87,14 @@ function requireEditor(req, res) {
   if (!sess) return null;
   if (!sess.canEdit) { res.status(403).json({ error: "no_edit" }); return null; }
   return sess;
+}
+function canViewContributors(roles,userId,name){
+  if(isSiteAdmin(roles,userId,name))return true;
+  const allowed=new Set(String(process.env.OFFICER_ROLE_IDS||"").split(",").map(x=>x.trim()).filter(Boolean));
+  if(roles.some(id=>allowed.has(String(id))))return true;
+  const g=_client&&_client.guilds&&_client.guilds.cache.get(GUILD_ID);
+  return !!g && roles.some(id=>/^(officers?|oficiais?|guild officers?)$/i.test(
+    String(g.roles.cache.get(id)?.name||"").trim()));
 }
 function canEditRoles(roles, userId) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
@@ -247,12 +261,12 @@ function startWebServer(client, opts) {
   });
   // Officers may view; thresholds and weekly reminder may only be changed by admins.
   app.get("/api/contributors/weekly",async(req,res)=>{
-    if(!requireEditor(req,res))return;
+    if(!requireContributorViewer(req,res))return;
     try{res.json(await contributorWeekly.getReport(db.pool));}
     catch(e){console.error("[contributor report]",e);res.status(500).json({error:"report_failed"});}
   });
   app.get("/api/contributors/settings",async(req,res)=>{
-    if(!requireEditor(req,res))return;
+    if(!requireContributorViewer(req,res))return;
     try{res.json(await contributorWeekly.getSettings(db.pool));}
     catch(e){res.status(500).json({error:"settings_failed"});}
   });
@@ -323,6 +337,7 @@ function startWebServer(client, opts) {
         canManageBomb: canManageBomb(roles, me.id, name),
         canManageCastleRoaming: canManageCastleRoaming(roles, me.id, name),
         isSiteAdmin: isSiteAdmin(roles, me.id, name),
+        canViewContributors: canViewContributors(roles,me.id,name),
         isMember: !!member,
         exp: Date.now() + SESSION_TTL_MS
       };
@@ -342,6 +357,7 @@ function startWebServer(client, opts) {
       canManageBomb: !!s.canManageBomb,
       canManageCastleRoaming: !!s.canManageCastleRoaming,
       isSiteAdmin: !!s.isSiteAdmin,
+      canViewContributors: !!s.canViewContributors||!!s.isSiteAdmin,
       member: !!s.isMember
     } : { logged: false });
   });
@@ -3402,7 +3418,7 @@ const PAGE = `<!doctype html>
     gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
   }
   function renderContributors(){
-    if(!authState.canEdit&&!authState.isSiteAdmin){setView('view-contributors','<div class="empty-note">Acesso exclusivo de administradores e oficiais.</div>');return;}
+    if(!authState.canViewContributors){setView('view-contributors','<div class="empty-note">Acesso exclusivo de administradores e oficiais.</div>');return;}
     loading('view-contributors','📅 Contribuintes – semana');
     Promise.all([
       fetch('/api/contributors/weekly',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Relatório HTTP '+r.status);return r.json();}),
@@ -3744,12 +3760,13 @@ const PAGE = `<!doctype html>
         canManageBomb:!!a.canManageBomb,
         canManageCastleRoaming:!!a.canManageCastleRoaming,
         isSiteAdmin:!!a.isSiteAdmin,
+        canViewContributors:!!a.canViewContributors,
         name:a.name||''
       };
       renderAuthHeader();
       var devicesNav=document.querySelector('.nav[data-view="devices"]');
       if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
-      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=(authState.canEdit||authState.isSiteAdmin)?'':'none';});
+      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=authState.canViewContributors?'':'none';});
       var navBomb=document.getElementById('nav-bomb');
       var navCastelo=document.getElementById('nav-castelo');
       var navRoaming=document.getElementById('nav-roaming');
