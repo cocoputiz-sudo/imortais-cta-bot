@@ -3127,7 +3127,7 @@ const PAGE = `<!doctype html>
   function gmCards(categories){
     var found={};
     var cards=guildMightCatalog.map(function(info,i){
-      var cat=categories.find(function(c){return info.aliases.some(function(alias){return gmNorm(c.category&&c.category.name)===gmNorm(alias);});})||null;
+      var cat=categories.find(function(c){var label=gmNorm(c.category&&c.category.name);return label===gmNorm(info.name)||info.aliases.some(function(alias){return label===gmNorm(alias);});})||null;
       if(cat) found[String(cat.category.key)]=true;
       return {id:'official:'+i,name:info.name,snapshot:cat};
     });
@@ -3138,16 +3138,27 @@ const PAGE = `<!doctype html>
     });
     return cards;
   }
+
+  function gmWeekNumber(value){
+    if(value==null)return 'SEM BASE';
+    var n=Number(value)||0;
+    return (n>0?'+':'')+fmtS(n);
+  }
+  function gmWeekPercent(m){
+    if(m.weeklyDelta==null||m.weeklyBaselineMight==null||Number(m.weeklyBaselineMight)===0)return '—';
+    var pct=100*Number(m.weeklyDelta)/Number(m.weeklyBaselineMight);
+    return (pct>0?'+':'')+pct.toFixed(2)+'%';
+  }
   function gmRows(members,type){
     var sum=(members||[]).reduce(function(a,m){return a+(Number(type==='challenge'?m.points:m.might)||0);},0);
     var extra=authState.isSiteAdmin?'<th>Dispositivo de origem</th><th>Jogador observador</th>':'';
-    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+(type==='challenge'?'Chavinhas':'Might')+'</th><th>Capturado em</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+extra+'</tr></thead><tbody>'
+    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+(type==='challenge'?'Chavinhas':'Might')+'</th><th>Capturado em</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th><th>Base anterior (7 dias)</th><th>Diferença 7 dias</th><th>Variação %</th>')+extra+'</tr></thead><tbody>'
       +(members&&members.length?members.map(function(m,i){
         var v=Number(type==='challenge'?m.points:m.might)||0;
         return '<tr data-gm-player="'+esc(m.player||'?')+'"><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+esc(gmDate(m.capturedAt))+(m.stale?' · DESATUALIZADO':'')+'</td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
-          +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')
+          +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td><td>'+(m.weeklyBaselineMight==null?'SEM BASE':fmtS(m.weeklyBaselineMight))+'</td><td>'+gmWeekNumber(m.weeklyDelta)+'</td><td>'+gmWeekPercent(m)+'</td>')
           +(authState.isSiteAdmin?'<td>'+esc(m.sourceDeviceId||'não informado')+'</td><td>'+esc(m.sourceObserver||'não informado')+'</td>':'')+'</tr>';
-      }).join(''):'<tr><td colspan="'+(authState.isSiteAdmin?'8':'6')+'" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
+      }).join(''):'<tr><td colspan="'+((type==='challenge'?5:9)+(authState.isSiteAdmin?2:0))+'" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
   }
   function gmCsvValue(v){
     var q=String.fromCharCode(34);
@@ -3166,15 +3177,15 @@ const PAGE = `<!doctype html>
     chosen.forEach(function(c){
       if(!c.snapshot) return;
       (c.snapshot.members||[]).forEach(function(m,i){
-        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,'',gmDate(m.capturedAt||c.snapshot.capturedAt),m.stale?'DESATUALIZADO (>24h)':'OBSERVADO']);
+        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,'',gmDate(m.capturedAt||c.snapshot.capturedAt),m.stale?'DESATUALIZADO (>24h)':'OBSERVADO',m.weeklyBaselineMight==null?'':m.weeklyBaselineMight,m.weeklyDelta==null?'':m.weeklyDelta,gmWeekPercent(m),m.weeklyBaselineAt||'']);
       });
       (c.snapshot.historicalMembers||[]).forEach(function(m,i){
-        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,'',m.capturedAt||'','DESATUALIZADO']);
+        records.push([c.name,m.rank||i+1,m.player,Number(m.might)||0,'',m.capturedAt||'','DESATUALIZADO','','','','']);
       });
     });
     var stamp=new Date().toLocaleString('pt-BR');
     if(format==='csv'){
-      var lines=[['Categoria','Posição observada','Jogador','Might','SP (não capturado)','Capturado em','Status'].map(gmCsvValue).join(';')];
+      var lines=[['Categoria','Posição observada','Jogador','Might','SP (não capturado)','Capturado em','Status','Might há 7 dias','Diferença 7 dias','Variação % 7 dias','Captura de base'].map(gmCsvValue).join(';')];
       records.forEach(function(r){lines.push(r.map(gmCsvValue).join(';'));});
       lines.push('');
       if(guildChallengeVisible){
