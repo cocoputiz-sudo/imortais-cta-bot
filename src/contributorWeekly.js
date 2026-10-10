@@ -221,7 +221,7 @@ async function getReport(pool,{now=new Date()}={}){
       "FROM guild_might_snapshots s WHERE s.members_complete=true AND s.category_mapped=true "+
       "AND s.layout->>'guildVerified'='true' "+
       "AND s.layout->>'code'=ANY($1::text[]) AND s.device_id=ANY($2::text[]) "+
-      "AND s.captured_at>=$3::timestamptz ORDER BY s.captured_at,s.id LIMIT 25000",
+      "AND s.captured_at>=$3::timestamptz ORDER BY s.captured_at DESC,s.id DESC LIMIT 25000",
       [CODES,[...allowed],bounds]);
     if(r.rows.length===25000)warnings.push("Limite de 25.000 páginas atingido; algumas varreduras podem não estar disponíveis.");
     const ids=r.rows.map(x=>x.id),map=new Map();
