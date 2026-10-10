@@ -18,6 +18,7 @@ const scout = require("./scout");
 const perfil = require("./perfil");
 const web = require("./web");
 const telemetry = require("./telemetry");
+const contributorWeekly = require("./contributorWeekly");
 const navigation = require("./navigation");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
@@ -3381,6 +3382,11 @@ client.once(Events.ClientReady, async (c) => {
   setInterval(checkReminders, 60 * 1000);
   setInterval(checkConsolidation, 60 * 1000);
   setInterval(checkNavigationPlans, 30 * 1000);
+  // Hora configurada na tela do War Room, sempre UTC; idempotência em PostgreSQL.
+  const checkContributorWeekly=()=>contributorWeekly.tick(db.pool,client,{channelId:CFG.staffLogChannelId})
+    .catch(e=>console.error("[contributor weekly scheduler]",e?.message||e));
+  setInterval(checkContributorWeekly, 5 * 60 * 1000);
+  checkContributorWeekly();
   checkNavigationPlans().catch(() => {});
   for (const [gid] of c.guilds.cache) {
     try { await cmds.registerCommands(c.user.id, gid); }
@@ -3715,6 +3721,7 @@ const webActions = {
     await db.init();
     await perfil.initSchema(db.pool);
     await telemetry.initSchema(db.pool);
+    await contributorWeekly.init(db.pool);
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
     await client.login(CFG.token);
