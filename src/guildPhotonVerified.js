@@ -169,7 +169,8 @@ function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
         if(!playerName(String(p.members[i]?.player||"")) || rank<0 || rank>=size){conflict=true;break;}
         const old=ranks.get(rank);
         if(old && normalize(old.member.player)!==name)conflict=true;
-        if(!old||p.ms>old.ms)ranks.set(rank,{member:p.members[i],ms:p.ms,capturedAt:p.capturedAt});
+        if(!old||p.ms>old.ms)ranks.set(rank,{member:p.members[i],ms:p.ms,capturedAt:p.capturedAt,
+          sourceDeviceId:p.deviceId||null,sourceObserver:p.observer||null});
       }
       if(conflict)break;
     }
@@ -184,9 +185,9 @@ function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
   const start=latestComplete?.at??Number.NEGATIVE_INFINITY;
   const current=new Map(),deleted=new Map();
   if(latestComplete){
-    for(const {member,ms,capturedAt} of latestComplete.members){
+    for(const {member,ms,capturedAt,sourceDeviceId,sourceObserver} of latestComplete.members){
       const key=normalize(member.player);
-      current.set(key,{...member,capturedAt,ms});
+      current.set(key,{...member,capturedAt,ms,sourceDeviceId,sourceObserver});
     }
     // Older valid increases are floors only for members still present in
     // the complete capture. Their older timestamps are not used as 'fresh'.
@@ -197,6 +198,8 @@ function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
         if(existing && (m.might??m.points??0)>(existing.might??existing.points??0)){
           const value=m.might??m.points;
           if(m.might!=null)existing.might=value; else existing.points=value;
+          existing.capturedAt=p.capturedAt;existing.ms=p.ms;
+          existing.sourceDeviceId=p.deviceId||null;existing.sourceObserver=p.observer||null;
         }
       }
     }
@@ -218,11 +221,14 @@ function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
       // reading never overwrites a trusted higher prior observation.
       const oldValue=prev?.might??prev?.points??-1;
       const value=m.might??m.points??0;
-      const row={...(prev||{}),...m,player:name,capturedAt:p.capturedAt,ms:p.ms};
+      const row={...(prev||{}),...m,player:name,capturedAt:p.capturedAt,ms:p.ms,
+        sourceDeviceId:p.deviceId||null,sourceObserver:p.observer||null};
       if(value<oldValue){
         if(prev.might!=null)row.might=prev.might;
         else row.points=prev.points;
         row.lowerReadingIgnored=true;
+        row.ms=prev.ms;row.capturedAt=prev.capturedAt;
+        row.sourceDeviceId=prev.sourceDeviceId;row.sourceObserver=prev.sourceObserver;
       }
       current.set(key,row);
       deleted.delete(key);
@@ -233,6 +239,7 @@ function assemblePages(pages,{seasonStartAt=null,asOf=null}={}){
     a.player.localeCompare(b.player,"pt-BR"))
     .map((m,i)=>({
       player:m.player,rank:i+1,capturedAt:m.capturedAt,
+      sourceDeviceId:m.sourceDeviceId||null,sourceObserver:m.sourceObserver||null,
       stale:validNow-m.ms>24*60*60*1000,
       ...(m.lowerReadingIgnored?{lowerReadingIgnored:true}:{}),
       ...(m.removedByComplete?{removedByComplete:true}:{}),
@@ -345,7 +352,8 @@ function assembleMightPages(pages,{seasonStartAt=null,asOf=null,sweepMinutes=5}=
       if(!name||!Number.isFinite(value)||value<0)continue;
       const earlier=floors.get(key);
       if(!earlier||value>=earlier.might)
-        floors.set(key,{player:name,might:value,capturedAt:page.capturedAt,ms:page.ms});
+        floors.set(key,{player:name,might:value,capturedAt:page.capturedAt,ms:page.ms,
+          sourceDeviceId:page.deviceId||null,sourceObserver:page.observer||null});
       latestSeen.set(key,{player:name,ms:page.ms});
     }
   }

@@ -40,6 +40,7 @@ on:
       - "test/guild-might-worker.js"
       - "test/guild-challenge.js"
       - "test/guild-ranking-season.js"
+      - "test/guild-ranking-auth.js"
       - "test/guild-might-sweep.js"
       - "test/guild-legacy-repair.js"
       - "test/guild-might-page.js"
@@ -112,6 +113,8 @@ jobs:
         run: node test/guild-might-discovery.js
       - name: Guild ranking season monotonic and guild ID
         run: node test/guild-ranking-season.js
+      - name: Dynamic paired-device authorization and token revocation
+        run: node test/guild-ranking-auth.js
       - name: Might certified cross-marker sweep regression
         run: node test/guild-might-sweep.js
       - name: Legacy guild snapshot repair dry-run

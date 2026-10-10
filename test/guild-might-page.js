@@ -73,6 +73,10 @@ assert(page.includes("gm-config-warning"),
   "production must display a clear notice when season or observers are missing");
 assert(page.includes("Cobertura integral"),
   "Might card must show complete sweep coverage");
+assert(page.includes("var extra=authState.isSiteAdmin?'<th>Dispositivo de origem</th><th>Jogador observador</th>':'';"),
+  "source provenance columns must only be added in admin mode");
+assert(page.includes("m.sourceDeviceId"),"winning value must carry source device into UI");
+assert(page.includes("m.sourceObserver"),"winning value must carry source observer into UI");
 const root=require("node:path").join(__dirname,"..");
 const example=fs.readFileSync(require("node:path").join(root,"env.example"),"utf8");
 assert(example.includes("# GUILD_SEASON_START_AT="));

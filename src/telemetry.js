@@ -3786,7 +3786,8 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
   `, [safeMinutes, safeLimit]);
 
   // Pairing grants telemetry access, not authorization for official rankings.
-  const trustedRows=rows.filter(x=>guildRankingAuth.isApprovedDevice(x.device_id));
+  const approvedForBatch=await guildRankingAuth.approvedDeviceIds(pool);
+  const trustedRows=rows.filter(x=>approvedForBatch.has(String(x.device_id||"")));
   const challenge = await guildChallengeStore.materialize(pool, trustedRows);
   const snapshots = guildMight.buildContributionSnapshots(trustedRows, { minConfidence: 0.85 });
   if (!snapshots.length) {
@@ -3821,7 +3822,7 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
     }
     if (!memberMap.size) continue;
     const contentHash = crypto.createHash("sha256").update(guildMight.stableJson([
-      snapshot.category.key,snapshot.layout?.snapshotMarker??null,snapshot.layout?.pageOffset??0,snapshot.layout?.totalMembers??null,
+      snapshot.deviceId,snapshot.category.key,snapshot.layout?.snapshotMarker??null,snapshot.layout?.pageOffset??0,snapshot.layout?.totalMembers??null,
       (snapshot.members||[]).map(m=>[String(m.player||"").toLowerCase(),Number(m.might)||0])
     ])).digest("hex");
     const captureDay = new Date(snapshot.capturedAt).toISOString().slice(0,10);
@@ -3899,10 +3900,10 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
 async function getGuildMightDashboard({ days = 90 } = {}) {
   const safeDays = Math.max(1, Math.min(365, Number(days) || 90));
   const epoch=await guildSeason.getSeasonEpoch(pool);
-  const approvedDevices=[...guildRankingAuth.approvedDeviceIds()];
+  const approvedDevices=[...await guildRankingAuth.approvedDeviceIds(pool)];
   const configurationNotices=[];
   if(!approvedDevices.length)configurationNotices.push(
-    "Nenhum dispositivo autorizado para o ranking. Configure GUILD_RANKING_ALLOWED_DEVICE_IDS no serviço de produção.");
+    "Nenhum dispositivo com pareamento de telemetria válido (token não revogado). Verifique os dispositivos em Telemetria → Dispositivos e os pareamentos ativos; GUILD_RANKING_ALLOWED_DEVICE_IDS é apenas restrição opcional.");
   if(!guildSeason.canPublishRankings(epoch))configurationNotices.push(
     "Início da temporada ainda não validado. Confira o número oficial e configure GUILD_SEASON_START_AT (UTC), ou aguarde uma transição Photon comprovada.");
   if(configurationNotices.length)return {

@@ -45,7 +45,7 @@ async function materialize(pool,rows){
     }
     if(!memberMap.size)continue;
     const contentHash=crypto.createHash("sha256").update(JSON.stringify([
-      snap.snapshotMarker,snap.guildTotalPoints,snap.pageOffset,snap.totalMembers,snap.members.map(m=>[m.player.toLowerCase(),m.points])
+      snap.deviceId,snap.snapshotMarker,snap.guildTotalPoints,snap.pageOffset,snap.totalMembers,snap.members.map(m=>[m.player.toLowerCase(),m.points])
     ])).digest("hex");
     const capturedDay=new Date(snap.capturedAt).toISOString().slice(0,10);
     const client=await pool.connect();
@@ -97,7 +97,7 @@ async function getDashboard(pool,{days=90}={}){
   if(!canPublishRankings(epoch))return {available:false,verified:false,season:epoch,
     members:[],totalPoints:null,observedPoints:0,observedMembers:0,expectedMembers:null,
     complete:false,meta:{error:"season_boundary_not_verified"}};
-  const devices=[...approvedDeviceIds()];
+  const devices=[...await approvedDeviceIds(pool)];
   const expectedGuild=IMORTAIS_GUILD_ID_BASE64;
   const [latest,stats,probes]=await Promise.all([
     pool.query("SELECT id,response_event_id,observer,device_id,captured_at,total_members,snapshot_marker,guild_total_points FROM guild_challenge_snapshots "+
@@ -120,7 +120,7 @@ async function getDashboard(pool,{days=90}={}){
     // Always pick the most recent page at each offset, not simply the latest 16 players.
     // A two-hour window avoids mixing historical seasons; report incomplete coverage explicitly.
     const selected=await pool.query(
-      "SELECT id,response_event_id,page_offset,total_members,captured_at,observer,snapshot_marker,guild_total_points "+
+      "SELECT id,response_event_id,device_id,page_offset,total_members,captured_at,observer,snapshot_marker,guild_total_points "+
       "FROM guild_challenge_snapshots WHERE members_complete=true AND total_members IS NOT NULL "+
       "AND captured_at BETWEEN COALESCE($3::timestamptz,now()-($2::text || ' days')::interval) AND $1::timestamptz "+
       "AND device_id=ANY($4::text[]) "+
@@ -147,7 +147,7 @@ async function getDashboard(pool,{days=90}={}){
     }
     const pages=selected.rows.map(s=>({
       pageOffset:s.page_offset,totalMembers:Number(s.total_members),
-      capturedAt:s.captured_at,responseEventId:s.response_event_id,snapshotMarker:s.snapshot_marker,guildTotalPoints:s.guild_total_points===null?null:Number(s.guild_total_points),members:byId.get(String(s.id))||[]
+      capturedAt:s.captured_at,responseEventId:s.response_event_id,deviceId:s.device_id,observer:s.observer,snapshotMarker:s.snapshot_marker,guildTotalPoints:s.guild_total_points===null?null:Number(s.guild_total_points),members:byId.get(String(s.id))||[]
     }));
     combined=assemblePages(pages,{seasonStartAt:epoch.startAt});
   }

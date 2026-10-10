@@ -14,7 +14,7 @@ const good={
 const invalid=structuredClone(good);invalid.id=101;
 invalid.payload.parameters["0"]={kind:"bytes",length:16,base64:Buffer.alloc(16).toString("base64")};
 const missing=structuredClone(good);missing.id=102;delete missing.payload.parameters["1"];
-const p=classifyLegacyRows([good,invalid,missing]);
+const p=classifyLegacyRows([good,invalid,missing],{approvedIds:new Set(["WORKSPACEIGOR"])});
 assert.equal(p.eligible.length,1);
 assert.equal(p.quarantined.length,2);
 assert.equal(p.eligible[0].code,"PVE");

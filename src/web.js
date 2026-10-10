@@ -3113,13 +3113,15 @@ const PAGE = `<!doctype html>
     return cards;
   }
   function gmRows(members,type){
-    var sum=(members||[]).reduce(function(a,m){return a+Number(type==='challenge'?m.points:m.might)||0;},0);
-    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+ (type==='challenge'?'Chavinhas':'Might') +'</th><th>Capturado em</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+'</tr></thead><tbody>'
+    var sum=(members||[]).reduce(function(a,m){return a+(Number(type==='challenge'?m.points:m.might)||0);},0);
+    var extra=authState.isSiteAdmin?'<th>Dispositivo de origem</th><th>Jogador observador</th>':'';
+    return '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Pos. observada</th><th>Jogador</th><th>'+(type==='challenge'?'Chavinhas':'Might')+'</th><th>Capturado em</th><th>% do observado</th>'+(type==='challenge'?'':'<th>SP estimado</th>')+extra+'</tr></thead><tbody>'
       +(members&&members.length?members.map(function(m,i){
         var v=Number(type==='challenge'?m.points:m.might)||0;
         return '<tr><td>'+fmtS(m.rank||i+1)+'</td><td><b>'+esc(m.player||'?')+'</b></td><td><b>'+fmtS(v)+'</b></td><td>'+esc(gmDate(m.capturedAt))+(m.stale?' · DESATUALIZADO':'')+'</td><td>'+(sum?(100*v/sum).toFixed(2)+'%':'—')+'</td>'
-          +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')+'</tr>';
-      }).join(''):'<tr><td colspan="5" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
+          +(type==='challenge'?'':'<td>'+gmSp(m.estimatedSp)+'</td>')
+          +(authState.isSiteAdmin?'<td>'+esc(m.sourceDeviceId||'não informado')+'</td><td>'+esc(m.sourceObserver||'não informado')+'</td>':'')+'</tr>';
+      }).join(''):'<tr><td colspan="'+(authState.isSiteAdmin?'8':'6')+'" style="color:var(--faint)">Nenhum jogador coletado.</td></tr>')+'</tbody></table></div>';
   }
   function gmCsvValue(v){
     var q=String.fromCharCode(34);

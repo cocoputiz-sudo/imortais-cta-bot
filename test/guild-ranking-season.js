@@ -9,12 +9,9 @@ assert.equal(canPublishRankings({verified:false},{HOMOLOG_MODE:"1"}),true);
 assert.equal(canPublishRankings({verified:true},{HOMOLOG_MODE:"0"}),true);
 const guild={kind:"bytes",length:16,base64:"ckzUYJXLFUmTBs0y4mZ+SQ=="};
 
-const {isApprovedDevice}=require("../src/guildRankingAuth");
-assert.equal(isApprovedDevice("WORKSPACEIGOR",{HOMOLOG_MODE:"0"}),false,
-  "A valid token alone cannot authorize official production ranking");
-assert.equal(isApprovedDevice("WORKSPACEIGOR",{HOMOLOG_MODE:"1"}),true);
-assert.equal(isApprovedDevice("trusted",{HOMOLOG_MODE:"0",GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"}),true);
-assert.equal(isApprovedDevice("other",{HOMOLOG_MODE:"0",GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"}),false);
+const {optionalDeviceRestriction}=require("../src/guildRankingAuth");
+assert.equal(optionalDeviceRestriction({GUILD_RANKING_ALLOWED_DEVICE_IDS:""}),null);
+assert.deepEqual([...optionalDeviceRestriction({GUILD_RANKING_ALLOWED_DEVICE_IDS:"trusted"})],["trusted"]);
 
 const other={kind:"bytes",length:16,base64:Buffer.alloc(16,1).toString("base64")};
 assert(validImortaisGuild({"0":guild},"GetGuildChallengePoints"));
@@ -47,6 +44,15 @@ const lower={...partial,capturedAt:"2026-10-09T21:31:00Z",
 const lowerDash=assemblePages([...baseline,partial,lower],{asOf:"2026-10-09T22:00:00Z"});
 assert.equal(lowerDash.members.find(x=>x.player==="Member001").points,1200,
   "single lower reading cannot decrease season floor");
+const attributed=assemblePages([
+ {...baseline[0],deviceId:"DEVICE-A",observer:"Observer A"},
+ {...partial,deviceId:"DEVICE-B",observer:"Observer B"},
+ {...lower,deviceId:"DEVICE-C",observer:"Observer C"}
+]);
+assert.equal(attributed.members.find(m=>m.player==="Member001").points,1200);
+assert.equal(attributed.members.find(m=>m.player==="Member001").sourceDeviceId,"DEVICE-B",
+  "lower later observation must not steal high-score attribution");
+assert.equal(attributed.members.find(m=>m.player==="Member001").sourceObserver,"Observer B");
 const oldMember=assemblePages([
  {pageOffset:0,totalMembers:1,snapshotMarker:"old",capturedAt:"2026-10-09T01:00:00Z",members:[{player:"Departed",points:50}]},
  {pageOffset:0,totalMembers:1,snapshotMarker:"new",capturedAt:after,members:[{player:"Current",points:70}]}
