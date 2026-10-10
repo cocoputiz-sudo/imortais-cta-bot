@@ -120,6 +120,8 @@ jobs:
         run: node test/guild-might-sweep.js
       - name: Legacy guild snapshot repair dry-run
         run: node test/guild-legacy-repair.js
+      - name: Relatório semanal de contribuintes
+        run: node test/contributor-weekly.js
       - name: Guild Might worker e snapshots em Postgres
         run: node test/guild-might-worker.js
       - name: Guild Might e Challenge - testes especificos do PR 66
