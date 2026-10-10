@@ -115,4 +115,9 @@ assert(page.includes('id="gm-player-search"'),"War Room Must include player sear
 assert(page.includes('data-gm-player'),"search must cover Might and Challenge rows");
 assert(page.includes('gmFilterPlayers(guildMightSearchTerm)'),"search persists across redraw and category switches");
 assert(page.includes("gmFilterPlayers(playerSearch.value)"),"search filters without re-requesting network data");
-console.log("guild might War Room: 14 cards, exports, live player search and JS syntax ok");
+assert(page.includes("label===gmNorm(info.name)"),"PvE card must match Photon full category name");
+assert(page.includes("weeklyDelta"),"Might weekly delta visible per player");
+assert(page.includes("Might há 7 dias"),"CSV exports weekly baseline");
+assert(page.includes("Diferença 7 dias"),"Might table and export include weekly delta");
+assert(page.includes("SEM BASE"),"Missing prior capture cannot show made-up zero");
+console.log("guild might War Room: categories, weekly difference, exports and JS syntax ok");

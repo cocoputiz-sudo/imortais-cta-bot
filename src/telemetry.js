@@ -3747,7 +3747,7 @@ function scheduleGuildMightMaterialization({ backfill = false } = {}) {
     guildMightWorkerState.running = true;
 
     guildMightWorkerPromise = materializeGuildMightRecent({
-      minutes: full ? 3 * 24 * 60 : 15,
+      minutes: full ? 14 * 24 * 60 : 15,
       limit: full ? 20000 : 3000
     }).then(result => {
       guildMightWorkerState.lastScanned = result.probes;
@@ -3774,7 +3774,7 @@ function scheduleGuildMightMaterialization({ backfill = false } = {}) {
 }
 
 async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
-  const safeMinutes = Math.max(1, Math.min(3 * 24 * 60, Number(minutes) || 5));
+  const safeMinutes = Math.max(1, Math.min(14 * 24 * 60, Number(minutes) || 5));
   const safeLimit = Math.max(20, Math.min(20000, Number(limit) || 1000));
   const { rows } = await pool.query(`
     SELECT event_id, device_id, player_name, payload, occurred_at, received_at
@@ -3782,6 +3782,8 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
         SELECT event_id, device_id, player_name, payload, occurred_at, received_at
           FROM albion_telemetry_events
          WHERE type='guild_might_probe'
+           AND payload->>'direction'='response'
+           AND payload->>'operationName' IN ('GetGuildMightCategoryContribution','GetGuildChallengePoints')
            AND occurred_at >= now() - ($1::text || ' minutes')::interval
          ORDER BY occurred_at DESC, received_at DESC
          LIMIT $2
@@ -3789,6 +3791,8 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
      ORDER BY occurred_at ASC, received_at ASC
   `, [safeMinutes, safeLimit]);
 
+  // Scan only verified leaderboard RESPONSES; requests/overviews are not
+  // snapshots and can crowd old pages out of a bounded backfill.
   // Pairing grants telemetry access, not authorization for official rankings.
   const approvedForBatch=await guildRankingAuth.approvedDeviceIds(pool);
   const trustedRows=rows.filter(x=>approvedForBatch.has(String(x.device_id||"")));

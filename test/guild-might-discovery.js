@@ -128,6 +128,23 @@ const foreign=structuredClone(verifiedRows);
 foreign[0].payload.parameters["0"]={kind:"bytes",length:16,base64:Buffer.alloc(16,9).toString("base64")};
 assert.equal(buildContributionSnapshots(foreign).length,0);
 console.log("✅ GuildMight verified Photon only; legacy and other guilds quarantined");
+const point=(id,at,entries)=>({
+ responseEventId:id,deviceId:"d3",observer:"BadMack",
+ category:{mapped:true,name:"PvE (Outlands e Roads)"},capturedAt:at,
+ layout:{code:"PVE",pageOffset:0,totalMembers:2,snapshotMarker:id,guildVerified:true},
+ members:entries.map(([player,might],i)=>({player,might,rank:i+1}))
+});
+const now="2026-10-10T18:00:00Z";
+const older=point("prev","2026-10-03T17:55:00Z",[["PlayerA",100],["PlayerOld",9]]);
+const newer=point("current","2026-10-10T17:55:00Z",[["PlayerA",170],["PlayerNew",50]]);
+const weekly=buildDashboardFromLatestSnapshots([older,newer],{asOf:now}).categories[0];
+assert.equal(weekly.members.find(m=>m.player==="PlayerA").weeklyDelta,70);
+assert.equal(weekly.members.find(m=>m.player==="PlayerNew").weeklyDelta,null);
+assert.equal(weekly.weekly.comparedPlayers,1);
+assert.equal(weekly.weekly.missingBaselinePlayers,1);
+assert.equal(buildDashboardFromLatestSnapshots([newer],{asOf:now}).categories[0].members[0].weeklyDelta,null);
+console.log("✅ PvE semanal usa captura prévia válida, sem inventar zero quando falta base");
+
 
 // Exercise Challenge extraction and generated Guild Might page in the CI discovery step.
 require("./guild-challenge");

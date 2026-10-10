@@ -381,7 +381,15 @@ function buildContributionSnapshots(rows, { minConfidence = 0.85 } = {}) {
   return snapshots.sort((a,b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0));
 }
 
-function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
+function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null,asOf=null}={}){
+  const now=asOf==null?Date.now():Date.parse(asOf);
+  const atMs=Number.isFinite(now)?now:Date.now();
+  const weekMs=7*24*60*60*1000;
+  const referenceMs=atMs-weekMs;
+  const referenceAt=new Date(referenceMs).toISOString();
+  // Baseline comes only from snapshots actually observed BEFORE the cutoff.
+  // Never assume that missing historical observations mean zero contribution.
+  const baselineOldest=referenceMs-weekMs;
   const byCategory=new Map();
   for(const snap of snapshots||[]){
     const code=snap?.layout?.code;
@@ -402,12 +410,38 @@ function buildDashboardFromLatestSnapshots(snapshots,{seasonStartAt=null}={}){
         categoryCode:code,snapshotMarker:s.layout.snapshotMarker??null,
         members:s.members||[]}));
     if(!pages.length)continue;
-    const merged=assembleMightPages(pages,{seasonStartAt});
+    const merged=assembleMightPages(pages,{seasonStartAt,asOf});
+    const baselineByPlayer=new Map();
+    for(const page of pages){
+      const when=Date.parse(page.capturedAt||"");
+      if(!Number.isFinite(when)||when>referenceMs||when<baselineOldest)continue;
+      for(const m of page.members||[]){
+        const key=String(m.player||"").trim().toLowerCase();
+        const value=Number(m.might);
+        if(!key||!Number.isFinite(value)||value<0)continue;
+        const previous=baselineByPlayer.get(key);
+        if(!previous||when>previous.ms||(when===previous.ms&&value>previous.might))
+          baselineByPlayer.set(key,{might:value,ms:when,capturedAt:page.capturedAt});
+      }
+    }
+    const comparedMembers=merged.members.map(m=>{
+      const baseline=baselineByPlayer.get(String(m.player||"").trim().toLowerCase());
+      const recent=Date.parse(m.capturedAt||"")>referenceMs;
+      return {...m,
+        weeklyBaselineMight:baseline&&recent?baseline.might:null,
+        weeklyBaselineAt:baseline&&recent?baseline.capturedAt:null,
+        weeklyDelta:baseline&&recent?Number(m.might)-baseline.might:null};
+    });
+    const comparable=comparedMembers.filter(m=>m.weeklyDelta!=null);
     categories.push({...latest,
       category:{key:"name:"+normalizeCategoryLabel(KNOWN_CATEGORY_LABELS[code]),
         name:KNOWN_CATEGORY_LABELS[code],mapped:true,nameTentative:false},
       capturedAt:merged.capturedAt||latest.capturedAt,
-      members:merged.members.map(m=>({...m,estimatedSp:null})),
+      members:comparedMembers.map(m=>({...m,estimatedSp:null})),
+      weekly:{referenceAt,periodDays:7,comparedPlayers:comparable.length,
+        missingBaselinePlayers:comparedMembers.length-comparable.length,
+        observedDelta:comparable.reduce((sum,m)=>sum+m.weeklyDelta,0),
+        evidence:"Última captura individual entre 7 e 14 dias atrás. Sem captura anterior, não há diferença calculável."},
       totalMembers:merged.totalMembers,observedMembers:merged.observedMembers,
       historicalObservedMembers:merged.historicalObservedMembers,
       historicalMembers:merged.historicalMembers,
