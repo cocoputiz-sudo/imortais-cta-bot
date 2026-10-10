@@ -73,7 +73,7 @@ assert(page.includes("gm-config-warning"),
   "production must display a clear notice when season or observers are missing");
 assert(page.includes("Cobertura integral"),
   "Might card must show complete sweep coverage");
-assert(page.includes("authState.isSiteAdmin?'<th>Dispositivo de origem</th><th>Jogador observador</th>':'')"),
+assert(page.includes("var extra=authState.isSiteAdmin?'<th>Dispositivo de origem</th><th>Jogador observador</th>':'';"),
   "source provenance columns must only be added in admin mode");
 assert(page.includes("m.sourceDeviceId"),"winning value must carry source device into UI");
 assert(page.includes("m.sourceObserver"),"winning value must carry source observer into UI");
