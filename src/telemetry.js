@@ -3810,7 +3810,13 @@ async function materializeGuildMightRecent({ minutes = 5, limit = 1000 } = {}) {
       FROM guild_might_snapshots
      WHERE response_event_id = ANY($1::text[])
        AND members_complete = true
+       AND category_mapped = true
+       AND layout->>'guildVerified' = 'true'
+       AND COALESCE(layout->>'code','') <> ''
   `, [candidateIds]);
+  // A legacy row may have members_complete=true but no authenticated Photon
+  // category code. Reprocess it only from this event's original, validated
+  // IMORTAIS response; it must not suppress a real PvE or other category page.
   const complete = new Set(existingRows.map(x => x.response_event_id));
   let stored = 0;
 
