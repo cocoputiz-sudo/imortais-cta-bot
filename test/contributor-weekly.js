@@ -51,11 +51,11 @@ assert.throws(()=>validateSettings({...cfg,minima:{"1":{pve:-1,gathering:1},"2":
 assert.equal(scheduledForWeek(new Date("2026-10-10T15:00:00Z"),{weekday:0,timeUtc:"18:00"}).toISOString(),"2026-10-11T18:00:00.000Z");
 const webSource=fs.readFileSync(require.resolve("../src/web"),"utf8");
 const indexSource=fs.readFileSync(require.resolve("../src/index"),"utf8");
-const page=require("../src/web").__test.PAGE;
-const browser=/<script>([\s\S]*?)<\/script>/.exec(page);
+const warRoomPage=require("../src/web").__test.PAGE;
+const browser=/<script>([\s\S]*?)<\/script>/.exec(warRoomPage);
 assert(browser&&browser[1]);
 new vm.Script(browser[1],{filename:"weekly-browser.js"});
-const scriptSnippet=page;
+const scriptSnippet=warRoomPage;
 assert(scriptSnippet.includes("Contribuintes – semana"));
 assert(scriptSnippet.includes("Exportar CSV"));
 assert(scriptSnippet.includes("Exportar HTML"));
