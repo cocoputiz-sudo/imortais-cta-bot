@@ -93,7 +93,7 @@ function canViewContributors(roles,userId,name){
   const allowed=new Set(String(process.env.OFFICER_ROLE_IDS||"").split(",").map(x=>x.trim()).filter(Boolean));
   if(roles.some(id=>allowed.has(String(id))))return true;
   const g=_client&&_client.guilds&&_client.guilds.cache.get(GUILD_ID);
-  return !!g && roles.some(id=>/^(officers?|oficiais?|guild officers?)$/i.test(
+  return !!g && roles.some(id=>/^(officers?|oficial|oficiais|guild officers?)$/i.test(
     String(g.roles.cache.get(id)?.name||"").trim()));
 }
 function canEditRoles(roles, userId) {
