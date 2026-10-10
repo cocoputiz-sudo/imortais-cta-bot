@@ -51,7 +51,7 @@ async function main(){
  // Each observer's evidence must remain separately reversible after revocation.
  for(const [id,direction,parameters] of [
    ["req-same-content","request",{"0":"PvE (Outlands and Roads)"}],
-   ["res-same-content","response",{"0":guild,"1":"PVE","2":"sample-marker","3":2086795,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[550000,450000,1086795]}]
+   ["res-same-content","response",{"0":guild,"1":"PVE","2":"sample-marker","3":1800000,"4":3,"6":["BadMack","RagnaldoKun","ESTHER9950"],"7":[500000,400000,900000]}]
  ]){
    await db.pool.query(
      "INSERT INTO albion_telemetry_events(event_id,device_id,type,occurred_at,player_name,payload) "+
@@ -151,11 +151,16 @@ async function main(){
  assert.equal(revokedMight.meta.categoryCount,1);
  assert.equal(revokedMight.ranking[0].player,"ESTHER9950",
    "independent observer must continue supporting ranking after revocation");
+ assert.equal(beforeRevocation.ranking[0].might,1086795);
+ assert.equal(revokedMight.ranking[0].might,900000,
+   "revocation must subtract the revoked observer's previous season maximum");
  assert(revokedMight.categories[0].members.every(m=>m.sourceDeviceId==="might-other-device"),
    "all values from revoked device must disappear, including historical maxima");
  await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='challenge-test'");
  const revokedChallenge=await challengeStore.getDashboard(db.pool,{days:1});
  assert.equal(revokedChallenge.available,true);
+ assert(!revokedChallenge.members.some(m=>m.player==="GiganteCarrara"),
+   "revoking a device must remove its unique Challenge values");
  assert(revokedChallenge.members.every(m=>m.sourceDeviceId==="different-device"),
    "Challenge values from revoked device must leave current leaderboard");
  await db.pool.query("UPDATE albion_telemetry_agent_tokens SET revoked_at=now() WHERE device_id='different-device'");
