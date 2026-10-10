@@ -9,6 +9,7 @@ process.env.PORT = String(39000 + (process.pid % 1000));
 
 const db = require("../src/db");
 const telemetry = require("../src/telemetry");
+const contributorWeekly = require("../src/contributorWeekly");
 const web = require("../src/web");
 
 const G = process.env.GUILD_ID || "guild-test";
@@ -132,6 +133,22 @@ async function testRouteAccessAndResponses() {
     const good = await post(base, cookieFor({ canEdit: true }), { text: roster, eventId: ev.id });
     assert.equal(good.status, 200);
     assert.equal(good.json.ok, true);
+    assert.equal(good.json.savedRoster.member_count,8,"valid Guilda Online paste persisted for weekly report");
+    assert.equal(good.json.savedRoster.contributors,3,"three contributor role tiers recognized");
+    const saved=await contributorWeekly.rosterLatest(db.pool);
+    assert.equal(saved.members.length,8,"roster persisted in PostgreSQL");
+    assert.equal(saved.members.find(x=>x.name==="Delta").roles[0],"CONTRIBUINTE 1");
+    const snapshotOnly=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
+      body:JSON.stringify({text:roster})
+    });
+    assert.equal(snapshotOnly.status,200,"last pasted roster saved even without open CTA");
+    const refused=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:false})},
+      body:JSON.stringify({text:roster})
+    });
+    assert.equal(refused.status,403,"regular guild member cannot overwrite roster");
+
 
     const names = (key) => good.json.groups[key].map((x) => x.name);
     assert.deepEqual(names("pronto"), ["Alfa"]);
@@ -196,6 +213,7 @@ async function main() {
 
   await db.init();
   await telemetry.initSchema(db.pool);
+  await contributorWeekly.init(db.pool);
   testBrowserScriptSyntax();
   testMobileAndMuralShell();
   await testRouteAccessAndResponses();
