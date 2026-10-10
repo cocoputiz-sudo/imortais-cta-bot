@@ -36,13 +36,14 @@ function resolveEpoch(observations,{manualStartAt=null}={}){
   return {seasonId:newest.id,startAt,verified,source,lastObservedAt:newest.at};
 }
 async function getSeasonEpoch(pool){
+  const ids=[...await approvedDeviceIds(pool)];
   const r=await pool.query(
     "SELECT occurred_at,payload FROM albion_telemetry_events "+
     "WHERE type='guild_might_probe' "+
     "AND payload->>'operationName'='GetGvgSeasonContributionByActivity' "+
     "AND payload->>'direction'='response' "+
     "AND device_id=ANY($1::text[]) "+
-    "ORDER BY occurred_at DESC LIMIT 250",[[...approvedDeviceIds()]]);
+    "ORDER BY occurred_at DESC LIMIT 250",[ids]);
   return resolveEpoch(r.rows,{manualStartAt:process.env.GUILD_SEASON_START_AT||null});
 }
 function canPublishRankings(epoch,env=process.env){
