@@ -9,18 +9,21 @@ process.env.PORT = String(39000 + (process.pid % 1000));
 
 const db = require("../src/db");
 const telemetry = require("../src/telemetry");
+const contributorWeekly = require("../src/contributorWeekly");
 const web = require("../src/web");
 
 const G = process.env.GUILD_ID || "guild-test";
 
 function ok(name) { console.log("✅ " + name); }
 
-function cookieFor({ canEdit }) {
+function cookieFor({ canEdit, canViewContributors=false, isSiteAdmin=false }) {
   const sid = web.__test.signSession({
     id: canEdit ? "staff-test" : "member-test",
     name: canEdit ? "Staff Test" : "Member Test",
     isMember: true,
     canEdit: !!canEdit,
+    canViewContributors:!!canViewContributors,
+    isSiteAdmin:!!isSiteAdmin,
     exp: Date.now() + 60 * 60 * 1000,
   });
   return "sid=" + sid;
@@ -132,7 +135,45 @@ async function testRouteAccessAndResponses() {
     const good = await post(base, cookieFor({ canEdit: true }), { text: roster, eventId: ev.id });
     assert.equal(good.status, 200);
     assert.equal(good.json.ok, true);
+    assert.equal(good.json.savedRoster.member_count,8,"valid Guilda Online paste persisted for weekly report");
+    assert.equal(good.json.savedRoster.contributors,3,"three contributor role tiers recognized");
+    const saved=await contributorWeekly.rosterLatest(db.pool);
+    assert.equal(saved.members.length,8,"roster persisted in PostgreSQL");
+    assert.equal(saved.members.find(x=>x.name==="Delta").roles[0],"CONTRIBUINTE 1");
+    const snapshotOnly=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
+      body:JSON.stringify({text:roster})
+    });
+    assert.equal(snapshotOnly.status,200,"last pasted roster saved even without open CTA");
+    const refused=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:false})},
+      body:JSON.stringify({text:roster})
+    });
+    assert.equal(refused.status,403,"regular guild member cannot overwrite roster");
 
+
+    const contributorRead=async (cookie,method="GET",body=null)=>{
+      const options={method,headers:{Cookie:cookie}};
+      if(body){options.headers["Content-Type"]="application/json";options.body=JSON.stringify(body);}
+      const response=await fetch(base+"/api/contributors/"+(method==="GET"?"weekly":"settings"),options);
+      return {status:response.status,json:await response.json()};
+    };
+    assert.equal((await contributorRead(cookieFor({canEdit:false}))).status,403,
+      "regular guild member cannot see contributor report");
+    assert.equal((await contributorRead(cookieFor({canEdit:true}))).status,403,
+      "a caller without admin/officer role cannot see contributor report");
+    const officerReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(officerReport.status,200,"officer can see contributor report");
+    assert.equal(officerReport.json.roster.memberCount,8);
+    assert.equal(officerReport.json.rows.length,3,"read only contributor roles 1, 2 and 3");
+    const adminCfg={minima:{"1":{pve:10,gathering:5},"2":{pve:1,gathering:1},"3":{pve:1,gathering:1}},weekday:0,timeUtc:"18:00",reminderEnabled:false};
+    assert.equal((await contributorRead(cookieFor({canEdit:false,canViewContributors:true}),"POST",adminCfg)).status,403,
+      "officer cannot alter the thresholds or schedule");
+    assert.equal((await contributorRead(cookieFor({canEdit:true,isSiteAdmin:true}),"POST",adminCfg)).status,200,
+      "site admin can update contributor minimums");
+    const storedSettings=await contributorWeekly.getSettings(db.pool);
+    assert.equal(storedSettings.minima["1"].pve,10);
+    assert.equal(storedSettings.reminderEnabled,false);
     const names = (key) => good.json.groups[key].map((x) => x.name);
     assert.deepEqual(names("pronto"), ["Alfa"]);
     assert.deepEqual(names("naCallSemPing"), ["Bravo"]);
@@ -196,6 +237,7 @@ async function main() {
 
   await db.init();
   await telemetry.initSchema(db.pool);
+  await contributorWeekly.init(db.pool);
   testBrowserScriptSyntax();
   testMobileAndMuralShell();
   await testRouteAccessAndResponses();

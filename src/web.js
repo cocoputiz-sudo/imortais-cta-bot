@@ -14,6 +14,7 @@ const crypto = require("crypto");
 const telemetry = require("./telemetry");
 const scout = require("./scout");
 const guildroster = require("./guildroster");
+const contributorWeekly = require("./contributorWeekly");
 const path = require("path");
 // Challenge appears only when explicitly enabled by the dedicated feature flag.
 const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
@@ -69,6 +70,12 @@ function requireMember(req, res) {
   if (!sess.isMember) { res.status(403).json({ error: "not_member" }); return null; }
   return sess;
 }
+function requireContributorViewer(req,res){
+  const sess=requireMember(req,res);
+  if(!sess)return null;
+  if(!sess.canViewContributors&&!sess.isSiteAdmin){res.status(403).json({error:"officer_or_admin_only"});return null;}
+  return sess;
+}
 function requireSiteAdmin(req,res) {
   const sess=requireMember(req,res);
   if(!sess)return null;
@@ -80,6 +87,14 @@ function requireEditor(req, res) {
   if (!sess) return null;
   if (!sess.canEdit) { res.status(403).json({ error: "no_edit" }); return null; }
   return sess;
+}
+function canViewContributors(roles,userId,name){
+  if(isSiteAdmin(roles,userId,name))return true;
+  const allowed=new Set(String(process.env.OFFICER_ROLE_IDS||"").split(",").map(x=>x.trim()).filter(Boolean));
+  if(roles.some(id=>allowed.has(String(id))))return true;
+  const g=_client&&_client.guilds&&_client.guilds.cache.get(GUILD_ID);
+  return !!g && roles.some(id=>/^(officers?|oficial|oficiais|guild officers?)$/i.test(
+    String(g.roles.cache.get(id)?.name||"").trim()));
 }
 function canEditRoles(roles, userId) {
   const g = _client && _client.guilds && _client.guilds.cache.get(GUILD_ID);
@@ -216,7 +231,10 @@ function startWebServer(client, opts) {
     try {
       const body = req.body || {};
       const result = await guildroster.analyze(db, { text: body.text, eventId: body.eventId });
-      if (result && result.ok) return res.json(result);
+      if (result && result.ok) {
+        result.savedRoster=await contributorWeekly.saveRoster(db.pool,body.text,sess.id);
+        return res.json(result);
+      }
 
       const error = result && result.error ? String(result.error) : "server";
       if (["empty", "unknown_format", "too_large", "too_many_lines", "no_members"].includes(error)) {
@@ -227,6 +245,37 @@ function startWebServer(client, opts) {
     } catch (e) {
       console.error("/api/guild-roster/analyze:", e?.message || e);
       return res.status(500).json({ error: "server" });
+    }
+  });
+
+  // Persistent guild paste can also be saved when there is no open CTA.
+  app.post("/api/guild-roster/save", async (req,res)=>{
+    const sess=requireEditor(req,res);if(!sess)return;
+    try{
+      const saved=await contributorWeekly.saveRoster(db.pool,req.body?.text,sess.id);
+      return res.json({ok:true,saved});
+    }catch(e){
+      const error=String(e.message||"server");
+      return res.status(["empty","unknown_format","too_large","too_many_lines","no_members"].includes(error)?400:500).json({error});
+    }
+  });
+  // Officers may view; thresholds and weekly reminder may only be changed by admins.
+  app.get("/api/contributors/weekly",async(req,res)=>{
+    if(!requireContributorViewer(req,res))return;
+    try{res.json(await contributorWeekly.getReport(db.pool));}
+    catch(e){console.error("[contributor report]",e);res.status(500).json({error:"report_failed"});}
+  });
+  app.get("/api/contributors/settings",async(req,res)=>{
+    if(!requireContributorViewer(req,res))return;
+    try{res.json(await contributorWeekly.getSettings(db.pool));}
+    catch(e){res.status(500).json({error:"settings_failed"});}
+  });
+  app.post("/api/contributors/settings",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    try{res.json(await contributorWeekly.saveSettings(db.pool,req.body||{},sess.id));}
+    catch(e){
+      const err=String(e.message||"");
+      res.status(["minima_invalidos","horario_invalido","lembrete_invalido"].includes(err)?400:500).json({error:err||"settings_failed"});
     }
   });
 
@@ -288,6 +337,7 @@ function startWebServer(client, opts) {
         canManageBomb: canManageBomb(roles, me.id, name),
         canManageCastleRoaming: canManageCastleRoaming(roles, me.id, name),
         isSiteAdmin: isSiteAdmin(roles, me.id, name),
+        canViewContributors: canViewContributors(roles,me.id,name),
         isMember: !!member,
         exp: Date.now() + SESSION_TTL_MS
       };
@@ -307,6 +357,7 @@ function startWebServer(client, opts) {
       canManageBomb: !!s.canManageBomb,
       canManageCastleRoaming: !!s.canManageCastleRoaming,
       isSiteAdmin: !!s.isSiteAdmin,
+      canViewContributors: !!s.canViewContributors||!!s.isSiteAdmin,
       member: !!s.isMember
     } : { logged: false });
   });
@@ -1113,6 +1164,7 @@ const PAGE = `<!doctype html>
   <div class="nav" data-view="loot">📦 Loot</div>
   <div class="nav" data-view="combat">⚔️ Combate</div>
   <div class="nav" data-view="might">🏅 Guild Might</div>
+  <div class="nav" data-view="contributors">📅 Contribuintes – semana</div>
   <div class="nav" data-view="guild">🟢 Guilda</div>
   <div class="nav" data-view="devices">🖥️ Dispositivos</div>
 </nav>
@@ -1129,6 +1181,7 @@ const PAGE = `<!doctype html>
     <div class="nav" data-view="loot">📦 Registros &amp; Loot</div>
     <div class="nav" data-view="combat">⚔️ Combate</div>
     <div class="nav" data-view="might">🏅 Guild Might</div>
+    <div class="nav" data-view="contributors">📅 Contribuintes – semana</div>
     <div class="nav" data-view="guild">🟢 Guilda online</div>
     <div class="nav" data-view="devices">🖥️ Dispositivos</div>
     <div class="navtitle">EM BREVE</div>
@@ -1168,6 +1221,7 @@ const PAGE = `<!doctype html>
     <div id="view-loot" style="display:none"></div>
     <div id="view-combat" style="display:none"></div>
     <div id="view-might" style="display:none"></div>
+    <div id="view-contributors" style="display:none"></div>
     <div id="view-devices" style="display:none"></div>
     <div id="view-guild" style="display:none"></div>
   </main>
@@ -1260,7 +1314,7 @@ const PAGE = `<!doctype html>
   function mclose(id){ document.getElementById(id).classList.remove('open'); }
 
   function show(v){
-    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',might:'view-might',devices:'view-devices',guild:'view-guild'};
+    var vs={board:'view-board',navigation:'view-navigation',mural:'view-mural',scout:'view-scout',confirm:'view-confirm',loot:'view-loot',combat:'view-combat',might:'view-might',contributors:'view-contributors',devices:'view-devices',guild:'view-guild'};
     for(var k in vs){ var el=document.getElementById(vs[k]); if(el) el.style.display=(k===v)?'':'none'; }
     Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view]'),function(b){ b.classList.toggle('on', b.getAttribute('data-view')===v); });
     if(v==='navigation') renderNavigation();
@@ -1269,6 +1323,7 @@ const PAGE = `<!doctype html>
     if(v==='loot') renderLoot();
     if(v==='combat') renderCombat();
     if(v==='might') renderGuildMight();
+    if(v==='contributors') renderContributors();
     if(v==='devices') renderDevices();
     if(v==='guild') renderGuild();
   }
@@ -3315,6 +3370,128 @@ const PAGE = `<!doctype html>
       .catch(function(e){setView('view-might','<div class="modhead">🏅 Guild Might</div><div class="empty-note">Erro ao consultar Might: '+esc(e.message)+'</div>');});
   }
 
+
+  var contributorReport=null,contributorSettings=null;
+  function contribNumber(x){return x==null?'SEM DADOS':fmtS(x);}
+  function contribDelta(x){return x==null?'—':(Number(x)>0?'+':'')+fmtS(x);}
+  function contribDisplayDate(x){return x?gmDate(x):'sem varredura integral';}
+  function contribStatus(x){
+    var label=String(x||'SEM DADOS');
+    return '<span class="pill '+(label==='ATIVO'?'ok':label==='SEM DADOS'?'':'miss')+'">'+esc(label)+'</span>';
+  }
+  function contribSummaryDate(p){
+    return 'Anterior: '+esc(contribDisplayDate(p&&p.previous&&p.previous.capturedAt))+
+      ' · Última: '+esc(contribDisplayDate(p&&p.latest&&p.latest.capturedAt))+
+      (p&&p.ready?' · intervalo válido (≥ 6 dias)':' · <b>faltam varreduras integrais com intervalo de 6 dias</b>');
+  }
+  function contribCsvCell(x){
+    var q=String.fromCharCode(34),v=String(x==null?'':x);
+    // Spreadsheet formula injection: names from pasted rosters are untrusted.
+    if(/^\\s*[=+@-]/.test(v))v="'"+v;
+    return q+v.replaceAll(q,q+q)+q;
+  }
+  function exportContributors(format){
+    var d=contributorReport;
+    if(!d)return;
+    var header=['Jogador','Cargo','PvE ganho','Coleta ganho','Demais categorias ganho','Outras categorias comparadas','Status','PvE anterior UTC','PvE último UTC','Coleta anterior UTC','Coleta último UTC','Lista salva UTC','Desatualizado'];
+    var dates=d.categories||{},p=dates.PVE||{},g=dates.GATHERING||{};
+    var records=(d.rows||[]).map(function(x){
+      return [x.player,'CONTRIBUINTE '+x.level,x.pveMight,x.gatheringMight,x.otherMight,
+        x.otherCategoriesCompared+'/'+x.otherCategoriesTotal,x.status,
+        p.previous&&p.previous.capturedAt,p.latest&&p.latest.capturedAt,
+        g.previous&&g.previous.capturedAt,g.latest&&g.latest.capturedAt,
+        d.roster&&d.roster.importedAt,d.stale?'SIM':'NÃO'];
+    });
+    if(format==='csv'){
+      var lines=[header.map(contribCsvCell).join(';')].concat(records.map(function(r){return r.map(contribCsvCell).join(';');}));
+      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+lines.join('\\r\\n'),'text/csv;charset=utf-8');
+      return;
+    }
+    var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Contribuintes semana</title><style>body{font:14px Arial;margin:24px;color:#20232a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.warning{background:#ffeded;padding:16px;color:#8c1414;font-weight:bold}</style></head><body>';
+    html+='<h1>IMORTAIS · Contribuintes – semana</h1><p>Gerado: '+esc(contribDisplayDate(d.generatedAt))+'</p>';
+    if(d.stale)html+='<div class="warning">DESATUALIZADO: a última varredura integral de PvE ou Coleta tem mais de 7 dias ou não existe. Não tratar estes valores como atuais.</div>';
+    html+='<p>Ativos: '+fmtS(d.counts.active)+' · Abaixo (inclui sem evolução): '+fmtS(d.counts.below)+' · Sem dados: '+fmtS(d.counts.noData)+'</p>';
+    html+='<p>PvE: '+contribSummaryDate(p)+'</p><p>Coleta: '+contribSummaryDate(g)+'</p>';
+    html+='<table><thead><tr>'+header.map(function(x){return '<th>'+esc(x)+'</th>';}).join('')+'</tr></thead><tbody>';
+    html+=records.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+esc(x==null?'SEM DADOS':x)+'</td>';}).join('')+'</tr>';}).join('');
+    html+='</tbody></table><p>Critério: somente varreduras INTEGRAIS, do mesmo dispositivo por varredura, separadas por pelo menos 6 dias. Dados ausentes não valem zero; outras categorias são soma apenas das comparáveis.</p></body></html>';
+    gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
+  }
+  function renderContributors(){
+    if(!authState.canViewContributors){setView('view-contributors','<div class="empty-note">Acesso exclusivo de administradores e oficiais.</div>');return;}
+    loading('view-contributors','📅 Contribuintes – semana');
+    Promise.all([
+      fetch('/api/contributors/weekly',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Relatório HTTP '+r.status);return r.json();}),
+      fetch('/api/contributors/settings',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Configuração HTTP '+r.status);return r.json();})
+    ]).then(function(results){
+      contributorReport=results[0];contributorSettings=results[1];
+      drawContributors();
+    }).catch(function(e){setView('view-contributors','<div class="empty-note">Erro ao carregar relatório: '+esc(e.message)+'</div>');});
+  }
+  function drawContributors(){
+    var d=contributorReport||{},cfg=contributorSettings||{},count=d.counts||{},cats=d.categories||{},p=cats.PVE||{},g=cats.GATHERING||{};
+    var html='<div class="modhead">📅 Contribuintes – semana</div>'+
+      '<div class="note">Acesso exclusivo da administração e oficiais. Somente registros Photon verificados de varreduras integrais e dispositivos pareados.</div>';
+    if(d.stale)html+='<div class="panel" role="alert" style="background:#3b181c;border:2px solid #e95757;color:#ffb6b6;padding:20px;font-weight:bold;font-size:16px">⚠️ DESATUALIZADO. Última varredura integral de PvE/Coleta há mais de 7 dias ou ausente. Os números abaixo são históricos, NÃO são resultados atuais.</div>';
+    if(d.warnings&&d.warnings.length)html+='<div class="panel" style="padding:12px;margin:10px 0">'+d.warnings.map(function(w){return '<div class="note">⚠️ '+esc(w)+'</div>';}).join('')+'</div>';
+    html+='<div class="statgrid" style="margin:12px 0">'+
+      '<div class="stat g"><div class="k">ATIVOS</div><div class="v">'+fmtS(count.active||0)+'</div></div>'+
+      '<div class="stat a"><div class="k">ABAIXO (inclui sem evolução)</div><div class="v">'+fmtS(count.below||0)+'</div></div>'+
+      '<div class="stat b"><div class="k">SEM DADOS</div><div class="v">'+fmtS(count.noData||0)+'</div></div>'+
+      '</div>';
+    html+='<div class="panel"><b>Última lista salva em Guilda Online:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
+      '<div class="note">Somente cargos CONTRIBUINTE 1, 2 e 3 do último arquivo colado. Atualize a lista após mudanças de cargos.</div>'+
+      '<p><b>PvE:</b> '+contribSummaryDate(p)+'</p><p><b>Coleta:</b> '+contribSummaryDate(g)+'</p>'+
+      '<div class="note">Diferença = Might na última varredura integral menos Might na varredura integral anterior (≥ 6 dias). Demais categorias: somente pares completos comparáveis. SEM DADOS não significa zero.</div></div>';
+    html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">'+
+      '<button class="btn primary" id="cw-refresh">↻ Atualizar relatório</button>'+
+      '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
+      '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
+    if(authState.isSiteAdmin){
+      var minimum=(cfg.minima||{});
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (somente admin)</summary>'+
+        '<div class="note">Padrão: pelo menos +1 Might em PvE OU +1 em Coleta. Os mínimos podem ser ajustados individualmente; a comparação sempre exige os dois pares de varreduras.</div>'+
+        '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Cargo</th><th>Mínimo PvE</th><th>Mínimo Coleta</th></tr></thead><tbody>'+
+        ['1','2','3'].map(function(tier){var row=minimum[tier]||{pve:1,gathering:1};return '<tr><td>CONTRIBUINTE '+tier+'</td>'+
+          '<td><input id="cw-pve-'+tier+'" type="number" min="0" step="1" value="'+Number(row.pve)+'" style="width:150px"></td>'+
+          '<td><input id="cw-gather-'+tier+'" type="number" min="0" step="1" value="'+Number(row.gathering)+'" style="width:150px"></td></tr>';}).join('')+
+        '</tbody></table></div>'+
+        '<label><input type="checkbox" id="cw-enabled"'+(cfg.reminderEnabled?' checked':'')+'> Ativar lembrete semanal na staff</label>'+
+        '<div style="margin-top:10px">Dia (UTC): <select id="cw-weekday">'+['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'].map(function(x,i){return '<option value="'+i+'"'+(Number(cfg.weekday)===i?' selected':'')+'>'+x+'</option>';}).join('')+'</select>'+
+        ' · Hora (UTC): <input id="cw-time" type="time" value="'+esc(cfg.timeUtc||'18:00')+'"></div>'+
+        '<div class="note">Canal: staff configurada no bot (STAFF_LOG_CHANNEL_ID). O resumo só será enviado quando PvE e Coleta tiverem novas varreduras integrais válidas após o lembrete. Desativado até você salvar a programação.</div>'+
+        '<button class="btn primary" id="cw-save" style="margin-top:10px">Salvar configurações</button> <span id="cw-settings-status" class="note"></span></details>';
+    }
+    html+='<div class="panel" style="overflow-x:auto"><table class="dtable"><thead><tr>'+
+      '<th>Jogador</th><th>Cargo</th><th>Ganho PvE</th><th>Ganho Coleta</th><th>Demais categorias</th><th>Comparadas</th><th>Situação</th></tr></thead><tbody>'+
+      ((d.rows||[]).length?d.rows.map(function(x){return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
+        '<td>'+contribDelta(x.pveMight)+'</td><td>'+contribDelta(x.gatheringMight)+'</td><td>'+contribDelta(x.otherMight)+'</td>'+
+        '<td>'+fmtS(x.otherCategoriesCompared)+'/'+fmtS(x.otherCategoriesTotal)+'</td><td>'+contribStatus(x.status)+'</td></tr>';}).join(''):
+        '<tr><td colspan="7">Sem lista de contribuintes salva. Cole uma lista atualizada em Guilda Online e clique em Salvar.</td></tr>')+
+      '</tbody></table></div>';
+    setView('view-contributors',html);
+    document.getElementById('cw-refresh').onclick=renderContributors;
+    document.getElementById('cw-csv').onclick=function(){exportContributors('csv');};
+    document.getElementById('cw-html').onclick=function(){exportContributors('html');};
+    if(authState.isSiteAdmin){
+      document.getElementById('cw-save').onclick=function(){
+        var minima={};
+        ['1','2','3'].forEach(function(tier){minima[tier]={
+          pve:Number(document.getElementById('cw-pve-'+tier).value),
+          gathering:Number(document.getElementById('cw-gather-'+tier).value)
+        };});
+        var btn=document.getElementById('cw-save'),status=document.getElementById('cw-settings-status');
+        btn.disabled=true;status.textContent='Salvando…';
+        fetch('/api/contributors/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({minima:minima,reminderEnabled:document.getElementById('cw-enabled').checked,
+            weekday:Number(document.getElementById('cw-weekday').value),timeUtc:document.getElementById('cw-time').value})})
+        .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(x.error||'falha');return x;});})
+        .then(function(x){contributorSettings=x;status.textContent='Configuração salva em '+new Date().toLocaleString('pt-BR');})
+        .catch(function(e){status.textContent='Erro: '+e.message;}).finally(function(){btn.disabled=false;});
+      };
+    }
+  }
+
   var guildRefreshTimer=null;
   function guildRosterCtaOptions(){
     var list=openEventsCache||[];
@@ -3334,6 +3511,7 @@ const PAGE = `<!doctype html>
       +'<label style="min-width:190px"><span class="note">CTA</span><select id="guild-roster-event" class="brief-select" style="width:100%">'+guildRosterCtaOptions()+'</select></label>'
       +'<button type="button" class="btn primary" id="guild-roster-analyze">Analisar</button>'
       +'<span id="guild-roster-status" class="note"></span></div>'
+      +'<button type="button" class="btn ghost" id="guild-roster-save" style="margin:8px 0">Salvar lista de cargos sem CTA aberto</button>'
       +'<textarea id="guild-roster-text" class="brief-input" rows="9" autocomplete="off" spellcheck="false" placeholder="Cole aqui a lista exportada da Guild..." style="width:100%;margin-top:10px;resize:vertical"></textarea>'
       +'<div id="guild-roster-result" style="margin-top:14px"></div>'
       +'</div></details>';
@@ -3425,6 +3603,16 @@ const PAGE = `<!doctype html>
     if(!authState.canEdit) return;
     var btn=document.getElementById('guild-roster-analyze');
     if(!btn) return;
+    var saveBtn=document.getElementById('guild-roster-save');
+    if(saveBtn)saveBtn.onclick=function(){
+      var box=document.getElementById('guild-roster-text'),status=document.getElementById('guild-roster-status');
+      saveBtn.disabled=true;status.textContent='Salvando lista da guilda…';
+      fetch('/api/guild-roster/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:box?box.value:''})})
+       .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(guildRosterErrorText(x.error));return x;});})
+       .then(function(x){status.textContent='Lista salva em '+new Date(x.saved.imported_at).toLocaleString('pt-BR')+' · '+x.saved.member_count+' membros · '+x.saved.contributors+' contribuintes';})
+       .catch(function(e){status.textContent='Erro: '+e.message;})
+       .finally(function(){saveBtn.disabled=false;});
+    };
     btn.onclick=function(){
       var textEl=document.getElementById('guild-roster-text');
       var eventEl=document.getElementById('guild-roster-event');
@@ -3447,10 +3635,10 @@ const PAGE = `<!doctype html>
         }
         result.innerHTML=guildRosterResultHtml(x.data);
         bindGuildRosterResult(x.data);
+        if(x.data.savedRoster) status.textContent='Lista e cargos salvos: '+x.data.savedRoster.contributors+' contribuintes';
       }).catch(function(e){
         result.innerHTML='<div class="empty-note">Erro ao analisar: '+esc(e.message)+'</div>';
       }).finally(function(){
-        status.textContent='';
         btn.disabled=false;
       });
     };
@@ -3572,11 +3760,13 @@ const PAGE = `<!doctype html>
         canManageBomb:!!a.canManageBomb,
         canManageCastleRoaming:!!a.canManageCastleRoaming,
         isSiteAdmin:!!a.isSiteAdmin,
+        canViewContributors:!!a.canViewContributors,
         name:a.name||''
       };
       renderAuthHeader();
       var devicesNav=document.querySelector('.nav[data-view="devices"]');
       if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
+      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=authState.canViewContributors?'':'none';});
       var navBomb=document.getElementById('nav-bomb');
       var navCastelo=document.getElementById('nav-castelo');
       var navRoaming=document.getElementById('nav-roaming');
