@@ -3371,7 +3371,7 @@ const PAGE = `<!doctype html>
   function contribCsvCell(x){
     var q=String.fromCharCode(34),v=String(x==null?'':x);
     // Spreadsheet formula injection: names from pasted rosters are untrusted.
-    if(/^\s*[=+\-@]/.test(v))v="'"+v;
+    if(/^\\s*[=+@-]/.test(v))v="'"+v;
     return q+v.replaceAll(q,q+q)+q;
   }
   function exportContributors(format){
@@ -3388,7 +3388,7 @@ const PAGE = `<!doctype html>
     });
     if(format==='csv'){
       var lines=[header.map(contribCsvCell).join(';')].concat(records.map(function(r){return r.map(contribCsvCell).join(';');}));
-      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+lines.join('\r\n'),'text/csv;charset=utf-8');
+      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+lines.join('\\r\\n'),'text/csv;charset=utf-8');
       return;
     }
     var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Contribuintes semana</title><style>body{font:14px Arial;margin:24px;color:#20232a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.warning{background:#ffeded;padding:16px;color:#8c1414;font-weight:bold}</style></head><body>';
