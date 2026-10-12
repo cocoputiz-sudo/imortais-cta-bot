@@ -1,5 +1,6 @@
 "use strict";
 
+const { normName } = require("./playerName");
 // ============================================================================
 // LISTA DA GUILDA (exportada do jogo) x PINGS DO BOT x CALL DE PREPARAÇÃO
 //
@@ -28,15 +29,6 @@ const DEFAULT_EXEMPT_ROLES = ["contribuinte", "contribuinte 1", "contribuinte 2"
 
 // Mesma regra de nomes usada no resto do projeto: tira "!", espaços e tags
 // de guilda/nacionalidade do começo ([IM], [ESP]...), em minúsculas.
-function normName(v) {
-  let out = String(v || "").trim();
-  let prev;
-  do {
-    prev = out;
-    out = out.replace(/^[!\s]+/, "").replace(/^\[[^\]]{1,16}\]\s*/i, "");
-  } while (out !== prev);
-  return out.trim().toLowerCase();
-}
 
 // Divide uma linha respeitando aspas ("" dentro de aspas vira ").
 function splitLine(line, delim) {
