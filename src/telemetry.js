@@ -1089,7 +1089,7 @@ async function getConfirm(db, eventId) {
       n: v.username,
       discord: true,
       ping: false,
-      game: !!actual,
+      game: !!actual && !actual.stale,
       albion: albionOf(key).st,
       actualParty: actual?.party || null,
       actualPartyLabel: actual?.partyLabel || null,
@@ -1135,21 +1135,26 @@ async function getConfirm(db, eventId) {
   function issueGroup(display) {
     const key = Number(display);
     if (!issuesByParty.has(key)) {
-      issuesByParty.set(key, { party: key, missing: [], intruders: [], correct: [] });
+      issuesByParty.set(key, {
+        party: key, missing: [], intruders: [], correct: [],
+        unidentified: [], stale: [], uncovered: [], collisions: [], reserves: []
+      });
     }
     return issuesByParty.get(key);
   }
-
+  for (const display of displayByRaw.values()) issueGroup(display);
   for (const row of rows) {
     if (row.plannedParty != null) {
       const g = issueGroup(row.plannedParty);
-      if (row.actualParty == null) g.missing.push(row);
-      else if (Number(row.actualParty) === Number(row.plannedParty)) g.correct.push(row);
+      if (row.st === "ok") g.correct.push(row);
+      else if (row.st === "miss" || row.st === "wrong") g.missing.push(row);
+      else if (row.st === "seen") g.unidentified.push(row);
+      else if (row.st === "stale") g.stale.push(row);
+      else if (row.st === "unobserved") g.uncovered.push(row);
+      else if (row.st === "collision") g.collisions.push(row);
     }
-    if (row.actualParty != null && row.plannedParty != null && Number(row.actualParty) !== Number(row.plannedParty)) {
-      issueGroup(row.actualParty).intruders.push(row);
-      issueGroup(row.plannedParty).missing.push(row);
-    }
+    if (row.st === "wrong" && row.actualParty != null) issueGroup(row.actualParty).intruders.push(row);
+    if (row.st === "reserve" && row.actualParty != null) issueGroup(row.actualParty).reserves.push(row);
   }
 
   const plannedCount = signups.filter(s => s.party_index != null).length;
@@ -1173,15 +1178,26 @@ async function getConfirm(db, eventId) {
         party: g.party,
         missing: g.missing.sort((a,b) => (a.slot||99) - (b.slot||99)),
         intruders: g.intruders.sort((a,b) => String(a.n).localeCompare(String(b.n))),
-        correct: g.correct.sort((a,b) => (a.slot||99) - (b.slot||99))
+        correct: g.correct.sort((a,b) => (a.slot||99) - (b.slot||99)),
+        unidentified: g.unidentified,
+        stale: g.stale,
+        uncovered: g.uncovered,
+        collisions: g.collisions,
+        reserves: g.reserves,
+        coverage: coverage.get(g.party) || { party: g.party, devices: 0, activeDevices: 0, receivedAt: null, observers: [] }
       })),
+    nameCollisions: [...collisions.entries()].map(([key, conflicting]) => ({
+      key, signups: conflicting.map(x => ({ name: x.username, userId: String(x.user_id||"") }))
+    })),
     realParties: realParties.map((rp, i) => ({
       id: i + 1,
       mappedParty: rp.display || null,
       overlap: rp.overlap || 0,
       members: rp.members,
       devices: rp.devices.size,
-      occurredAt: rp.occurredAt
+      activeDevices: rp.activeDevices.size,
+      occurredAt: rp.occurredAt,
+      receivedAt: rp.receivedAt
     })),
     meta: {
       partySnapshots: snapshotRows.length,
@@ -1196,10 +1212,11 @@ async function getConfirm(db, eventId) {
       partyPlayers: actualByName.size,
       discordPlayers: voice.length,
       latestPartyAt: snapshotRows.reduce((latest, row) => {
-        const t = row.occurred_at ? new Date(row.occurred_at).getTime() : 0;
+        const t = row.received_at ? new Date(row.received_at).getTime() : 0;
         return t > latest ? t : latest;
       }, 0) || null,
-      note: "A party exibida é o último estado conhecido de cada Combat Client. Falta de novo snapshot não zera a PT; somente um novo snapshot altera o estado."
+      heartbeatFreshSeconds: Math.round(OBSERVER_HEARTBEAT_FRESH_MS/1000),
+      note: "Idade e heartbeat calculados pelo recebimento no servidor. Snapshot sem heartbeat ativo é histórico, não confirma presença atual. A deduplicação do cliente não apaga party estável."
     }
   };
 }
