@@ -926,9 +926,11 @@ async function getConfirm(db, eventId) {
   }
   function matchesVoice(signup) {
     const id=String(signup.user_id||"").trim();
-    if (id) return voiceById.has(id);
+    if (id && voiceById.has(id)) return true;
     const matches=voiceByName.get(normName(signup.username))||[];
-    return matches.length===1; // fallback somente quando falta ID e não é ambíguo
+    // Fallback apenas se UM dos dois registros não trouxer ID,
+    // nunca associar IDs diferentes pela semelhança do nome.
+    return matches.length===1 && (!id || !String(matches[0].user_id||"").trim());
   }
   function voiceHasSignup(entry) {
     const id=String(entry.user_id||"").trim();
