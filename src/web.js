@@ -2553,7 +2553,7 @@ const PAGE = `<!doctype html>
           return '<tr><td class="cv2-pt-audit-player"><b>'+esc(x.n)+'</b><span>'+esc(x.arma||'')+'</span></td>'
             +'<td>'+esc(x.slot==null?'—':x.slot)+'</td>'
             +'<td>'+esc(x.plannedParty!=null?('PT '+x.plannedParty):'SEM ESCALA')+'</td>'
-            +'<td>'+esc(x.actualPartyLabel||'NÃO VISTO')+'</td>'
+            +'<td>'+esc(x.actualPartyLabel||(x.st==='unobserved'?'SEM CLIENT OBSERVANDO':x.st==='collision'?'IDENTIDADE EM CONFLITO':'NÃO OBSERVADO'))+'</td>'
             +'<td><span class="cv2-pt-status '+s.cls+'">'+s.label+'</span>'
             +(x.snapshotReceivedAt?'<div class="cv2-muted">'+esc(age(x.snapshotReceivedAt))+' · '+esc(x.observerDevice||'observador desconhecido')+'</div>':'')
             +'</td>'
@@ -2617,7 +2617,7 @@ const PAGE = `<!doctype html>
 
       var tableRows=filteredRows.map(function(x){
         var planned=x.plannedParty!=null?('PT '+x.plannedParty):'Reserva';
-        var actual=x.actualPartyLabel||'Não visto';
+        var actual=x.actualPartyLabel||(x.st==='unobserved'?'Sem client observando':x.st==='collision'?'Identidade em conflito':'Não observado');
         var equipKey=String(x.n||'').trim().toLowerCase();
         var hasEquip=!!equipmentByPlayer[equipKey];
         var playerName=hasEquip
