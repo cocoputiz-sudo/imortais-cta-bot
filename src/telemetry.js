@@ -906,10 +906,37 @@ async function getConfirm(db, eventId) {
      ORDER BY user_id, joined_at DESC
   `, [ev.guild_id]).then(r => r.rows).catch(() => []);
 
+  const voiceById = new Map();
   const voiceByName = new Map();
   for (const v of voice) {
+    const id = String(v.user_id || "").trim();
+    if (id) voiceById.set(id, v);
     const key = normName(v.username);
-    if (key) voiceByName.set(key, v);
+    if (key) {
+      const bucket = voiceByName.get(key) || [];
+      bucket.push(v);
+      voiceByName.set(key, bucket);
+    }
+  }
+  const signupByName = new Map(), signupById = new Map();
+  for (const signup of signups) {
+    const key = normName(signup.username);
+    if (key && !collisions.has(key)) signupByName.set(key,signup);
+    if (signup.user_id) signupById.set(String(signup.user_id),signup);
+  }
+  function matchesVoice(signup) {
+    const id=String(signup.user_id||"").trim();
+    if (id) return voiceById.has(id);
+    const matches=voiceByName.get(normName(signup.username))||[];
+    return matches.length===1; // fallback somente quando falta ID e não é ambíguo
+  }
+  function voiceHasSignup(entry) {
+    const id=String(entry.user_id||"").trim();
+    if (id && signupById.has(id))return true;
+    const key=normName(entry.username);
+    const signup=signupByName.get(key);
+    // ID dos dois lados prevalece; nomes diferentes nunca vinculam IDs diferentes.
+    return !!signup && (!id || !signup.user_id);
   }
 
   // ----- Albion: presenca da guild (online/offline) por jogador -----
@@ -937,16 +964,18 @@ async function getConfirm(db, eventId) {
   }
   const CAT_LABEL = { pronto: "PRONTO", online_fora_call: "ONLINE, FORA DA CALL", fora_pt: "NA CALL, FORA DA PT", off_pingou: "PINGOU, OFFLINE", pt_errada: "PT ERRADA", indefinido: "—" };
 
-  const signupByName = new Map();
-  for (const s of signups) signupByName.set(normName(s.username), s);
-
   const rows = [];
   const pts = new Map();
   const resumo = {
     inscritos: signups.length,
     discord: voice.length,
-    jogo: actualByName.size,
+    jogo: [...actualByName.values()].filter(a => !a.stale).length,
     corretos: 0,
+    semCobertura: 0,
+    observadosDefasados: 0,
+    partyNaoIdentificada: 0,
+    reservasNaParty: 0,
+    colisoesNomes: collisions.size,
     ptErrada: 0,
     foraParty: 0,
     pingouForaDiscord: 0,
@@ -957,8 +986,9 @@ async function getConfirm(db, eventId) {
 
   for (const s of signups) {
     const key = normName(s.username);
-    const actual = actualByName.get(key);
-    const inDiscord = voiceByName.has(key);
+    const ambiguous = collisions.has(key);
+    const actual = ambiguous ? null : actualByName.get(key);
+    const inDiscord = matchesVoice(s);
     const plannedDisplay = s.party_index == null
       ? null
       : (displayByRaw.get(Number(s.party_index)) || (Number(s.party_index) + 1));
@@ -966,22 +996,38 @@ async function getConfirm(db, eventId) {
     let status = "ok";
     let obs = "";
 
-    if (!actual) {
-      status = "miss";
-      resumo.foraParty++;
-      obs = "Pingou, mas não foi detectado em nenhuma party";
+    const partyCoverage = coverage.get(plannedDisplay);
+    if (ambiguous) {
+      status = "collision";
+      obs = "Nome normalizado ambíguo: várias inscrições, identificação manual necessária";
+    } else if (actual?.stale) {
+      status = "stale";
+      resumo.observadosDefasados++;
+      obs = "Snapshot defasado · observador sem heartbeat recente";
+    } else if (!actual) {
+      if (plannedDisplay != null && !partyCoverage?.activeDevices) {
+        status = "unobserved";
+        resumo.semCobertura++;
+        obs = "PT sem client ativo observando · presença não confirmável";
+      } else {
+        status = "miss";
+        resumo.foraParty++;
+        obs = "Inscrito ainda não detectado nos snapshots da party observada";
+      }
     } else if (plannedDisplay == null) {
-      status = "extra";
-      resumo.jogoSemEscala++;
-      obs = `Está no jogo (${actual.partyLabel}), mas segue como reserva`;
+      status = "reserve";
+      resumo.reservasNaParty++;
+      obs = `Reserva dentro da party (${actual.partyLabel})`;
     } else if (actual.party != null && Number(actual.party) !== Number(plannedDisplay)) {
       status = "wrong";
       resumo.ptErrada++;
       obs = `Deveria estar PT ${plannedDisplay}, está ${actual.partyLabel}`;
     } else if (actual.party == null) {
       status = "seen";
-      obs = "Detectado no jogo, party real ainda não identificada";
+      resumo.partyNaoIdentificada++;
+      obs = "Detectado · party não identificada";
     } else {
+      status = "ok";
       resumo.corretos++;
       obs = `PT ${plannedDisplay} correta`;
     }
@@ -1000,8 +1046,15 @@ async function getConfirm(db, eventId) {
       plannedParty: plannedDisplay,
       actualParty: actual?.party || null,
       actualPartyLabel: actual?.partyLabel || null,
+      snapshotReceivedAt: actual?.receivedAt || null,
+      snapshotOccurredAt: actual?.occurredAt || null,
+      observerHeartbeatAt: actual?.heartbeatAt || null,
+      observerDevice: actual?.deviceId || null,
+      snapshotStale: !!actual?.stale,
+      snapshotAgeMs: actual?.ageMs ?? null,
+      nameCollision: ambiguous,
       discord: inDiscord,
-      game: !!actual,
+      game: !!actual && !actual.stale,
       ping: true,
       albion: alb.st,
       albionKnownState: alb.raw,
@@ -1027,8 +1080,9 @@ async function getConfirm(db, eventId) {
   }
 
   const discordNoPing = [];
-  for (const [key, v] of voiceByName.entries()) {
-    if (signupByName.has(key)) continue;
+  for (const v of voice) {
+    if (voiceHasSignup(v)) continue;
+    const key=normName(v.username);
     const actual = actualByName.get(key);
     resumo.discordSemPing++;
     discordNoPing.push({
@@ -1052,24 +1106,28 @@ async function getConfirm(db, eventId) {
 
   const gameNoSignup = [];
   for (const [key, a] of actualByName.entries()) {
-    if (signupByName.has(key)) continue;
+    if (signupByName.has(key) || collisions.has(key) || a.stale) continue;
     resumo.jogoSemEscala++;
     gameNoSignup.push({
       n: a.name,
-      discord: voiceByName.has(key),
+      discord: (voiceByName.get(key)||[]).length===1,
       ping: false,
       game: true,
       albion: albionOf(key).st,
       actualParty: a.party || null,
       actualPartyLabel: a.partyLabel,
+      snapshotReceivedAt: a.receivedAt,
+      observerHeartbeatAt: a.heartbeatAt,
+      observerDevice: a.deviceId,
+      snapshotStale: a.stale,
       equipment: equipmentByName.get(key)?.equipment || null,
       itemPower: equipmentByName.get(key)?.itemPower || null,
       equipmentInspected: equipmentByName.get(key)?.inspected || false,
       equipmentObservedAt: equipmentByName.get(key)?.occurredAt || null,
       st: "extra",
-      obs: voiceByName.has(key)
-        ? `No jogo e na call, sem ping (${a.partyLabel})`
-        : `No jogo sem escala (${a.partyLabel})`
+      obs: (voiceByName.get(key)||[]).length===1
+        ? `Na PT e na call, sem inscrição no CTA (${a.partyLabel})`
+        : `Na PT sem inscrição no CTA (${a.partyLabel})`
     });
   }
 
