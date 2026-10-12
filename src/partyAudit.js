@@ -19,6 +19,7 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
       const key = normName(name);
       if (key && !members.has(key)) members.set(key, String(name).trim());
     }
+    const solo = members.size === 1 && members.has(normName(row.player_name));
     const heartbeatAt = timestamp(row.heartbeat_received_at);
     const receivedAt = timestamp(row.received_at);
     return {
@@ -27,7 +28,7 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
       heartbeatAt: row.heartbeat_received_at || null,
       ageMs: receivedAt ? Math.max(0, now - receivedAt) : null,
       fresh: !!heartbeatAt && now >= heartbeatAt - 5_000 && now - heartbeatAt <= heartbeatFreshMs,
-      members
+      solo, members
     };
   }).filter(s => s.members.size);
 
@@ -54,13 +55,13 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
     let occurredAt = null, receivedAt = null;
     for (const sample of cluster) {
       devices.add(sample.deviceId);
-      if (sample.fresh) activeDevices.add(sample.deviceId);
+      if (sample.fresh && !sample.solo) activeDevices.add(sample.deviceId);
       if (timestamp(sample.occurredAt) > timestamp(occurredAt)) occurredAt = sample.occurredAt;
       if (timestamp(sample.receivedAt) > timestamp(receivedAt)) receivedAt = sample.receivedAt;
       for (const [key, name] of sample.members) {
         const candidate = { name, key, deviceId: sample.deviceId,
           receivedAt: sample.receivedAt, occurredAt: sample.occurredAt,
-          heartbeatAt: sample.heartbeatAt, ageMs: sample.ageMs, stale: !sample.fresh };
+          heartbeatAt: sample.heartbeatAt, ageMs: sample.ageMs, stale: !sample.fresh, solo: sample.solo };
         const previous = memberDetails.get(key);
         // Fonte mais nova pelo relógio do servidor. Empate: fonte ativa.
         if (!previous || timestamp(candidate.receivedAt) > timestamp(previous.receivedAt)
@@ -73,6 +74,8 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
   });
   const candidates = [];
   parties.forEach((party, i) => {
+    // Um snapshot só com o próprio personagem é o estado de saída de party.
+    if (!party.activeDevices.size && [...party.memberDetails.values()].every(x => x.solo)) return;
     for (const [display, names] of planned) {
       let overlap = 0;
       for (const key of party.memberKeys) if (names.has(key)) overlap++;
@@ -91,8 +94,9 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
   const actualByName = new Map();
   for (const p of parties) for (const [key, detail] of p.memberDetails) {
     const current = actualByName.get(key);
-    const candidate = { ...detail, party: p.display || null,
-      partyLabel: p.display ? `PT ${p.display}` : "Party não identificada",
+    const candidate = { ...detail, party: detail.solo ? null : (p.display || null),
+      partyLabel: detail.solo ? "Fora de PT (solo)"
+        : p.display ? `PT ${p.display}` : "Party não identificada",
       devices: p.devices.size, activeDevices: p.activeDevices.size };
     if (!current || timestamp(candidate.receivedAt) > timestamp(current.receivedAt)
       || (timestamp(candidate.receivedAt) === timestamp(current.receivedAt)
