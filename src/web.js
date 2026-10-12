@@ -2524,6 +2524,9 @@ const PAGE = `<!doctype html>
         (g.correct||[]).forEach(push);
         (g.missing||[]).forEach(push);
         (g.intruders||[]).forEach(push);
+        ['unidentified','stale','uncovered','collisions','reserves'].forEach(function(kind){
+          (g[kind]||[]).forEach(push);
+        });
         (d.gameNoSignup||[]).forEach(function(x){if(Number(x.actualParty)===party) push(x);});
         rows.sort(function(a,b){
           var sa=ptSituation(a,party), sb=ptSituation(b,party);
@@ -2533,22 +2536,34 @@ const PAGE = `<!doctype html>
           return String(a.n).localeCompare(String(b.n),'pt-BR');
         });
         var planned=allRows.filter(function(x){return Number(x.plannedParty)===party;});
-        var correct=planned.filter(function(x){return Number(x.actualParty)===party;}).length;
-        var missing=planned.filter(function(x){return x.actualParty==null;}).length;
-        var wrong=planned.filter(function(x){return x.actualParty!=null&&Number(x.actualParty)!==party;}).length;
-        var intruders=rows.filter(function(x){return Number(x.actualParty)===party&&Number(x.plannedParty)!==party;}).length;
+        var correct=planned.filter(function(x){return x.st==='ok';}).length;
+        var missing=planned.filter(function(x){return x.st==='miss';}).length;
+        var unknown=planned.filter(function(x){return ['seen','stale','unobserved','collision'].includes(x.st);}).length;
+        var wrong=planned.filter(function(x){return x.st==='wrong';}).length;
+        var intruders=rows.filter(function(x){return Number(x.actualParty)===party&&x.st==='extra';}).length;
+        var reserves=rows.filter(function(x){return Number(x.actualParty)===party&&x.st==='reserve';}).length;
+        var coverage=g.coverage||{};
+        var coverageLabel=Number(coverage.activeDevices||0)+'/'+Number(coverage.devices||0)+' clients ativos';
+        var coverageDetail=Number(coverage.activeDevices||0)===0
+          ?'SEM CLIENT ATIVO OBSERVANDO'
+          :'ÚLTIMA OBSERVAÇÃO '+age(coverage.receivedAt);
         var body=rows.length?rows.map(function(x){
           var s=ptSituation(x,party);
           return '<tr><td class="cv2-pt-audit-player"><b>'+esc(x.n)+'</b><span>'+esc(x.arma||'')+'</span></td>'
             +'<td>'+esc(x.slot==null?'—':x.slot)+'</td>'
             +'<td>'+esc(x.plannedParty!=null?('PT '+x.plannedParty):'SEM ESCALA')+'</td>'
             +'<td>'+esc(x.actualPartyLabel||'NÃO VISTO')+'</td>'
-            +'<td><span class="cv2-pt-status '+s.cls+'">'+s.label+'</span></td>'
+            +'<td><span class="cv2-pt-status '+s.cls+'">'+s.label+'</span>'
+            +(x.snapshotReceivedAt?'<div class="cv2-muted">'+esc(age(x.snapshotReceivedAt))+' · '+esc(x.observerDevice||'observador desconhecido')+'</div>':'')
+            +'</td>'
             +'<td>'+discordPill(!!x.discord)+'</td><td>'+albionPill(x.albion||'unknown')+'</td></tr>';
         }).join(''):'<tr><td colspan="7" class="cv2-muted" style="padding:14px">Nenhum jogador relacionado a esta PT.</td></tr>';
         return '<section class="cv2-pt-audit '+(selectedParty===party?'selected':'')+'"><div class="cv2-pt-audit-head"><h3>PT '+party+'</h3>'
           +'<div class="cv2-pt-audit-meta"><span>Escalados <b>'+planned.length+'</b></span><span>Corretos <b>'+correct+'</b></span>'
-          +'<span>Não vistos <b>'+missing+'</b></span><span>Em outra PT <b>'+wrong+'</b></span><span>Intrusos <b>'+intruders+'</b></span></div></div>'
+          +'<span>Não observados <b>'+missing+'</b></span><span>Indefinidos <b>'+unknown+'</b></span>'
+          +'<span>Em outra PT <b>'+wrong+'</b></span><span>Sem inscrição <b>'+intruders+'</b></span>'
+          +'<span>Reservas <b>'+reserves+'</b></span><span>'+esc(coverageLabel)+'</span>'
+          +'<span>'+esc(coverageDetail)+'</span></div></div>'
           +'<div class="cv2-pt-audit-tablebox"><table class="cv2-pt-audit-table"><thead><tr><th>JOGADOR</th><th>SLOT</th><th>DEVERIA</th><th>ESTÁ</th><th>SITUAÇÃO</th><th>DISCORD</th><th>ALBION</th></tr></thead><tbody>'+body+'</tbody></table></div></section>';
       }
 
