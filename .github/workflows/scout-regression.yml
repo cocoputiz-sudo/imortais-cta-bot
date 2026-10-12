@@ -32,6 +32,9 @@ on:
       - "test/combat-presence-cache.js"
       - "test/attendance-batch.js"
       - "test/attendance-valid-events.js"
+      - "test/attendance-period.js"
+      - "src/attendance-period.js"
+      - "src/commands.js"
       - "test/locale-weapons.js"
       - "test/guild-roster.js"
       - "test/guild-roster-route.js"
@@ -103,6 +106,8 @@ jobs:
         run: node test/attendance-batch.js
       - name: Attendance valid events
         run: node test/attendance-valid-events.js
+      - name: Attendance fixed periods and prize ranking
+        run: node test/attendance-period.js
       - name: Locale weapons
         run: node test/locale-weapons.js
       - name: Guild roster
