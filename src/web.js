@@ -2438,20 +2438,26 @@ const PAGE = `<!doctype html>
       }
       function partyStats(g){
         var correct=(g.correct||[]).length, missing=(g.missing||[]).length, intruders=(g.intruders||[]).length;
-        var planned=correct+missing;
-        return {correct:correct,missing:missing,intruders:intruders,planned:planned,score:planned?Math.round(correct/planned*100):0,problems:missing+intruders};
+        var unknown=(g.unidentified||[]).length+(g.stale||[]).length+(g.uncovered||[]).length+(g.collisions||[]).length;
+        var reserves=(g.reserves||[]).length;
+        var planned=correct+missing+unknown;
+        return {correct:correct,missing:missing,intruders:intruders,unknown:unknown,reserves:reserves,planned:planned,
+          score:planned?Math.round(correct/planned*100):0,problems:missing+intruders+unknown+reserves};
       }
       function slotState(x){
         if(!x) return 'empty';
         if(x.categoria==='off_pingou'||x.albion==='offline') return 'off';
         if(x.st==='wrong'||x.categoria==='pt_errada') return 'wrong';
         if(x.st==='ok') return 'ok';
+        if(['seen','solo','stale','unobserved','collision'].includes(x.st)) return 'empty';
         return 'miss';
       }
       function slotMap(g){
         var bySlot={};
         (g.correct||[]).forEach(function(x){ if(x.slot!=null) bySlot[Number(x.slot)]=x; });
-        (g.missing||[]).forEach(function(x){ if(x.slot!=null&&!bySlot[Number(x.slot)]) bySlot[Number(x.slot)]=x; });
+        ['missing','unidentified','stale','uncovered','collisions'].forEach(function(group){
+          (g[group]||[]).forEach(function(x){if(x.slot!=null&&!bySlot[Number(x.slot)])bySlot[Number(x.slot)]=x;});
+        });
         var out='<div class="cv2-slotmap">';
         for(var i=1;i<=20;i++){
           var x=bySlot[i]||null;
@@ -2476,7 +2482,7 @@ const PAGE = `<!doctype html>
         +metric('purple','Prontidão',String(r.prontidao||0)+'%',String(r.corretos||0)+' de '+String(r.inscritos||0)+' inscritos na PT correta',r.prontidao||0)
         +metric('good','Na PT correta',r.corretos||0,'posição confirmada',pct(r.corretos,total))
         +metric('bad','PT errada',r.ptErrada||0,'precisam trocar de PT',pct(r.ptErrada,total))
-        +metric('warn','Não vistos em PT',r.foraParty||0,'sem party observada',pct(r.foraParty,total))
+        +metric('warn','Não observados em PT',r.foraParty||0,'com dispositivo observando',pct(r.foraParty,total))
         +metric('blue','Na call Discord',r.discord||0,'presença na call de preparação',pct(r.discord,total))
         +'</div>';
 
@@ -2495,10 +2501,17 @@ const PAGE = `<!doctype html>
         +'</div></div></div>';
 
       function ptSituation(x,party){
-        if(Number(x.plannedParty)===party&&Number(x.actualParty)===party) return {label:'CORRETO',cls:'ok',order:0};
-        if(Number(x.plannedParty)===party&&x.actualParty==null) return {label:'DEVERIA ESTAR AQUI · NÃO VISTO',cls:'miss',order:1};
-        if(Number(x.plannedParty)===party&&Number(x.actualParty)!==party) return {label:'DEVERIA ESTAR AQUI · ESTÁ '+esc(x.actualPartyLabel||('PT '+x.actualParty)),cls:'wrong',order:2};
-        if(Number(x.actualParty)===party&&Number(x.plannedParty)!==party) return {label:'NÃO DEVERIA ESTAR AQUI · '+(x.plannedParty!=null?('ESCALADO PT '+x.plannedParty):'SEM ESCALA'),cls:'intruder',order:3};
+        if(Number(x.plannedParty)===party&&x.st==='collision') return {label:'COLISÃO DE NOME · CONFERIR',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='stale') return {label:'SNAPSHOT DEFASADO',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='unobserved') return {label:'PT SEM CLIENT ATIVO',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='seen') return {label:'DETECTADO · PARTY NÃO IDENTIFICADA',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='solo') return {label:'DETECTADO SOLO · FORA DE PT',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='ok') return {label:'CORRETO',cls:'ok',order:0};
+        if(Number(x.plannedParty)===party&&x.st==='miss') return {label:'DEVERIA ESTAR AQUI · NÃO OBSERVADO',cls:'miss',order:2};
+        if(Number(x.plannedParty)===party&&x.st==='wrong') return {label:'DEVERIA ESTAR AQUI · ESTÁ '+esc(x.actualPartyLabel||('PT '+x.actualParty)),cls:'wrong',order:2};
+        if(Number(x.actualParty)===party&&x.st==='reserve') return {label:'RESERVA DENTRO DA PT',cls:'neutral',order:3};
+        if(Number(x.actualParty)===party&&x.ping===false) return {label:'NA PT SEM INSCRIÇÃO NO CTA',cls:'intruder',order:3};
+        if(Number(x.actualParty)===party&&Number(x.plannedParty)!==party) return {label:'ESCALADO PT '+x.plannedParty,cls:'intruder',order:3};
         return {label:'—',cls:'',order:9};
       }
       function ptAuditSection(g){
@@ -2512,6 +2525,9 @@ const PAGE = `<!doctype html>
         (g.correct||[]).forEach(push);
         (g.missing||[]).forEach(push);
         (g.intruders||[]).forEach(push);
+        ['unidentified','stale','uncovered','collisions','reserves'].forEach(function(kind){
+          (g[kind]||[]).forEach(push);
+        });
         (d.gameNoSignup||[]).forEach(function(x){if(Number(x.actualParty)===party) push(x);});
         rows.sort(function(a,b){
           var sa=ptSituation(a,party), sb=ptSituation(b,party);
@@ -2521,22 +2537,34 @@ const PAGE = `<!doctype html>
           return String(a.n).localeCompare(String(b.n),'pt-BR');
         });
         var planned=allRows.filter(function(x){return Number(x.plannedParty)===party;});
-        var correct=planned.filter(function(x){return Number(x.actualParty)===party;}).length;
-        var missing=planned.filter(function(x){return x.actualParty==null;}).length;
-        var wrong=planned.filter(function(x){return x.actualParty!=null&&Number(x.actualParty)!==party;}).length;
-        var intruders=rows.filter(function(x){return Number(x.actualParty)===party&&Number(x.plannedParty)!==party;}).length;
+        var correct=planned.filter(function(x){return x.st==='ok';}).length;
+        var missing=planned.filter(function(x){return x.st==='miss';}).length;
+        var unknown=planned.filter(function(x){return ['seen','stale','unobserved','collision'].includes(x.st);}).length;
+        var wrong=planned.filter(function(x){return x.st==='wrong';}).length;
+        var intruders=rows.filter(function(x){return Number(x.actualParty)===party&&x.st==='extra';}).length;
+        var reserves=rows.filter(function(x){return Number(x.actualParty)===party&&x.st==='reserve';}).length;
+        var coverage=g.coverage||{};
+        var coverageLabel=Number(coverage.activeDevices||0)+'/'+Number(coverage.devices||0)+' clients ativos';
+        var coverageDetail=Number(coverage.activeDevices||0)===0
+          ?'SEM CLIENT ATIVO OBSERVANDO'
+          :'ÚLTIMA OBSERVAÇÃO '+age(coverage.receivedAt);
         var body=rows.length?rows.map(function(x){
           var s=ptSituation(x,party);
           return '<tr><td class="cv2-pt-audit-player"><b>'+esc(x.n)+'</b><span>'+esc(x.arma||'')+'</span></td>'
             +'<td>'+esc(x.slot==null?'—':x.slot)+'</td>'
             +'<td>'+esc(x.plannedParty!=null?('PT '+x.plannedParty):'SEM ESCALA')+'</td>'
-            +'<td>'+esc(x.actualPartyLabel||'NÃO VISTO')+'</td>'
-            +'<td><span class="cv2-pt-status '+s.cls+'">'+s.label+'</span></td>'
+            +'<td>'+esc(x.actualPartyLabel||(x.st==='unobserved'?'SEM CLIENT OBSERVANDO':x.st==='collision'?'IDENTIDADE EM CONFLITO':'NÃO OBSERVADO'))+'</td>'
+            +'<td><span class="cv2-pt-status '+s.cls+'">'+s.label+'</span>'
+            +(x.snapshotReceivedAt?'<div class="cv2-muted">'+esc(age(x.snapshotReceivedAt))+' · '+esc(x.observerDevice||'observador desconhecido')+'</div>':'')
+            +'</td>'
             +'<td>'+discordPill(!!x.discord)+'</td><td>'+albionPill(x.albion||'unknown')+'</td></tr>';
         }).join(''):'<tr><td colspan="7" class="cv2-muted" style="padding:14px">Nenhum jogador relacionado a esta PT.</td></tr>';
         return '<section class="cv2-pt-audit '+(selectedParty===party?'selected':'')+'"><div class="cv2-pt-audit-head"><h3>PT '+party+'</h3>'
           +'<div class="cv2-pt-audit-meta"><span>Escalados <b>'+planned.length+'</b></span><span>Corretos <b>'+correct+'</b></span>'
-          +'<span>Não vistos <b>'+missing+'</b></span><span>Em outra PT <b>'+wrong+'</b></span><span>Intrusos <b>'+intruders+'</b></span></div></div>'
+          +'<span>Não observados <b>'+missing+'</b></span><span>Indefinidos <b>'+unknown+'</b></span>'
+          +'<span>Em outra PT <b>'+wrong+'</b></span><span>Sem inscrição <b>'+intruders+'</b></span>'
+          +'<span>Reservas <b>'+reserves+'</b></span><span>'+esc(coverageLabel)+'</span>'
+          +'<span>'+esc(coverageDetail)+'</span></div></div>'
           +'<div class="cv2-pt-audit-tablebox"><table class="cv2-pt-audit-table"><thead><tr><th>JOGADOR</th><th>SLOT</th><th>DEVERIA</th><th>ESTÁ</th><th>SITUAÇÃO</th><th>DISCORD</th><th>ALBION</th></tr></thead><tbody>'+body+'</tbody></table></div></section>';
       }
 
@@ -2544,10 +2572,11 @@ const PAGE = `<!doctype html>
       groups.forEach(function(g){
         var s=partyStats(g), color=ringColor(s.score), party=Number(g.party);
         var extraIntruders=(d.gameNoSignup||[]).filter(function(x){return Number(x.actualParty)===party;}).length;
-        var problemCount=s.missing+s.intruders+extraIntruders;
+        var problemCount=s.problems+extraIntruders;
         var selected=selectedParty!=null&&Number(selectedParty)===party;
+        var coverage=g.coverage||{};
         partyCards+='<div class="cv2-party '+(s.problems||extraIntruders?'problem ':'')+(selected?'selected ':'')+(selectedParty!=null&&!selected?'dim':'')+'" data-confirm-party="'+party+'"><div class="cv2-party-head"><div><div class="cv2-party-name">PT '+party+' <span class="cv2-party-badge '+(problemCount?'':'ok')+'">'+problemCount+'</span></div>'
-          +'<div class="cv2-party-meta"><span>'+s.correct+' corretos</span><span>'+s.missing+' não vistos</span><span>'+(s.intruders+extraIntruders)+' intrusos</span></div></div>'
+          +'<div class="cv2-party-meta"><span>'+s.correct+' corretos</span><span>'+s.missing+' não observados</span><span>'+s.unknown+' indefinidos</span><span>'+(s.intruders+extraIntruders)+' sem inscrição</span><span>Clients '+(coverage.activeDevices||0)+'/'+(coverage.devices||0)+'</span></div></div>'
           +'<div class="cv2-party-score" style="color:'+color+'">'+s.correct+'/20</div></div>'
           +'<div class="cv2-ring-wrap"><div class="cv2-ring" style="background:conic-gradient('+color+' '+clamp(s.score)+'%,#202b3a 0)"><b>'+s.score+'%</b></div></div>'
           +slotMap(g)+'</div>';
@@ -2588,7 +2617,7 @@ const PAGE = `<!doctype html>
 
       var tableRows=filteredRows.map(function(x){
         var planned=x.plannedParty!=null?('PT '+x.plannedParty):'Reserva';
-        var actual=x.actualPartyLabel||'Não visto';
+        var actual=x.actualPartyLabel||(x.st==='unobserved'?'Sem client observando':x.st==='collision'?'Identidade em conflito':'Não observado');
         var equipKey=String(x.n||'').trim().toLowerCase();
         var hasEquip=!!equipmentByPlayer[equipKey];
         var playerName=hasEquip
@@ -2647,7 +2676,9 @@ const PAGE = `<!doctype html>
         +indicator('Detectados nas PTs',r.jogo||0,'#42c77a')
         +indicator('Na PT correta',r.corretos||0,'#d9aa52')
         +indicator('Na PT errada',r.ptErrada||0,'#9a6cff')
-        +indicator('Não vistos em PT',r.foraParty||0,'#ef6672')+'</div>';
+        +indicator('Não observados em PT com client',r.foraParty||0,'#ef6672')
+        +indicator('PT sem cobertura',r.semCobertura||0,'#6f8aab')
+        +indicator('Snapshot defasado',r.observadosDefasados||0,'#6f8aab')+'</div>';
 
       var extras='';
       if(selectedParty==null&&(d.discordNoPing||[]).length){
@@ -2656,13 +2687,18 @@ const PAGE = `<!doctype html>
           +'</div></div>';
       }
       if(selectedParty==null&&(d.gameNoSignup||[]).length){
-        extras+='<div class="cv2-panel cv2-extra"><h3>Na PT sem escala · '+d.gameNoSignup.length+'</h3><div class="cv2-extra-grid">'
+        extras+='<div class="cv2-panel cv2-extra"><h3>Na PT sem inscrição no CTA · '+d.gameNoSignup.length+'</h3><div class="cv2-extra-grid">'
           +(d.gameNoSignup||[]).map(function(x){ return '<div class="cv2-extra-player"><b>'+esc(x.n)+'</b><br><span class="cv2-muted">'+esc(x.actualPartyLabel||'detectado no jogo')+'</span></div>'; }).join('')
           +'</div></div>';
       }
       if(extras) extras='<div class="cv2-extras">'+extras+'</div>';
 
-      var html='<div class="cv2-shell">'+head+kpis+'<div class="cv2-layout"><div class="cv2-main">'+dist+parties+table+extras+'</div><aside class="cv2-side">'+side+'</aside></div></div>';
+      var collisions=(d.nameCollisions||[]).map(function(x){
+        return '<div class="cv2-attention" style="margin:8px"><b>CONFLITO DE IDENTIDADE: '+esc(x.key)+'</b> '
+          +esc((x.signups||[]).map(function(v){return v.name;}).join(' / '))
+          +' · sem associação automática até corrigir a escala</div>';
+      }).join('');
+      var html='<div class="cv2-shell">'+head+collisions+kpis+'<div class="cv2-layout"><div class="cv2-main">'+dist+parties+table+extras+'</div><aside class="cv2-side">'+side+'</aside></div></div>';
       setView('view-confirm',html);
 
       Array.prototype.forEach.call(document.querySelectorAll('[data-confirm-party],[data-confirm-party-btn]'),function(el){

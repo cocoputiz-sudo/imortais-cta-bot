@@ -11,6 +11,10 @@ on:
       - "src/web.js"
       - "src/guildroster.js"
       - "src/telemetry.js"
+      - "src/playerName.js"
+      - "src/partyAudit.js"
+      - "test/cta-party-audit.js"
+      - "package.json"
       - "src/guildMight.js"
       - "src/guildPhotonVerified.js"
       - "src/guildChallenge.js"
@@ -92,6 +96,8 @@ jobs:
       - run: npm ci
       - name: node --check em todos os src/*.js e test/*.js
         run: find src test -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: CTA party audit e colisões
+        run: node test/cta-party-audit.js
       - name: Scout regression em PostgreSQL temporário
         run: node test/scout-regression.js
       - name: Season regression em PostgreSQL temporário

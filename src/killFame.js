@@ -1,5 +1,6 @@
 "use strict";
 
+const { normName } = require("./playerName");
 const GAMEINFO_BASE = String(
   process.env.ALBION_GAMEINFO_BASE || "https://gameinfo.albiononline.com/api/gameinfo"
 ).replace(/\/+$/, "");
@@ -49,15 +50,6 @@ let sleepImpl = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 let nowImpl = () => Date.now();
 let retryMs = [...DEFAULT_RETRY_MS];
 
-function normName(v) {
-  let out = String(v || "").trim();
-  let prev;
-  do {
-    prev = out;
-    out = out.replace(/^[!\s]+/, "").replace(/^\[[^\]]{1,16}\]\s*/i, "");
-  } while (out !== prev);
-  return out.trim().toLowerCase();
-}
 
 function normGuild(v) {
   return String(v || "")
