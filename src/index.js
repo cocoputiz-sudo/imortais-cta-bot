@@ -13,6 +13,7 @@ const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = requir
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
 const attendance = require("./attendance");
+const attendancePeriod = require("./attendance-period");
 const seasonSnap = require("./season");
 const scout = require("./scout");
 const perfil = require("./perfil");
@@ -1801,6 +1802,7 @@ async function onSlash(interaction) {
   if (name === "attendance_week")    return slashAttendance(interaction, 7, "últimos 7 dias");
   if (name === "attendance_monthly") return slashAttendance(interaction, 30, "últimos 30 dias");
   if (name === "attendance_temporada") return slashAttendanceSeason(interaction);
+  if (name === "attendance_periodo") return slashAttendancePeriod(interaction);
 
   if (name === "cta_flashmass") return slashFlashmass(interaction);
 
@@ -2495,6 +2497,53 @@ async function slashAttendance(interaction, dias, rotulo) {
   });
 }
 
+async function slashAttendancePeriod(interaction) {
+  let period;
+  try {
+    period = attendancePeriod.parsePeriod(
+      interaction.options.getString("inicio"),
+      interaction.options.getString("fim")
+    );
+  } catch (err) {
+    return interaction.reply({ content: "⚠️ " + err.message, flags: MessageFlags.Ephemeral });
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const report = await attendance.buildReportForOperationalPeriod(interaction.guildId, period.start, period.end);
+  if (!report.ctaCount)
+    return interaction.editReply({ content: `Nenhum CTA válido de ${period.startLabel} a ${period.lastLabel} (UTC, por dia operacional).` });
+
+  const prizes = await attendancePeriod.selectPrizeWinners(report.rows, interaction.guild);
+  const label = `${period.startLabel} a ${period.lastLabel} (UTC)`;
+  const html = renderAttendanceHTML(report, label, period.start, period.end, { ...prizes, period });
+  const lines = prizes.winners.map((r, i) =>
+    `${i + 1}. **${r.username}** · ${r.score} pontos · ${r.integral} integral · ${r.parcial} parcial`
+  );
+  const csvCell = value => '"' + String(value ?? "").replace(/"/g, '""') + '"';
+  const csv = [
+    ["Posição", "Jogador", "Discord ID", "Score", "Integral", "Parcial", "Período inicial", "Período final"].map(csvCell).join(";"),
+    ...prizes.winners.map((r, i) =>
+      [i + 1, r.username, r.user_id, r.score, r.integral, r.parcial, period.startLabel, period.lastLabel].map(csvCell).join(";"))
+  ].join("\r\n") + "\r\n";
+  const nameRange = `${period.start.toISOString().slice(0,10)}-a-${period.lastLabel.split("/").reverse().join("-")}`;
+  const warning = prizes.unresolved.length
+    ? `\n⚠️ **${prizes.unresolved.length} cargo(s) não verificado(s)** entre candidatos. Top 10 provisório: confira no HTML antes de premiar.`
+    : "";
+  return interaction.editReply({
+    content: `📊 **Attendance de ${label}** · **${report.ctaCount} CTAs**\n` +
+      `🏆 **Top ${prizes.winners.length} para premiação (sem líderes/officers):**\n` +
+      (lines.join("\n") || "(nenhum jogador elegível)") +
+      `\n🚫 Líderes/officers removidos da seleção: ${prizes.excluded.length}.` +
+      warning +
+      "\n\n📎 Relatório completo em HTML e lista de premiação em CSV. " +
+      "O último dia indicado no comando é **exclusivo** e o filtro considera o dia operacional UTC do CTA.",
+    files: [
+      {attachment: Buffer.from(html, "utf8"), name: `attendance-periodo-${nameRange}.html`},
+      {attachment: Buffer.from("\uFEFF"+csv, "utf8"), name: `premiacao-${nameRange}.csv`}
+    ]
+  });
+}
+
 async function slashStartSeason(interaction) {
   const numero = interaction.options.getInteger("numero");
   await interaction.deferReply();
@@ -2699,8 +2748,18 @@ async function slashAudit(interaction) {
   if (low.length) alerts.push(`⚠️ ${low.length} CTA(s) com presença baixa (<5) — pode ser bot fora do ar ou canal errado: ${low.map((c) => c.date + " " + c.time).join(", ")}`);
   const mid = a.counted.filter((c) => c.midnight);
   if (mid.length) alerts.push(`🕛 ${mid.length} CTA(s) em virada de dia (00:/01:) — confira a janela: ${mid.map((c) => c.date + " " + c.time).join(", ")}`);
-  if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesmo dia+horário).`);
-  const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas`);
+  if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesma janela).`);
+  if (a.discarded?.length) alerts.push(`🚫 ${a.discarded.length} CTA(s) fora da contagem (cancelado ou fechado sem acontecer) — veja no anexo.`);
+  const hhmm = (d) => d ? new Date(d).toISOString().slice(5, 16).replace("T", " ") : "—";
+  const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas · criado ${hhmm(c.createdAt)} · fechado ${hhmm(c.closedAt)}`);
+  if (a.discarded?.length) {
+    lines.push("", "FORA DA CONTAGEM (janela sem nenhum CTA válido):");
+    for (const d of a.discarded) lines.push(`${d.date} ${String(d.time).padStart(5)} · id ${d.id} · ${d.reason}${d.copies ? ` · +${d.copies} cópia(s) também inválida(s)` : ""}`);
+  }
+  if (a.merged?.length) {
+    lines.push("", "MESCLADOS (mesma janela de outro CTA):");
+    for (const m of a.merged) lines.push(`${m.date} ${String(m.time).padStart(5)} · id ${m.id} · ficou o id ${m.keptId}${m.reason ? ` · ${m.reason}` : ""}`);
+  }
   const head = `🔎 Auditoria de attendance — ${rotulo}\nCTAs contados: ${a.counted.length} (de ${a.rawCount} eventos brutos)`;
   const body = head + "\n\n" + (alerts.length ? alerts.join("\n") + "\n\n" : "") + lines.join("\n") + "\n";
   const buf = Buffer.from(body, "utf-8");
@@ -2755,7 +2814,7 @@ async function slashRank(interaction, meu) {
   return interaction.editReply({ content: `✅ Placar da **Temporada ${season.number}** atualizado em ${link}.` });
 }
 
-function renderAttendanceHTML(report, rotulo, start, end) {
+function renderAttendanceHTML(report, rotulo, start, end, prizeData = null) {
   const catColor = { "Pilar": "#c9a227", "Regular": "#3f7a4d", "Intermitente": "#6ba7c4", "Fantasma": "#7a2222", "Ausente": "#555" };
   const levelLabel = { INTEGRAL: "Integral", PARCIAL: "Parcial", RAPIDA: "Rápida", FANTASMA: "Fantasma" };
   const levelColor = { INTEGRAL: "#c9a227", PARCIAL: "#6ba7c4", RAPIDA: "#9aa0ab", FANTASMA: "#e0a0a0" };
@@ -2784,6 +2843,26 @@ function renderAttendanceHTML(report, rotulo, start, end) {
     }).join("");
   };
 
+  const prizeHtml = prizeData ? (() => {
+    const people = prizeData.winners.map((r, i) =>
+      `<tr><td>${i + 1}</td><td class="name">${escapeHtml(r.username)}</td><td>${r.integral}</td><td>${r.parcial}</td><td class="num score">${r.score}</td></tr>`).join("");
+    const exclusions = prizeData.excluded.map(r =>
+      `<li>${escapeHtml(r.username)}: ${escapeHtml(r.exclusionReason)}</li>`).join("");
+    const uncertain = prizeData.unresolved.map(r =>
+      `<li>${escapeHtml(r.username)}: cargo não confirmado</li>`).join("");
+    return `<section class="prizes">
+      <h2>🏆 Top 10 · premiação semanal${uncertain ? " (prévia)" : ""}</h2>
+      <p>Período operacional UTC: <b>${prizeData.period.startLabel} a ${prizeData.period.lastLabel}</b>.
+      Dia final informado no comando (${prizeData.period.exclusiveEndLabel}) não entra na contagem.</p>
+      <p>Somente jogadores com presença integral ou parcial e score positivo.
+      Líderes, officers, callers, administradores e Mestre de Guerra não concorrem.</p>
+      <table><thead><tr><th>Posição</th><th class="l">Jogador</th><th>Integral</th><th>Parcial</th><th>Score</th></tr></thead>
+      <tbody>${people || '<tr><td colspan="5">Sem elegíveis confirmados</td></tr>'}</tbody></table>
+      ${exclusions ? `<details><summary>Liderança excluída da premiação (${prizeData.excluded.length})</summary><ul>${exclusions}</ul></details>` : ""}
+      ${uncertain ? `<div class="prize-warning">⚠️ Existem jogadores com cargos não confirmados, que podem alterar a classificação. Confira antes de pagar!</div><ul>${uncertain}</ul>` : ""}
+      <p class="prize-note">Elegibilidade baseada nos cargos atuais do Discord, verificados em ${escapeHtml(prizeData.checkedAt)}. Mudanças de cargo posteriores podem alterar a lista. O ranking completo permanece abaixo, sem exclusões.</p>
+    </section>`;
+  })() : "";
   const rowsHtml = report.rows.map((r, i) => `
     <tr class="prow" onclick="togRow(this)">
       <td class="rank">${i + 1}</td>
@@ -2837,12 +2916,20 @@ td{padding:9px 8px;text-align:center;border-bottom:1px solid rgba(255,255,255,.0
 .legend{margin-top:24px;color:var(--ink-dim);font-size:13px;line-height:1.7}
 .legend b{color:var(--ink)}
 .hint{text-align:center;color:var(--ice);font-size:13px;margin-bottom:18px;font-style:italic}
+.prizes{border:1px solid var(--gold);padding:20px;margin-bottom:30px;background:rgba(201,162,39,.04)}
+.prizes h2{color:var(--gold);margin-bottom:10px;font-size:23px}
+.prizes p{color:var(--ink-dim);font-size:13px;margin:8px 0 14px;line-height:1.5}
+.prizes details{margin:14px 0;color:var(--ink-dim);font-size:13px}
+.prizes ul{padding:8px 28px;line-height:1.7}
+.prize-warning{border:1px solid #e0a0a0;color:#ffd6d6;padding:11px;margin-top:12px}
+.prizes .prize-note{font-size:12px;font-style:italic}
 footer{text-align:center;margin-top:36px;color:var(--ink-dim);font-size:12px;font-style:italic}
 </style></head><body><div class="wrap">
 <div class="eyebrow">Imortais · Call to Arms</div>
 <h1>Attendance</h1>
 <p class="sub">Presença medida pelo tempo na call (Preparação)</p>
-<p class="meta">${start.toISOString().slice(0, 10)} — ${end.toISOString().slice(0, 10)} · ${rotulo} · <b style="color:var(--gold)">${report.ctaCount} CTAs no período</b></p>
+<p class="meta">${start.toISOString().slice(0, 10)} — ${prizeData ? prizeData.period.lastLabel : end.toISOString().slice(0, 10)} · ${rotulo} · <b style="color:var(--gold)">${report.ctaCount} CTAs no período</b></p>
+${prizeHtml}
 <p class="hint">👆 Clica num nome pra ver os dias · clica no dia pra ver os CTAs · clica no CTA pra ver horário e tempo</p>
 <table>
 <thead><tr>
