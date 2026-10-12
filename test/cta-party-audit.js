@@ -127,6 +127,32 @@ async function confirm(signups, snapshots, voice=[], partys=[0,1]) {
   ],new Map([[1,new Set(["angelxxofc","badmack","other"])]]),{now:NOW});
   assert.equal(x.actualByName.get("angelxxofc").deviceId,"PT1new","usar received_at, não relógio local occurred_at");
 
+  // Recorte do CTA #162 às 17:50 UTC: dois dispositivos, PT1 (18) e PT2 (5),
+  // sem interseção. A foto anterior com 19 jogadores é de OUTRO instante.
+  const pt1Names=["A0roboros","amittere1","ANGELXXOFC","BadMack","Caiodogral2",
+    "CamilleVegana","CascaGrossa57","Choujiro","Deathfake","girabel88",
+    "HOCOKBCmeTaHe","HYPNOSBRO1","JANAILSONVT","Kodamm","Rafaeliz",
+    "RodriguinhoGG","T4Flet","Zezinha1111"];
+  const pt2Names=["Adiel85","Arterom","LordIMT","MeuAmigoTotoro","SrTURGAS"];
+  const historicalCapture=await confirm([
+    signup("![IM] ANGELXXOFC 😍","angel",0),signup("BadMack","mack",0),
+    signup("Arterom","arter",1),signup("SrTURGAS","tur",1)
+  ],[
+    snap("WORKSPACEIGOR","BadMack",pt1Names),
+    snap("DESKTOP-IV2U0RV","SrTURGAS",pt2Names)
+  ]);
+  assert.equal(historicalCapture.resumo.jogo,23);
+  assert.equal(historicalCapture.realParties.length,2);
+  assert.equal(historicalCapture.issuesByParty[0].coverage.activeDevices,1);
+  assert.equal(historicalCapture.issuesByParty[1].coverage.activeDevices,1);
+  assert.equal(historicalCapture.resumo.corretos,4);
+  assert.equal(historicalCapture.gameNoSignup.some(x=>x.n==="ANGELXXOFC"),false);
+  console.log("✅ fixture do CTA #162: 18 PT1 + 5 PT2, duas coberturas distintas, sem duplicações");
+
+  const legacyFallback=await confirm([signup("Alpha","id-real",0,0)],[
+    snap("dev","Alpha",["Alpha","Beta"])
+  ],[{user_id:null,username:"Alpha"}]);
+  assert.equal(legacyFallback.pts[0].linhas[0].discord,true,"fallback permitido só com ID ausente");
   const crossId=await confirm([signup("Alpha","id-real",0,0)],[
     snap("dev","Alpha",["Alpha","Beta"])
   ],[{user_id:"id-diferente",username:"Alpha"}]);
