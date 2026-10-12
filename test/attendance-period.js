@@ -18,9 +18,32 @@ async function main(){
   assert.ok(period.memberExclusionReason({id:"officer",roles:{cache:new Map([["2",role("123","Officer")]])}},guild));
   assert.ok(period.memberExclusionReason({id:"owner",roles:{cache:new Map()}},guild));
   assert.equal(period.memberExclusionReason({id:"player",roles:{cache:new Map([["3",role("456","Contribuinte")]])}},guild),null);
+  const prizeEnv={STAFF_ROLE_ID:"staff-role",CALLER_TAG_ID:"caller-role",
+    BOMB_LEADER_ROLE_ID:"bomb-leader-role",OFFICER_ROLE_IDS:"officer-role",
+    ATTENDANCE_PRIZE_EXCLUDED_ROLE_IDS:""};
+  const prizeExcludedIds=period.excludedRoleIds(prizeEnv);
+  assert.equal(prizeExcludedIds.has("caller-role"),false,"Caller não pode ser excluído por ID");
+  for(const [id,roleId,roleName] of [
+    ["caller","caller-role","Caller"],
+    ["caller-decorado","caller-role","🎙️ Caller ✨"],
+    ["caller-pve","pve-role","Caller PvE"],
+    ["caller-pve-decorado","pve-role","🎮 Caller PvE ⚔️"]
+  ]) {
+    assert.equal(period.memberExclusionReason({
+      id,roles:{cache:new Map([["apenas-caller",role(roleId,roleName)]])}
+    },guild,prizeExcludedIds),null,roleName+" tem direito à premiação");
+  }
+  assert.ok(period.memberExclusionReason({
+    id:"officer",roles:{cache:new Map([["officer",role("officer-role","Officer")]])}
+  },guild,prizeExcludedIds),"officer continua excluído");
+  assert.ok(period.memberExclusionReason({
+    id:"staff",roles:{cache:new Map([["mestre",role("1268568850971230331","Mestre de Guerra")]])}
+  },guild,prizeExcludedIds),"Mestre de Guerra continua excluído");
   const rows=[
     {user_id:"staff",username:"Staff",score:99,integral:10,parcial:0},
+    {user_id:"caller",username:"Caller",score:97,integral:9,parcial:1},
     {user_id:"offline",username:"Unresolved",score:95,integral:9,parcial:0},
+    {user_id:"caller-pve",username:"Caller PvE",score:92,integral:8,parcial:1},
     {user_id:"officer",username:"Officer",score:90,integral:8,parcial:0},
     {user_id:"player",username:"Player",score:80,integral:7,parcial:0},
     {user_id:"rapida",username:"Rápida",score:70,integral:0,parcial:0},
@@ -29,11 +52,13 @@ async function main(){
   const memberMap={
     staff:{id:"staff",roles:{cache:new Map([["s",role("1268568850971230331","Mestre de Guerra")]])}},
     officer:{id:"officer",roles:{cache:new Map([["o",role("543","Officers")]])}},
+    caller:{id:"caller",roles:{cache:new Map([["caller",role("caller-role","🎙️ Caller ✨")]])}},
+    "caller-pve":{id:"caller-pve",roles:{cache:new Map([["caller-pve",role("pve-role","🎮 Caller PvE ⚔️")]])}},
     player:{id:"player",roles:{cache:new Map()}},
     other:{id:"other",roles:{cache:new Map()}}
   };
-  const prize=await period.selectPrizeWinners(rows,guild,{fetchMember:async id=>{if(!memberMap[id])throw Error("not found");return memberMap[id];}});
-  assert.deepEqual(prize.winners.map(r=>r.username),["Player","Other"]);
+  const prize=await period.selectPrizeWinners(rows,guild,{env:prizeEnv,fetchMember:async id=>{if(!memberMap[id])throw Error("not found");return memberMap[id];}});
+  assert.deepEqual(prize.winners.map(r=>r.username),["Caller","Caller PvE","Player","Other"]);
   assert.deepEqual(prize.excluded.map(r=>r.username),["Staff","Officer"]);
   assert.deepEqual(prize.unresolved.map(r=>r.username),["Unresolved"]);
 
