@@ -1,4 +1,5 @@
 const { normName, findSignupCollisions } = require("./playerName");
+const { buildPartyObservations } = require("./partyAudit");
 // ============================================================================
 // IMORTAIS TELEMETRY — bridge entre o Combat Client e o CTA War Room
 // ============================================================================
@@ -743,30 +744,37 @@ function notifyTelemetry(eventId, info = {}) {
 }
 
 async function latestPartyMembers(eventId) {
-  // Party é estado, não heartbeat. A última observação conhecida de cada client
-  // permanece válida até chegar um NOVO party_snapshot daquele mesmo dispositivo.
-  // Ausência de tráfego nunca transforma uma PT conhecida em PT vazia.
+  // Party é estado: persistir a última composição por dispositivo, mas medir
+  // sua confiabilidade pelo último heartbeat RECEBIDO no servidor (não pelo
+  // relógio Windows, nem pela ausência de snapshots deduplicados).
   const { rows } = await pool.query(`
     WITH ranked AS (
       SELECT device_id, player_name, payload, occurred_at, received_at,
              ROW_NUMBER() OVER (
                PARTITION BY device_id
-               ORDER BY occurred_at DESC, received_at DESC
+               ORDER BY received_at DESC, occurred_at DESC
              ) AS rn
       FROM albion_telemetry_events
       WHERE cta_event_id=$1 AND type='party_snapshot'
     )
-    SELECT device_id, player_name, payload, occurred_at, received_at
-      FROM ranked
-     WHERE rn=1
+    SELECT r.device_id, r.player_name, r.payload, r.occurred_at, r.received_at,
+           hb.received_at AS heartbeat_received_at
+      FROM ranked r
+      LEFT JOIN LATERAL (
+        SELECT received_at
+          FROM albion_telemetry_events h
+         WHERE h.device_id=r.device_id AND h.type='client_heartbeat'
+         ORDER BY received_at DESC LIMIT 1
+      ) hb ON true
+     WHERE r.rn=1
   `, [eventId]);
 
   const members = new Map();
   for (const row of rows) {
     const arr = row.payload && Array.isArray(row.payload.members) ? row.payload.members : [];
-    const observed = [...arr];
-    if (row.player_name) observed.push(row.player_name);
-    for (const name of observed) {
+    // Um snapshot vazio indica saída/limpeza de party. Não ressuscitar o
+    // observador como membro apenas por existir player_name no envelope.
+    for (const name of arr) {
       const key = normName(name);
       if (!key) continue;
       if (!members.has(key)) members.set(key, { name: String(name), devices: [] });
@@ -863,82 +871,29 @@ async function getConfirm(db, eventId) {
     }
   }
 
-  // Deduplica snapshots idênticos (vários clientes dentro da mesma party enxergam
-  // essencialmente a mesma lista). Mantém o snapshot mais recente de cada assinatura.
-  const realPartyMap = new Map();
-  for (const row of snapshotRows) {
-    const arr = row.payload && Array.isArray(row.payload.members) ? row.payload.members : [];
-    const observed = [...arr];
-    if (row.player_name) observed.push(row.player_name);
-    const clean = [...new Set(observed.map(x => String(x || "").trim()).filter(Boolean))];
-    if (!clean.length) continue;
-    const signature = clean.map(normName).sort().join("|");
-    const prev = realPartyMap.get(signature);
-    if (!prev || new Date(row.occurred_at) > new Date(prev.occurredAt)) {
-      realPartyMap.set(signature, {
-        signature,
-        members: clean,
-        memberKeys: new Set(clean.map(normName)),
-        occurredAt: row.occurred_at,
-        devices: new Set([row.device_id])
-      });
-    } else {
-      prev.devices.add(row.device_id);
-    }
+  // Nomes com ambiguidade dentro do mesmo CTA não podem ser conciliados
+  // automaticamente: cada inscrição continua independente até correção manual.
+  const collisions = findSignupCollisions(signups);
+  if (collisions.size) {
+    console.warn("[cta-confirm] colisão de nomes normalizados", {
+      ctaEventId: String(eventId),
+      keys: [...collisions.keys()],
+      signups: [...collisions.values()].map(group => group.map(x => ({ userId: x.user_id, username: x.username })))
+    });
   }
-  const realParties = [...realPartyMap.values()];
 
-  // ----- Formação planejada -----
-  const planned = new Map(); // display PT -> Set(nome normalizado)
-  for (const s of signups) {
-    if (s.party_index == null) continue;
-    const display = displayByRaw.get(Number(s.party_index)) || (Number(s.party_index) + 1);
+  const planned = new Map();
+  for (const signup of signups) {
+    if (signup.party_index == null) continue;
+    const display = displayByRaw.get(Number(signup.party_index)) || (Number(signup.party_index) + 1);
+    const key = normName(signup.username);
+    if (!key || collisions.has(key)) continue;
     if (!planned.has(display)) planned.set(display, new Set());
-    planned.get(display).add(normName(s.username));
+    planned.get(display).add(key);
   }
-
-  // Associa cada party real à PT planejada com maior sobreposição.
-  // É propositalmente conservador: sem qualquer membro em comum ela fica "não identificada".
-  const candidates = [];
-  realParties.forEach((rp, realIndex) => {
-    for (const [display, names] of planned.entries()) {
-      let overlap = 0;
-      for (const key of rp.memberKeys) if (names.has(key)) overlap++;
-      if (overlap > 0) {
-        const union = new Set([...rp.memberKeys, ...names]).size || 1;
-        candidates.push({ realIndex, display, overlap, score: overlap / union });
-      }
-    }
-  });
-  candidates.sort((a,b) => b.overlap - a.overlap || b.score - a.score);
-
-  const usedReal = new Set(), usedDisplay = new Set();
-  for (const x of candidates) {
-    if (usedReal.has(x.realIndex) || usedDisplay.has(x.display)) continue;
-    realParties[x.realIndex].display = x.display;
-    realParties[x.realIndex].overlap = x.overlap;
-    usedReal.add(x.realIndex);
-    usedDisplay.add(x.display);
-  }
-
-  const actualByName = new Map();
-  for (const rp of realParties) {
-    for (const name of rp.members) {
-      const key = normName(name);
-      if (!key) continue;
-      const current = actualByName.get(key);
-      const candidate = {
-        name,
-        party: rp.display || null,
-        partyLabel: rp.display ? `PT ${rp.display}` : "Party não identificada",
-        occurredAt: rp.occurredAt,
-        devices: rp.devices.size
-      };
-      if (!current || new Date(candidate.occurredAt) > new Date(current.occurredAt)) {
-        actualByName.set(key, candidate);
-      }
-    }
-  }
+  const { parties: realParties, actualByName, coverage } = buildPartyObservations(
+    snapshotRows, planned, { heartbeatFreshMs: OBSERVER_HEARTBEAT_FRESH_MS }
+  );
 
   // ----- Discord: presença atual na call de preparação -----
   const voice = await db.pool.query(`
