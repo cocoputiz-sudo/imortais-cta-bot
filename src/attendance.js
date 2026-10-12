@@ -258,6 +258,29 @@ async function buildReport(guildId, startUTC, endUTC) {
   const allEvents = await db.getEventsInRange(guildId, startUTC, endUTC);
   // mescla por janela e descarta cancelados / fechados sem acontecer (ver selectCountedEvents).
   const { events } = selectCountedEvents(allEvents);
+  return buildReportFromEvents(guildId, events);
+}
+
+// Relatório de premiação por DIAS OPERACIONAIS [início, fim), ambos UTC.
+// Inclui eventos criados na véspera / madrugada adjacente para filtrar pelo
+// verdadeiro dia do CTA, em vez do momento da criação da planilha.
+async function buildReportForOperationalPeriod(guildId, startUTC, endUTC) {
+  const start = new Date(startUTC), end = new Date(endUTC);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start)
+    throw new RangeError("Intervalo UTC de attendance inválido");
+  const dayMs = 86400000;
+  const allEvents = await db.getEventsInRange(guildId,
+    new Date(start.getTime() - dayMs), new Date(end.getTime() + dayMs));
+  const { events } = selectCountedEvents(allEvents);
+  const from = start.toISOString().slice(0, 10), until = end.toISOString().slice(0, 10);
+  const selected = events.filter(ev => {
+    const day = eventDay(ev, windowFor(ev));
+    return day >= from && day < until;
+  });
+  return buildReportFromEvents(guildId, selected);
+}
+
+async function buildReportFromEvents(guildId, events) {
   const ctx = await loadEventsContext(guildId, events);
   const perUser = new Map(); // uid -> stats acumulados
 
@@ -313,7 +336,7 @@ async function buildReport(guildId, startUTC, endUTC) {
 
 module.exports = {
   windowFor, presenceInWindow, classify, processEvent, buildReport,
-  selectCountedEvents, invalidReason, eventDay,
+  buildReportForOperationalPeriod, selectCountedEvents, invalidReason, eventDay,
   __test: { loadEventsContext }
 };
 
