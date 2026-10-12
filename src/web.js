@@ -2438,20 +2438,26 @@ const PAGE = `<!doctype html>
       }
       function partyStats(g){
         var correct=(g.correct||[]).length, missing=(g.missing||[]).length, intruders=(g.intruders||[]).length;
-        var planned=correct+missing;
-        return {correct:correct,missing:missing,intruders:intruders,planned:planned,score:planned?Math.round(correct/planned*100):0,problems:missing+intruders};
+        var unknown=(g.unidentified||[]).length+(g.stale||[]).length+(g.uncovered||[]).length+(g.collisions||[]).length;
+        var reserves=(g.reserves||[]).length;
+        var planned=correct+missing+unknown;
+        return {correct:correct,missing:missing,intruders:intruders,unknown:unknown,reserves:reserves,planned:planned,
+          score:planned?Math.round(correct/planned*100):0,problems:missing+intruders+unknown+reserves};
       }
       function slotState(x){
         if(!x) return 'empty';
         if(x.categoria==='off_pingou'||x.albion==='offline') return 'off';
         if(x.st==='wrong'||x.categoria==='pt_errada') return 'wrong';
         if(x.st==='ok') return 'ok';
+        if(['seen','stale','unobserved','collision'].includes(x.st)) return 'empty';
         return 'miss';
       }
       function slotMap(g){
         var bySlot={};
         (g.correct||[]).forEach(function(x){ if(x.slot!=null) bySlot[Number(x.slot)]=x; });
-        (g.missing||[]).forEach(function(x){ if(x.slot!=null&&!bySlot[Number(x.slot)]) bySlot[Number(x.slot)]=x; });
+        ['missing','unidentified','stale','uncovered','collisions'].forEach(function(group){
+          (g[group]||[]).forEach(function(x){if(x.slot!=null&&!bySlot[Number(x.slot)])bySlot[Number(x.slot)]=x;});
+        });
         var out='<div class="cv2-slotmap">';
         for(var i=1;i<=20;i++){
           var x=bySlot[i]||null;
@@ -2495,10 +2501,16 @@ const PAGE = `<!doctype html>
         +'</div></div></div>';
 
       function ptSituation(x,party){
-        if(Number(x.plannedParty)===party&&Number(x.actualParty)===party) return {label:'CORRETO',cls:'ok',order:0};
-        if(Number(x.plannedParty)===party&&x.actualParty==null) return {label:'DEVERIA ESTAR AQUI · NÃO VISTO',cls:'miss',order:1};
-        if(Number(x.plannedParty)===party&&Number(x.actualParty)!==party) return {label:'DEVERIA ESTAR AQUI · ESTÁ '+esc(x.actualPartyLabel||('PT '+x.actualParty)),cls:'wrong',order:2};
-        if(Number(x.actualParty)===party&&Number(x.plannedParty)!==party) return {label:'NÃO DEVERIA ESTAR AQUI · '+(x.plannedParty!=null?('ESCALADO PT '+x.plannedParty):'SEM ESCALA'),cls:'intruder',order:3};
+        if(Number(x.plannedParty)===party&&x.st==='collision') return {label:'COLISÃO DE NOME · CONFERIR',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='stale') return {label:'SNAPSHOT DEFASADO',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='unobserved') return {label:'PT SEM CLIENT ATIVO',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='seen') return {label:'DETECTADO · PARTY NÃO IDENTIFICADA',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='ok') return {label:'CORRETO',cls:'ok',order:0};
+        if(Number(x.plannedParty)===party&&x.st==='miss') return {label:'DEVERIA ESTAR AQUI · NÃO OBSERVADO',cls:'miss',order:2};
+        if(Number(x.plannedParty)===party&&x.st==='wrong') return {label:'DEVERIA ESTAR AQUI · ESTÁ '+esc(x.actualPartyLabel||('PT '+x.actualParty)),cls:'wrong',order:2};
+        if(Number(x.actualParty)===party&&x.st==='reserve') return {label:'RESERVA DENTRO DA PT',cls:'neutral',order:3};
+        if(Number(x.actualParty)===party&&x.ping===false) return {label:'NA PT SEM INSCRIÇÃO NO CTA',cls:'intruder',order:3};
+        if(Number(x.actualParty)===party&&Number(x.plannedParty)!==party) return {label:'ESCALADO PT '+x.plannedParty,cls:'intruder',order:3};
         return {label:'—',cls:'',order:9};
       }
       function ptAuditSection(g){
