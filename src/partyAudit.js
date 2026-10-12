@@ -32,23 +32,72 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
     };
   }).filter(s => s.members.size);
 
-  // Componentes conexos por nome real presente em listas distintas.
+  // Apenas observadores ativos podem conectar PTs. Uma troca de party pode
+  // deixar um nome em comum entre duas listas sem que elas sejam a mesma PT.
+  const overlap = (a, b) => {
+    let shared = 0;
+    for (const key of a.members.keys()) if (b.members.has(key)) shared++;
+    return shared;
+  };
+  const substantial = (a, b, shared) =>
+    shared * 2 >= Math.min(a.members.size, b.members.size);
   const parent = samples.map((_, i) => i);
   const root = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   const unite = (a, b) => { const ra = root(a), rb = root(b); if (ra !== rb) parent[rb] = ra; };
-  const firstForKey = new Map();
-  samples.forEach((sample, index) => {
-    for (const key of sample.members.keys()) {
-      if (firstForKey.has(key)) unite(index, firstForKey.get(key));
-      else firstForKey.set(key, index);
+  for (let i = 0; i < samples.length; i++) {
+    const a = samples[i];
+    if (!a.fresh || a.solo) continue;
+    for (let j = i + 1; j < samples.length; j++) {
+      const b = samples[j];
+      // Um snapshot solo representa saída da PT, não confirmação de formação.
+      if (!b.fresh || b.solo) continue;
+      if (substantial(a, b, overlap(a, b))) unite(i, j);
     }
-  });
+  }
+
   const clusters = new Map();
   samples.forEach((sample, index) => {
+    if (!sample.fresh) return;
     const id = root(index);
     if (!clusters.has(id)) clusters.set(id, []);
     clusters.get(id).push(sample);
   });
+
+  // Snapshots de devices sem heartbeat nunca participam do union-find.
+  // Podem complementar UMA party ativa, mas não conectar duas parties.
+  const activeClusters = [...clusters.values()];
+  samples.forEach((sample, index) => {
+    if (sample.fresh) return;
+    let best = null, maxShared = 0, bestRatio = 0, ambiguous = false;
+    if (!sample.solo) for (const cluster of activeClusters) {
+      for (const active of cluster) {
+        if (active.solo) continue;
+        const shared = overlap(sample, active);
+        if (!substantial(sample, active, shared)) continue;
+        const ratio = shared / Math.min(sample.members.size, active.members.size);
+        if (shared > maxShared || (shared === maxShared && ratio > bestRatio)) {
+          best = cluster;
+          maxShared = shared;
+          bestRatio = ratio;
+          ambiguous = false;
+        } else if (shared === maxShared && ratio === bestRatio && best !== cluster) {
+          ambiguous = true;
+        }
+      }
+    }
+    if (best && !ambiguous) best.push(sample);
+    else clusters.set(index, [sample]);
+  });
+
+  // Resolva duplicações ENTRE clusters antes de construir suas listas,
+  // usando exclusivamente received_at (servidor), com desempate pelo heartbeat.
+  const newestForName = new Map();
+  for (const sample of samples) for (const key of sample.members.keys()) {
+    const prior = newestForName.get(key);
+    if (!prior || timestamp(sample.receivedAt) > timestamp(prior.receivedAt)
+      || (timestamp(sample.receivedAt) === timestamp(prior.receivedAt)
+        && sample.fresh && !prior.fresh)) newestForName.set(key, sample);
+  }
   const parties = [...clusters.values()].map(cluster => {
     const memberDetails = new Map();
     const devices = new Set(), activeDevices = new Set();
@@ -59,6 +108,7 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
       if (timestamp(sample.occurredAt) > timestamp(occurredAt)) occurredAt = sample.occurredAt;
       if (timestamp(sample.receivedAt) > timestamp(receivedAt)) receivedAt = sample.receivedAt;
       for (const [key, name] of sample.members) {
+        if (newestForName.get(key) !== sample) continue;
         const candidate = { name, key, deviceId: sample.deviceId,
           receivedAt: sample.receivedAt, occurredAt: sample.occurredAt,
           heartbeatAt: sample.heartbeatAt, ageMs: sample.ageMs, stale: !sample.fresh, solo: sample.solo };
@@ -71,7 +121,7 @@ function buildPartyObservations(rows, planned = new Map(), options = {}) {
     }
     return { memberDetails, members: [...memberDetails.values()].map(x => x.name),
       memberKeys: new Set(memberDetails.keys()), devices, activeDevices, receivedAt, occurredAt };
-  });
+  }).filter(p => p.memberDetails.size);
   const candidates = [];
   parties.forEach((party, i) => {
     // Um snapshot só com o próprio personagem é o estado de saída de party.
