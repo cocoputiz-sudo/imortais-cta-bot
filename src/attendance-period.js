@@ -28,13 +28,13 @@ function parsePeriod(fromRaw, toRaw) {
 
 function excludedRoleIds(env=process.env) {
   return new Set([
-    env.STAFF_ROLE_ID, env.CALLER_TAG_ID, env.BOMB_LEADER_ROLE_ID,
+    env.STAFF_ROLE_ID, env.BOMB_LEADER_ROLE_ID,
     "1268568850971230331", // Mestre de Guerra: ID definido em index.js
     ...String(env.OFFICER_ROLE_IDS || "").split(","),
     ...String(env.ATTENDANCE_PRIZE_EXCLUDED_ROLE_IDS || "").split(",")
   ].map(String).map(s=>s.trim()).filter(s=>s && s !== "undefined"));
 }
-const EXCLUDED_ROLE_NAME = /(?:^|[\s_-])(?:officers?|oficia(?:l|is)|l[ií]der(?:es)?|leaders?|mestre\s+de\s+guerra|guild\s?master|guild\s?leader|callers?|gm)(?=$|[\s_-])/i;
+const EXCLUDED_ROLE_NAME = /(?:^|[\s_-])(?:officers?|oficia(?:l|is)|l[ií]der(?:es)?|leaders?|mestre\s+de\s+guerra|guild\s?master|guild\s?leader|gm)(?=$|[\s_-])/i;
 
 function memberExclusionReason(member, guild, roleIds=excludedRoleIds()) {
   if (!member) return "Cargo não verificado";
