@@ -2531,9 +2531,9 @@ async function slashAttendancePeriod(interaction) {
     : "";
   return interaction.editReply({
     content: `📊 **Attendance de ${label}** · **${report.ctaCount} CTAs**\n` +
-      `🏆 **Top ${prizes.winners.length} para premiação (sem líderes/officers):**\n` +
+      `🏆 **Top ${prizes.winners.length} para premiação (sem líderes, officers, administradores ou Mestre de Guerra):**\n` +
       (lines.join("\n") || "(nenhum jogador elegível)") +
-      `\n🚫 Líderes/officers removidos da seleção: ${prizes.excluded.length}.` +
+      `\n🚫 Líderes, officers, administradores e Mestre de Guerra excluídos da seleção: ${prizes.excluded.length}.` +
       warning +
       "\n\n📎 Relatório completo em HTML e lista de premiação em CSV. " +
       "O último dia indicado no comando é **exclusivo** e o filtro considera o dia operacional UTC do CTA.",
@@ -2855,7 +2855,7 @@ function renderAttendanceHTML(report, rotulo, start, end, prizeData = null) {
       <p>Período operacional UTC: <b>${prizeData.period.startLabel} a ${prizeData.period.lastLabel}</b>.
       Dia final informado no comando (${prizeData.period.exclusiveEndLabel}) não entra na contagem.</p>
       <p>Somente jogadores com presença integral ou parcial e score positivo.
-      Líderes, officers, callers, administradores e Mestre de Guerra não concorrem.</p>
+      Líderes, officers, administradores e Mestre de Guerra não concorrem.</p>
       <table><thead><tr><th>Posição</th><th class="l">Jogador</th><th>Integral</th><th>Parcial</th><th>Score</th></tr></thead>
       <tbody>${people || '<tr><td colspan="5">Sem elegíveis confirmados</td></tr>'}</tbody></table>
       ${exclusions ? `<details><summary>Liderança excluída da premiação (${prizeData.excluded.length})</summary><ul>${exclusions}</ul></details>` : ""}
