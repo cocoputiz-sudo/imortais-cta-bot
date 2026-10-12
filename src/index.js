@@ -2699,8 +2699,18 @@ async function slashAudit(interaction) {
   if (low.length) alerts.push(`⚠️ ${low.length} CTA(s) com presença baixa (<5) — pode ser bot fora do ar ou canal errado: ${low.map((c) => c.date + " " + c.time).join(", ")}`);
   const mid = a.counted.filter((c) => c.midnight);
   if (mid.length) alerts.push(`🕛 ${mid.length} CTA(s) em virada de dia (00:/01:) — confira a janela: ${mid.map((c) => c.date + " " + c.time).join(", ")}`);
-  if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesmo dia+horário).`);
-  const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas`);
+  if (a.mergedCount) alerts.push(`🔁 ${a.mergedCount} evento(s) mesclado(s) por duplicidade (mesma janela).`);
+  if (a.discarded?.length) alerts.push(`🚫 ${a.discarded.length} CTA(s) fora da contagem (cancelado ou fechado sem acontecer) — veja no anexo.`);
+  const hhmm = (d) => d ? new Date(d).toISOString().slice(5, 16).replace("T", " ") : "—";
+  const lines = a.counted.map((c) => `${c.date} ${String(c.time).padStart(5)} · id ${c.id} · ${c.present} presentes · ${c.integral} integrais · ${c.pinged} pingaram · ${c.fantasma} fantasmas · criado ${hhmm(c.createdAt)} · fechado ${hhmm(c.closedAt)}`);
+  if (a.discarded?.length) {
+    lines.push("", "FORA DA CONTAGEM (janela sem nenhum CTA válido):");
+    for (const d of a.discarded) lines.push(`${d.date} ${String(d.time).padStart(5)} · id ${d.id} · ${d.reason}${d.copies ? ` · +${d.copies} cópia(s) também inválida(s)` : ""}`);
+  }
+  if (a.merged?.length) {
+    lines.push("", "MESCLADOS (mesma janela de outro CTA):");
+    for (const m of a.merged) lines.push(`${m.date} ${String(m.time).padStart(5)} · id ${m.id} · ficou o id ${m.keptId}${m.reason ? ` · ${m.reason}` : ""}`);
+  }
   const head = `🔎 Auditoria de attendance — ${rotulo}\nCTAs contados: ${a.counted.length} (de ${a.rawCount} eventos brutos)`;
   const body = head + "\n\n" + (alerts.length ? alerts.join("\n") + "\n\n" : "") + lines.join("\n") + "\n";
   const buf = Buffer.from(body, "utf-8");

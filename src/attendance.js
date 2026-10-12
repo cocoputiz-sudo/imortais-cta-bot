@@ -27,6 +27,78 @@ function windowFor(event) {
   return { start, end, arrivalLimit, stayUntil };
 }
 
+// ============================================================================
+// QUAIS CTAs CONTAM
+// - A mescla de duplicados usa a JANELA real (guild + início), não o dia de
+//   criação. Assim dois CTAs 01:20 criados no mesmo dia UTC para noites
+//   diferentes contam separados, e um CTA criado na véspera e recriado no dia
+//   conta uma vez só.
+// - Não conta CTA cancelado nem CTA fechado antes do início da batalha
+//   (início + 40 min): foi aberto e fechado sem acontecer.
+// - Se todos os CTAs de uma janela são inválidos, a janela não conta.
+// ============================================================================
+const OPERATIONAL_DAY_SHIFT_MS = 6 * 60 * 60000;
+
+function invalidReason(event, win) {
+  if (event.status === "cancelled") return "cancelado";
+  if (event.status === "closed" && event.closed_at && win) {
+    const closed = new Date(event.closed_at).getTime();
+    if (Number.isFinite(closed)) {
+      if (closed < win.start.getTime()) return "fechado antes do horário";
+      if (closed < win.arrivalLimit.getTime()) return "fechado antes do início da batalha";
+    }
+  }
+  return null;
+}
+
+// "Dia do CTA": o dia da noite a que ele pertence. CTA de 00:00/01:20 UTC fica
+// no dia anterior, igual ao rótulo que já aparecia quando ele era criado antes
+// da meia-noite.
+function eventDay(event, win) {
+  const base = win ? new Date(win.start.getTime() - OPERATIONAL_DAY_SHIFT_MS) : new Date(event.created_at);
+  return base.toISOString().slice(0, 10);
+}
+
+function selectCountedEvents(allEvents) {
+  const groups = new Map();
+  for (const ev of allEvents || []) {
+    const win = windowFor(ev);
+    const key = win
+      ? String(ev.guild_id ?? "") + "|" + win.start.getTime()
+      : "legacy|" + new Date(ev.created_at).toISOString().slice(0, 10) + " " + ev.time_label;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ev, win, reason: invalidReason(ev, win) });
+  }
+
+  const byCreated = (a, b) => new Date(a.ev.created_at) - new Date(b.ev.created_at);
+  const counted = [];
+  const merged = [];
+  const discarded = [];
+  for (const members of groups.values()) {
+    members.sort(byCreated);
+    const valid = members.filter(m => !m.reason);
+    if (!valid.length) {
+      // janela inteira inválida: mostra só o mais recente como descartado
+      const last = members[members.length - 1];
+      discarded.push({ event: last.ev, win: last.win, reason: last.reason, copies: members.length - 1 });
+      continue;
+    }
+    const chosen = valid[valid.length - 1];
+    counted.push(chosen);
+    for (const m of members) {
+      if (m !== chosen) merged.push({ event: m.ev, win: m.win, reason: m.reason, keptId: chosen.ev.id });
+    }
+  }
+
+  const order = (a, b) => {
+    const ta = a.win ? a.win.start.getTime() : new Date(a.ev.created_at).getTime();
+    const tb = b.win ? b.win.start.getTime() : new Date(b.ev.created_at).getTime();
+    return ta - tb || byCreated(a, b);
+  };
+  counted.sort(order);
+  return { events: counted.map(c => c.ev), merged, discarded };
+}
+
 // soma o tempo (min) que a pessoa esteve na call dentro da janela, e o 1º join / último leave
 // RECORTADOS na janela (não os horários brutos da sessão).
 function presenceInWindow(sessions, win) {
@@ -184,15 +256,8 @@ async function processEvent(event, ctx) {
 // agrega vários eventos num período -> ranking por pessoa
 async function buildReport(guildId, startUTC, endUTC) {
   const allEvents = await db.getEventsInRange(guildId, startUTC, endUTC);
-  // deduplica: mesmo dia + mesmo horário = 1 CTA só (fica o mais recente).
-  // evita contar em dobro quando houve /cta_change_time ou recriação.
-  const byKey = new Map();
-  for (const ev of allEvents) {
-    const key = new Date(ev.created_at).toISOString().slice(0, 10) + " " + ev.time_label;
-    const prev = byKey.get(key);
-    if (!prev || new Date(ev.created_at) > new Date(prev.created_at)) byKey.set(key, ev);
-  }
-  const events = [...byKey.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  // mescla por janela e descarta cancelados / fechados sem acontecer (ver selectCountedEvents).
+  const { events } = selectCountedEvents(allEvents);
   const ctx = await loadEventsContext(guildId, events);
   const perUser = new Map(); // uid -> stats acumulados
 
@@ -205,7 +270,7 @@ async function buildReport(guildId, startUTC, endUTC) {
   let ctaCount = 0;
   for (const ev of events) {
     ctaCount++;
-    const dateKey = new Date(ev.created_at).toISOString().slice(0, 10);
+    const dateKey = eventDay(ev, windowFor(ev));
     const res = await processEvent(ev, ctx);
     for (const [uid, r] of res) {
       const o = ensure(uid, r.username);
@@ -248,6 +313,7 @@ async function buildReport(guildId, startUTC, endUTC) {
 
 module.exports = {
   windowFor, presenceInWindow, classify, processEvent, buildReport,
+  selectCountedEvents, invalidReason, eventDay,
   __test: { loadEventsContext }
 };
 
@@ -257,13 +323,7 @@ module.exports = {
 // ============================================================================
 async function auditEvents(guildId, startUTC, endUTC) {
   const allEvents = await db.getEventsInRange(guildId, startUTC, endUTC);
-  const byKey = new Map();
-  for (const ev of allEvents) {
-    const key = new Date(ev.created_at).toISOString().slice(0, 10) + " " + ev.time_label;
-    const prev = byKey.get(key);
-    if (!prev || new Date(ev.created_at) > new Date(prev.created_at)) byKey.set(key, ev);
-  }
-  const events = [...byKey.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const { events, merged, discarded } = selectCountedEvents(allEvents);
   const ctx = await loadEventsContext(guildId, events);
   const counted = [];
   for (const ev of events) {
@@ -276,13 +336,26 @@ async function auditEvents(guildId, startUTC, endUTC) {
     }
     counted.push({
       id: ev.id, time: ev.time_label,
-      date: new Date(ev.created_at).toISOString().slice(0, 10),
+      date: eventDay(ev, windowFor(ev)),
+      status: ev.status || null,
+      createdAt: ev.created_at || null,
+      closedAt: ev.closed_at || null,
       present, pinged, fantasma, integral,
       lowPresence: present < 5,
       midnight: /^(00:|01:)/.test((ev.time_label || "").trim()),
     });
   }
-  return { counted, rawCount: allEvents.length, mergedCount: allEvents.length - events.length };
+  const brief = (x) => ({
+    id: x.event.id, time: x.event.time_label, date: eventDay(x.event, x.win),
+    reason: x.reason || null, keptId: x.keptId ?? null, copies: x.copies || 0,
+  });
+  return {
+    counted,
+    rawCount: allEvents.length,
+    mergedCount: merged.length,
+    merged: merged.map(brief),
+    discarded: discarded.map(brief),
+  };
 }
 
 module.exports.auditEvents = auditEvents;
