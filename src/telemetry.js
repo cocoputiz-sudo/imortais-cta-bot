@@ -1,3 +1,4 @@
+const { normName, findSignupCollisions } = require("./playerName");
 // ============================================================================
 // IMORTAIS TELEMETRY — bridge entre o Combat Client e o CTA War Room
 // ============================================================================
@@ -114,17 +115,6 @@ function setZoneChangeHandler(handler) {
   zoneChangeHandler = typeof handler === "function" ? handler : null;
 }
 
-function normName(v) {
-  let out = String(v || "").trim();
-  // Remove repetidamente prefixos de tag ([IM], [ESP], [BR], etc.) e sinais (!, !!)
-  // ate sobrar so o nick do jogo. Cobre nicks com multiplas tags: "[IM] [ESP] Cizk".
-  let prev;
-  do {
-    prev = out;
-    out = out.replace(/^[!\s]+/, "").replace(/^\[[^\]]{1,16}\]\s*/i, "");
-  } while (out !== prev);
-  return out.trim().toLowerCase();
-}
 
 function normGuild(v) {
   return String(v || "")
