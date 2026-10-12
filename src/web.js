@@ -2449,7 +2449,7 @@ const PAGE = `<!doctype html>
         if(x.categoria==='off_pingou'||x.albion==='offline') return 'off';
         if(x.st==='wrong'||x.categoria==='pt_errada') return 'wrong';
         if(x.st==='ok') return 'ok';
-        if(['seen','stale','unobserved','collision'].includes(x.st)) return 'empty';
+        if(['seen','solo','stale','unobserved','collision'].includes(x.st)) return 'empty';
         return 'miss';
       }
       function slotMap(g){
@@ -2505,6 +2505,7 @@ const PAGE = `<!doctype html>
         if(Number(x.plannedParty)===party&&x.st==='stale') return {label:'SNAPSHOT DEFASADO',cls:'neutral',order:1};
         if(Number(x.plannedParty)===party&&x.st==='unobserved') return {label:'PT SEM CLIENT ATIVO',cls:'neutral',order:1};
         if(Number(x.plannedParty)===party&&x.st==='seen') return {label:'DETECTADO · PARTY NÃO IDENTIFICADA',cls:'neutral',order:1};
+        if(Number(x.plannedParty)===party&&x.st==='solo') return {label:'DETECTADO SOLO · FORA DE PT',cls:'neutral',order:1};
         if(Number(x.plannedParty)===party&&x.st==='ok') return {label:'CORRETO',cls:'ok',order:0};
         if(Number(x.plannedParty)===party&&x.st==='miss') return {label:'DEVERIA ESTAR AQUI · NÃO OBSERVADO',cls:'miss',order:2};
         if(Number(x.plannedParty)===party&&x.st==='wrong') return {label:'DEVERIA ESTAR AQUI · ESTÁ '+esc(x.actualPartyLabel||('PT '+x.actualParty)),cls:'wrong',order:2};
