@@ -4911,6 +4911,7 @@ module.exports = {
   getPresenceArea,
   getGuildPresence,
   __test: {
+    setConfirmPoolForTests: p => { pool = p; _confirmCache.clear(); },
     presenceForcesForWindow,
     presenceAreaSummary,
     getCombatCached,
