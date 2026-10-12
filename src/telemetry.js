@@ -956,6 +956,7 @@ async function getConfirm(db, eventId) {
     };
   }
   function categoriaDe(st, albionSt, inDiscord) {
+    if (["collision","stale","seen","unobserved","reserve"].includes(st)) return "indefinido";
     if (albionSt === "offline") return "off_pingou";
     if (st === "wrong") return "pt_errada";
     if (st === "ok") return inDiscord ? "pronto" : "online_fora_call";
@@ -975,6 +976,7 @@ async function getConfirm(db, eventId) {
     observadosDefasados: 0,
     partyNaoIdentificada: 0,
     reservasNaParty: 0,
+    observadosSozinhos: 0,
     colisoesNomes: collisions.size,
     ptErrada: 0,
     foraParty: 0,
@@ -1014,6 +1016,10 @@ async function getConfirm(db, eventId) {
         resumo.foraParty++;
         obs = "Inscrito ainda não detectado nos snapshots da party observada";
       }
+    } else if (actual.solo) {
+      status = "solo";
+      resumo.observadosSozinhos++;
+      obs = "Detectado sozinho · fora de party após saída do grupo";
     } else if (plannedDisplay == null) {
       status = "reserve";
       resumo.reservasNaParty++;
@@ -1106,7 +1112,7 @@ async function getConfirm(db, eventId) {
 
   const gameNoSignup = [];
   for (const [key, a] of actualByName.entries()) {
-    if (signupByName.has(key) || collisions.has(key) || a.stale) continue;
+    if (signupByName.has(key) || collisions.has(key) || a.stale || a.solo) continue;
     resumo.jogoSemEscala++;
     gameNoSignup.push({
       n: a.name,
@@ -1148,7 +1154,7 @@ async function getConfirm(db, eventId) {
       const g = issueGroup(row.plannedParty);
       if (row.st === "ok") g.correct.push(row);
       else if (row.st === "miss" || row.st === "wrong") g.missing.push(row);
-      else if (row.st === "seen") g.unidentified.push(row);
+      else if (row.st === "seen" || row.st === "solo") g.unidentified.push(row);
       else if (row.st === "stale") g.stale.push(row);
       else if (row.st === "unobserved") g.uncovered.push(row);
       else if (row.st === "collision") g.collisions.push(row);
