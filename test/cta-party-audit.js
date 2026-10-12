@@ -127,6 +127,53 @@ async function confirm(signups, snapshots, voice=[], partys=[0,1]) {
   ],new Map([[1,new Set(["angelxxofc","badmack","other"])]]),{now:NOW});
   assert.equal(x.actualByName.get("angelxxofc").deviceId,"PT1new","usar received_at, não relógio local occurred_at");
 
+  // Regressão: observador B retém composição antiga com q0 na PT1;
+  // q0 migrou para PT2 e é visto mais recentemente pelo device C.
+  const p = Array.from({length:18},(_,i)=>`p${i}`);
+  const q = Array.from({length:9},(_,i)=>`q${i}`);
+  const moveSnapshots = [
+    snap("device-A","p0",p,5_000,1_000),
+    snap("device-B","p1",[...p.slice(0,17),"q0"],120_000,1_000),
+    snap("device-C","q0",q,5_000,1_000)
+  ];
+  const movePlan = new Map([
+    [1,new Set(p)], [2,new Set(q)]
+  ]);
+  const moved = buildPartyObservations(moveSnapshots,movePlan,{now:NOW});
+  assert.equal(moved.parties.length,2,"troca de PT não pode fundir clusters");
+  assert.equal(moved.parties.find(x=>x.display===1).members.length,18,"PT1 sem q0 antigo");
+  assert.equal(moved.parties.find(x=>x.display===2).members.length,9,"PT2 completa");
+  assert.equal(moved.actualByName.size,27,"27 jogadores distintos sem duplicação");
+  for (const name of q) {
+    assert.equal(moved.actualByName.get(name).party,2,`${name} deve aparecer na PT2`);
+    assert.equal(moved.actualByName.get(name).partyLabel,"PT 2");
+  }
+  assert.equal(moved.actualByName.get("q0").deviceId,"device-C",
+    "received_at mais recente prevalece sobre snapshot do device B");
+  const movedConfirm = await confirm([
+    signup("p0","p0",0),signup("p17","p17",0),
+    signup("q0","q0",1),signup("q8","q8",1)
+  ],moveSnapshots);
+  assert.equal(movedConfirm.realParties.length,2);
+  assert.equal(movedConfirm.resumo.jogo,27);
+  assert.equal(movedConfirm.resumo.corretos,4);
+  assert.equal(movedConfirm.pts.find(x=>x.pt==="PT 2").linhas.find(x=>x.n==="q0").st,"ok");
+
+  // B sem heartbeat fresco não une PTs nem reivindica quem já foi visto depois.
+  const staleBridge = buildPartyObservations([
+    moveSnapshots[0],
+    snap("device-B","p1",[...p.slice(0,17),"q0","antigo"],120_000,120_000),
+    moveSnapshots[2]
+  ],movePlan,{now:NOW});
+  assert.equal(staleBridge.parties.length,2);
+  assert.equal(staleBridge.parties.find(x=>x.display===1).activeDevices.size,1);
+  assert.equal(staleBridge.parties.find(x=>x.display===2).activeDevices.size,1);
+  assert.equal(staleBridge.actualByName.get("q0").party,2);
+  assert.equal(staleBridge.actualByName.get("p0").deviceId,"device-A");
+  assert.equal(staleBridge.actualByName.get("antigo").stale,true,
+    "membro sem captura posterior pode ser mantido, mas como defasado");
+  console.log("✅ migração q0 PT1→PT2, sobreposição 50%, heartbeat e deduplicação global");
+
   // Recorte do CTA #162 às 17:50 UTC: dois dispositivos, PT1 (18) e PT2 (5),
   // sem interseção. A foto anterior com 19 jogadores é de OUTRO instante.
   const pt1Names=["A0roboros","amittere1","ANGELXXOFC","BadMack","Caiodogral2",
