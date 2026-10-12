@@ -1,3 +1,4 @@
+const { normName } = require("./playerName");
 // ============================================================================
 // SCOUT / DESEMPENHO — histórico permanente por jogador e CTA.
 // Consolida os mesmos números canônicos do Combate antes da telemetria bruta expirar.
@@ -7,15 +8,6 @@ const { WEAPONS } = require("./comps");
 let pool = null;
 const STATS_VERSION = 1;
 
-function normName(v) {
-  let out = String(v || "").trim();
-  let prev;
-  do {
-    prev = out;
-    out = out.replace(/^[!\s]+/, "").replace(/^\[[^\]]{1,16}\]\s*/i, "");
-  } while (out !== prev);
-  return out.trim().toLowerCase();
-}
 
 function n(v) {
   const x = Number(v);
