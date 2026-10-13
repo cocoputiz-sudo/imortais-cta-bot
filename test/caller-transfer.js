@@ -108,5 +108,48 @@ const transfer = d => transferPrimaryCaller(d.pool, {
   // Identical usernames are legal; control by Discord user ID only.
   validateCallerTransfer(db.state().ev, db.state().signups,
     { guildId: "guild1", fromUserId: "successor", toUserId: "caller-main" });
+  // Testa SQL de verdade no PostgreSQL TEMPORÁRIO da CI, sem alterar CTAs reais.
+  if (process.env.DATABASE_URL) {
+    const { Pool } = require("pg");
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false },
+      max: 1
+    });
+    try {
+      await pool.query(`CREATE TEMP TABLE cta_events
+        (id BIGINT PRIMARY KEY, guild_id TEXT, caller_id TEXT, time_label TEXT, status TEXT, party_list TEXT)`);
+      await pool.query(`CREATE TEMP TABLE cta_signups
+        (event_id BIGINT, user_id TEXT, username TEXT, weapon TEXT, presence TEXT,
+         party_index INT, slot_index INT, manual BOOLEAN DEFAULT false,
+         second_caller BOOLEAN DEFAULT false, PRIMARY KEY(event_id, user_id))`);
+      await pool.query(`INSERT INTO cta_events VALUES
+        (169,'guild1','caller-main','17:20','open','0,1')`);
+      await pool.query(`INSERT INTO cta_signups
+        (event_id,user_id,username,weapon,party_index,slot_index,manual,second_caller) VALUES
+        (169,'caller-main','[IM] BadMack','GOLEM',0,0,true,false),
+        (169,'other-account','!![IM]BadMack','GOLEM',NULL,NULL,false,false),
+        (169,'successor','[IM] Ragnaldokun','MONARCA',1,0,false,true)`);
+      const done = await transferPrimaryCaller(pool, {
+        eventId: 169, guildId: "guild1", fromUserId: "caller-main", toUserId: "successor"
+      });
+      assert.equal(done.event.caller_id, "successor");
+      const result = await pool.query("SELECT * FROM cta_signups WHERE event_id=169 ORDER BY user_id");
+      assert.equal(result.rows.length, 3);
+      assert.equal(result.rows.find(s => s.user_id === "caller-main").party_index, null);
+      assert.equal(result.rows.find(s => s.user_id === "successor").party_index, 0);
+      assert.equal(result.rows.find(s => s.user_id === "successor").slot_index, 0);
+      assert.equal(result.rows.find(s => s.user_id === "successor").second_caller, false);
+      assert.equal(result.rows.find(s => s.user_id === "other-account").username, "!![IM]BadMack");
+      await assert.rejects(() => transferPrimaryCaller(pool, {
+        eventId: 169, guildId: "guild1", fromUserId: "caller-main", toUserId: "other-account"
+      }), error => error instanceof CallerTransferError && error.code === "not_caller");
+      const owner = await pool.query("SELECT caller_id FROM cta_events WHERE id=169");
+      assert.equal(owner.rows[0].caller_id, "successor", "rollback must preserve transferred leadership");
+      console.log("PASS caller-transfer PostgreSQL temporary tables: atomic owner and roster");
+    } finally {
+      await pool.end();
+    }
+  }
   console.log("PASS caller-transfer: atomic authority, PT1, reserved occupant, second caller, dual accounts, rollback");
 })().catch(e => { console.error(e); process.exitCode = 1; });
