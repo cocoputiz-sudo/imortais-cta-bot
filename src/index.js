@@ -1066,9 +1066,25 @@ async function onPresence(interaction) {
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", components: [] });
 
+  const isMainCaller = String(interaction.user.id) === String(ev.caller_id);
+  if (isMainCaller && !CALLER_WEAPONS.includes(String(weapon).toUpperCase()))
+    return interaction.update({ content: "👑 Você é o caller principal. Transfira a liderança antes de assumir uma arma que não seja de caller.", components: [] });
+  const pl = db.parsePartyList(ev);
+  const existingCaller = isMainCaller ? await db.getSignup(eventId, interaction.user.id) : null;
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
-  const pl = db.parsePartyList(ev);
+  if (isMainCaller && existingCaller && Number(existingCaller.party_index) === Number(pl[0])
+      && Number(existingCaller.slot_index) === 0) {
+    // Trocar apenas a arma do próprio caller não pode desocupar temporariamente a PT1.
+    await db.upsertSignup({
+      eventId, userId: interaction.user.id, username, weapon, presence,
+      partyIndex: pl[0], slotIndex: 0, ip, manual: true, secondCaller: false,
+    });
+    refreshRoster(ev);
+    await interaction.editReply({ content: `👑 Arma de caller atualizada para **${shownWeapon}** · PT1 vaga 1.`, components: [] });
+    await logStaff(interaction.guild, `👑 **${username}** mudou sua arma de caller para **${weapon}** · CTA ${ev.time_label}`);
+    return;
+  }
 
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
@@ -1146,6 +1162,8 @@ async function onLooter(interaction) {
   const es = isSpanish(interaction);
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.reply({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (String(interaction.user.id) === String(ev.caller_id))
+    return interaction.reply({ content: "👑 Você é o caller principal. Use **Transferir Caller** antes de assumir Looter.", flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const username = interaction.member?.displayName || interaction.user.username;
   await db.upsertSignup({
@@ -1264,6 +1282,8 @@ async function onSwapYes(interaction) {
   const weapon = decodeURIComponent(wEnc);
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
+  if (String(interaction.user.id) === String(ev.caller_id))
+    return interaction.update({ content: "O caller principal não pode sair da vaga 1 da PT1 usando troca comum. Use **Transferir Caller** primeiro.", components: [] });
 
   await interaction.deferUpdate();
   const signups = await db.getSignups(eventId);
