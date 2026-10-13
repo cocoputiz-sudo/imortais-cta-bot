@@ -3062,6 +3062,8 @@ async function slashRemove(interaction, ev) {
   const vaga = interaction.options.getInteger("vaga");
 
   if (user) {
+    if (String(user.id) === String(ev.caller_id))
+      return interaction.reply({ content: "Esse jogador é o caller principal. Use **Transferir Caller** no CTA antes de removê-lo.", flags: MessageFlags.Ephemeral });
     const removed = await db.deleteSignup(ev.id, user.id);
     if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
     await interaction.reply({ content: `🗑️ ${user} removido do CTA ${ev.time_label}.` });
@@ -3075,6 +3077,8 @@ async function slashRemove(interaction, ev) {
     if (raw == null) return interaction.reply({ content: `A PT${pt} não está aberta nesse CTA.`, flags: MessageFlags.Ephemeral });
     const su = await db.getSignupAtSlot(ev.id, raw, vaga - 1);
     if (!su) return interaction.reply({ content: `Não há ninguém na PT${pt} vaga ${vaga}.`, flags: MessageFlags.Ephemeral });
+    if (String(su.user_id) === String(ev.caller_id))
+      return interaction.reply({ content: "Essa vaga pertence ao caller principal. Use **Transferir Caller** primeiro.", flags: MessageFlags.Ephemeral });
     await db.deleteSignup(ev.id, su.user_id);
     await interaction.reply({ content: `🗑️ **${su.username}** removido da PT${pt} vaga ${vaga} (CTA ${ev.time_label}).` });
     await applyReallocation(ev, interaction.guild, null);
@@ -3105,6 +3109,9 @@ async function onCleanConfirm(interaction) {
   const plClean = db.parsePartyList(ev);
   const rawClean = rawPtFromVisual(plClean, parseInt(pt, 10));
   if (rawClean == null) return interaction.update({ content: `A PT${pt} não está aberta.`, components: [] });
+  const callerSignup = await db.getSignup(eventId, ev.caller_id);
+  if (callerSignup && Number(callerSignup.party_index) === Number(rawClean))
+    return interaction.update({ content: "Esta PT contém o caller principal. Transfira a liderança antes de limpar a PT.", components: [] });
   const n = await db.clearParty(eventId, rawClean);
   await interaction.update({ content: `🧹 PT${pt} limpa — ${n} pessoa(s) removida(s).`, components: [] });
   refreshRoster(ev);
@@ -3134,6 +3141,9 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
   const target = cmds.resolveTargetSlot(raw, vaga, arma, others);
   if (!target) return interaction.reply({ content: `Não há vaga livre de **${arma || (existing && existing.weapon) || "essa arma"}** na PT${pt}. Use o campo **vaga** pra forçar numa posição específica, ou tente outra PT.`, flags: MessageFlags.Ephemeral });
 
+  if (existing && String(user.id) === String(ev.caller_id)
+      && !(target.partyIndex === db.parsePartyList(ev)[0] && target.slotIndex === 0))
+    return interaction.reply({ content: "O caller principal não pode mudar de vaga sem transferir a liderança. Use **Transferir Caller** primeiro.", flags: MessageFlags.Ephemeral });
   const occupant = await db.getSignupAtSlot(ev.id, target.partyIndex, target.slotIndex);
   const weaponToUse = arma || (existing ? existing.weapon : null);
 
@@ -3179,6 +3189,8 @@ async function onOccupantChoice(interaction) {
   const weapon = decodeURIComponent(wEnc) || "?";
   const occupant = await db.getSignupAtSlot(eventId, target.partyIndex, target.slotIndex);
 
+  if (occupant && String(occupant.user_id) === String(ev.caller_id))
+    return interaction.update({ content: "Essa vaga pertence ao caller principal. Use **Transferir Caller** antes de enviá-lo à reserva ou trocar sua vaga.", components: [] });
   if (choice === "reserva" && occupant) {
     await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: null, slotIndex: null, manual: false });
   }
