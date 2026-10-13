@@ -4,7 +4,7 @@
 const {
   Client, GatewayIntentBits, Partials, Events,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, ChannelType, MessageFlags,
+  StringSelectMenuBuilder, UserSelectMenuBuilder, ChannelType, MessageFlags,
   ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require("discord.js");
 
@@ -28,7 +28,7 @@ const { ctaPingTime, timeForCtaLabelUTC: timeToTodayUTC, sortCtaTimes } = requir
 const { parseConsolidationSteps, isCtaFrozen, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
 const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
-const CALLER_WEAPONS = Object.freeze(["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA", "HAND OF JUSTICE"]);
+const { CALLER_WEAPONS, CallerTransferError } = require("./caller-transfer");
 const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
 const CFG = {
@@ -510,6 +510,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (bk === "cleanyes") return onCleanConfirm(interaction);
       if (bk === "cleanno")  return interaction.update({ content: "Cancelado.", components: [] });
       if (bk === "caller2") return onSecondCaller(interaction);
+      if (bk === "xfercaller") return onTransferCaller(interaction);
+      if (bk === "xferconfirm") return onTransferCallerConfirm(interaction);
+      if (bk === "xfercancel") return interaction.update({ content: "Transferência cancelada. O caller permanece o mesmo.", components: [] });
     }
     if (interaction.isButton()) {
       const [k] = interaction.customId.split("|");
@@ -533,6 +536,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("weapon|"))
       return onWeaponPick(interaction);
+    if (interaction.isUserSelectMenu() && interaction.customId.startsWith("xferchoose|"))
+      return onTransferCallerChosen(interaction);
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("caller2weapon|"))
       return onSecondCallerWeaponPick(interaction);
     if (interaction.isModalSubmit() && interaction.customId.startsWith("ipmodal|"))
@@ -673,10 +678,11 @@ function buildRolePicker(eventId) {
   const montar = new ButtonBuilder().setCustomId(`montar|${eventId}`).setLabel("Montar PT (caller)").setStyle(ButtonStyle.Success);
   const cancel = new ButtonBuilder().setCustomId(`cancel|${eventId}`).setLabel("Cancelar (caller)").setStyle(ButtonStyle.Danger);
   const fechar = new ButtonBuilder().setCustomId(`fechar|${eventId}`).setLabel("Fechar CTA (caller)").setStyle(ButtonStyle.Secondary);
+  const transferir = new ButtonBuilder().setCustomId(`xfercaller|${eventId}`).setLabel("Transferir Caller").setEmoji("👑").setStyle(ButtonStyle.Secondary);
   const rows = [];
   for (let i = 0; i < roleBtns.length; i += 5) rows.push(new ActionRowBuilder().addComponents(roleBtns.slice(i, i + 5)));
   rows.push(new ActionRowBuilder().addComponents(looter, caller2, leave, montar));
-  rows.push(new ActionRowBuilder().addComponents(fechar, cancel));
+  rows.push(new ActionRowBuilder().addComponents(fechar, cancel, transferir));
   return rows;
 }
 
@@ -703,6 +709,100 @@ async function onRolePick(interaction) {
     components: [new ActionRowBuilder().addComponents(menu)],
     flags: MessageFlags.Ephemeral
   });
+}
+
+async function onTransferCaller(interaction) {
+  const [, eventId] = interaction.customId.split("|");
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open")
+    return interaction.reply({ content: "Este CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (String(ev.caller_id) !== String(interaction.user.id))
+    return interaction.reply({ content: "Somente o caller principal atual pode transferir a liderança deste CTA.", flags: MessageFlags.Ephemeral });
+
+  const picker = new UserSelectMenuBuilder()
+    .setCustomId(`xferchoose|${eventId}|${interaction.user.id}`)
+    .setPlaceholder("Selecione o novo caller principal")
+    .setMinValues(1).setMaxValues(1);
+  return interaction.reply({
+    content: "👑 **Transferir Caller** · selecione a conta exata do Discord que assumirá a liderança. " +
+      "O jogador deve estar inscrito no CTA com arma de caller. " +
+      "A PT1 vaga 1 será transferida para ele, e o ocupante anterior ficará na reserva.",
+    components: [new ActionRowBuilder().addComponents(picker)],
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function onTransferCallerChosen(interaction) {
+  const [, eventId, originId] = interaction.customId.split("|");
+  if (String(originId) !== String(interaction.user.id))
+    return interaction.reply({ content: "Esta seleção pertence ao caller que iniciou a transferência.", flags: MessageFlags.Ephemeral });
+  const ev = await db.getEvent(eventId);
+  if (!ev || ev.status !== "open" || String(ev.caller_id) !== String(originId))
+    return interaction.update({ content: "Este CTA foi encerrado ou já tem outro caller. Reabra o menu.", components: [] });
+  const selectedId = interaction.values?.[0];
+  if (!selectedId || String(selectedId) === String(originId))
+    return interaction.update({ content: "Selecione outra conta para receber a liderança.", components: [] });
+  const signup = await db.getSignup(eventId, selectedId);
+  if (!signup)
+    return interaction.update({ content: "O jogador não está inscrito nesse CTA. Inscreva-o primeiro usando /cta_add e tente novamente.", components: [] });
+  if (!CALLER_WEAPONS.includes(String(signup.weapon || "").toUpperCase()))
+    return interaction.update({ content: "Essa inscrição não usa uma arma de caller. Ajuste a arma para Golem, Monarca, Maça ou Bruxo de uma mão antes de transferir.", components: [] });
+  const confirm = new ButtonBuilder()
+    .setCustomId(`xferconfirm|${eventId}|${originId}|${selectedId}`)
+    .setLabel("Confirmar transferência").setStyle(ButtonStyle.Danger);
+  const cancel = new ButtonBuilder()
+    .setCustomId(`xfercancel|${eventId}|${originId}`)
+    .setLabel("Cancelar").setStyle(ButtonStyle.Secondary);
+  return interaction.update({
+    content: `⚠️ **Confirma a transferência do caller principal?**\nDe <@${originId}> para <@${selectedId}> (${signup.weapon}).\n` +
+      "O novo caller receberá as permissões de gerenciamento e ocupará **PT1 vaga 1**. " +
+      "O atual ocupante da vaga irá para a reserva sem perder sua inscrição. " +
+      "O antigo caller permanecerá inscrito, se já estava, e poderá assumir 2 Caller separadamente.",
+    components: [new ActionRowBuilder().addComponents(confirm, cancel)],
+    allowedMentions: { parse: [] }
+  });
+}
+
+async function onTransferCallerConfirm(interaction) {
+  const [, eventId, originId, targetId] = interaction.customId.split("|");
+  if (String(originId) !== String(interaction.user.id))
+    return interaction.reply({ content: "Somente o caller que iniciou a operação pode confirmá-la.", flags: MessageFlags.Ephemeral });
+  await interaction.deferUpdate();
+  let result;
+  try {
+    result = await db.transferCaller({
+      eventId,
+      guildId: interaction.guildId,
+      fromUserId: originId,
+      toUserId: targetId,
+    });
+  } catch (error) {
+    if (error instanceof CallerTransferError)
+      return interaction.editReply({ content: `⚠️ ${error.message}`, components: [] });
+    throw error;
+  }
+
+  // Somente atualizar o Discord após COMMIT; a próxima renderização lê a nova titularidade.
+  const fresh = (await db.getEvent(eventId)) || result.event;
+  refreshRoster(fresh);
+  await interaction.editReply({
+    content: `✅ Caller principal transferido de <@${originId}> para <@${targetId}>. ` +
+      `${result.successor.weapon} agora ocupa a PT1 vaga 1.`,
+    components: [],
+    allowedMentions: { parse: [] }
+  });
+  const thread = fresh.thread_id ? await client.channels.fetch(fresh.thread_id).catch(() => null) : null;
+  if (thread) await thread.send({
+    content: `👑 **Transferência de Caller · CTA ${fresh.time_label} UTC**\n` +
+      `<@${originId}> passou a liderança para <@${targetId}>. ` +
+      `Novo caller: **${result.successor.weapon}**, PT1 vaga 1.` +
+      (result.displaced.length ? `\n📋 Ocupante anterior da vaga enviado à reserva: ${result.displaced.map(x => `<@${x.user_id}>`).join(", ")}.` : ""),
+    allowedMentions: { parse: [] }
+  }).catch((e) => console.error("caller transfer announcement:", e));
+  await logStaff(interaction.guild,
+    `👑 **TRANSFERÊNCIA DE CALLER** · CTA ${fresh.time_label} UTC (#${eventId}): ` +
+    `<@${originId}> → <@${targetId}> · ${result.successor.weapon} na PT1 vaga 1` +
+    (result.displaced.length ? ` · ${result.displaced.map(x => `<@${x.user_id}>`).join(", ")} na reserva` : ""));
 }
 
 async function onSecondCaller(interaction) {
@@ -966,9 +1066,25 @@ async function onPresence(interaction) {
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", components: [] });
 
+  const isMainCaller = String(interaction.user.id) === String(ev.caller_id);
+  if (isMainCaller && !CALLER_WEAPONS.includes(String(weapon).toUpperCase()))
+    return interaction.update({ content: "👑 Você é o caller principal. Transfira a liderança antes de assumir uma arma que não seja de caller.", components: [] });
+  const pl = db.parsePartyList(ev);
+  const existingCaller = isMainCaller ? await db.getSignup(eventId, interaction.user.id) : null;
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
-  const pl = db.parsePartyList(ev);
+  if (isMainCaller && existingCaller && Number(existingCaller.party_index) === Number(pl[0])
+      && Number(existingCaller.slot_index) === 0) {
+    // Trocar apenas a arma do próprio caller não pode desocupar temporariamente a PT1.
+    await db.upsertSignup({
+      eventId, userId: interaction.user.id, username, weapon, presence,
+      partyIndex: pl[0], slotIndex: 0, ip, manual: true, secondCaller: false,
+    });
+    refreshRoster(ev);
+    await interaction.editReply({ content: `👑 Arma de caller atualizada para **${shownWeapon}** · PT1 vaga 1.`, components: [] });
+    await logStaff(interaction.guild, `👑 **${username}** mudou sua arma de caller para **${weapon}** · CTA ${ev.time_label}`);
+    return;
+  }
 
   await db.upsertSignup({
     eventId, userId: interaction.user.id, username, weapon, presence,
@@ -1046,6 +1162,8 @@ async function onLooter(interaction) {
   const es = isSpanish(interaction);
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.reply({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (String(interaction.user.id) === String(ev.caller_id))
+    return interaction.reply({ content: "👑 Você é o caller principal. Use **Transferir Caller** antes de assumir Looter.", flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const username = interaction.member?.displayName || interaction.user.username;
   await db.upsertSignup({
@@ -1164,6 +1282,8 @@ async function onSwapYes(interaction) {
   const weapon = decodeURIComponent(wEnc);
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
+  if (String(interaction.user.id) === String(ev.caller_id))
+    return interaction.update({ content: "O caller principal não pode sair da vaga 1 da PT1 usando troca comum. Use **Transferir Caller** primeiro.", components: [] });
 
   await interaction.deferUpdate();
   const signups = await db.getSignups(eventId);
@@ -1194,6 +1314,8 @@ async function onLeave(interaction) {
   const [, eventId] = interaction.customId.split("|");
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.reply({ content: "CTA não está aberto.", flags: MessageFlags.Ephemeral });
+  if (String(interaction.user.id) === String(ev.caller_id))
+    return interaction.reply({ content: "👑 Você é o caller principal deste CTA. Use **Transferir Caller** para passar a liderança antes de sair da função.", flags: MessageFlags.Ephemeral });
   const removed = await db.deleteSignup(eventId, interaction.user.id);
   if (!removed) return interaction.reply({ content: "Você não estava inscrito.", flags: MessageFlags.Ephemeral });
   await interaction.reply({ content: "🚪 Saiu da função. Vaga liberada.", flags: MessageFlags.Ephemeral });
@@ -1252,7 +1374,7 @@ async function onCallerYes(interaction) {
   const ev = await db.getEvent(eventId);
   if (!ev || ev.status !== "open") return interaction.update({ content: "CTA não está aberto.", components: [] });
   if (interaction.user.id !== ev.caller_id)
-    return interaction.update({ content: "Só quem criou o CTA é o caller.", components: [] });
+    return interaction.update({ content: "Só o caller principal atual pode ocupar a vaga de caller.", components: [] });
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
   await db.upsertSignup({
@@ -2960,6 +3082,8 @@ async function slashRemove(interaction, ev) {
   const vaga = interaction.options.getInteger("vaga");
 
   if (user) {
+    if (String(user.id) === String(ev.caller_id))
+      return interaction.reply({ content: "Esse jogador é o caller principal. Use **Transferir Caller** no CTA antes de removê-lo.", flags: MessageFlags.Ephemeral });
     const removed = await db.deleteSignup(ev.id, user.id);
     if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
     await interaction.reply({ content: `🗑️ ${user} removido do CTA ${ev.time_label}.` });
@@ -2973,6 +3097,8 @@ async function slashRemove(interaction, ev) {
     if (raw == null) return interaction.reply({ content: `A PT${pt} não está aberta nesse CTA.`, flags: MessageFlags.Ephemeral });
     const su = await db.getSignupAtSlot(ev.id, raw, vaga - 1);
     if (!su) return interaction.reply({ content: `Não há ninguém na PT${pt} vaga ${vaga}.`, flags: MessageFlags.Ephemeral });
+    if (String(su.user_id) === String(ev.caller_id))
+      return interaction.reply({ content: "Essa vaga pertence ao caller principal. Use **Transferir Caller** primeiro.", flags: MessageFlags.Ephemeral });
     await db.deleteSignup(ev.id, su.user_id);
     await interaction.reply({ content: `🗑️ **${su.username}** removido da PT${pt} vaga ${vaga} (CTA ${ev.time_label}).` });
     await applyReallocation(ev, interaction.guild, null);
@@ -3003,6 +3129,9 @@ async function onCleanConfirm(interaction) {
   const plClean = db.parsePartyList(ev);
   const rawClean = rawPtFromVisual(plClean, parseInt(pt, 10));
   if (rawClean == null) return interaction.update({ content: `A PT${pt} não está aberta.`, components: [] });
+  const callerSignup = await db.getSignup(eventId, ev.caller_id);
+  if (callerSignup && Number(callerSignup.party_index) === Number(rawClean))
+    return interaction.update({ content: "Esta PT contém o caller principal. Transfira a liderança antes de limpar a PT.", components: [] });
   const n = await db.clearParty(eventId, rawClean);
   await interaction.update({ content: `🧹 PT${pt} limpa — ${n} pessoa(s) removida(s).`, components: [] });
   refreshRoster(ev);
@@ -3032,6 +3161,9 @@ async function slashMoveOrAdd(interaction, ev, isAdd) {
   const target = cmds.resolveTargetSlot(raw, vaga, arma, others);
   if (!target) return interaction.reply({ content: `Não há vaga livre de **${arma || (existing && existing.weapon) || "essa arma"}** na PT${pt}. Use o campo **vaga** pra forçar numa posição específica, ou tente outra PT.`, flags: MessageFlags.Ephemeral });
 
+  if (existing && String(user.id) === String(ev.caller_id)
+      && !(target.partyIndex === db.parsePartyList(ev)[0] && target.slotIndex === 0))
+    return interaction.reply({ content: "O caller principal não pode mudar de vaga sem transferir a liderança. Use **Transferir Caller** primeiro.", flags: MessageFlags.Ephemeral });
   const occupant = await db.getSignupAtSlot(ev.id, target.partyIndex, target.slotIndex);
   const weaponToUse = arma || (existing ? existing.weapon : null);
 
@@ -3077,6 +3209,8 @@ async function onOccupantChoice(interaction) {
   const weapon = decodeURIComponent(wEnc) || "?";
   const occupant = await db.getSignupAtSlot(eventId, target.partyIndex, target.slotIndex);
 
+  if (occupant && String(occupant.user_id) === String(ev.caller_id))
+    return interaction.update({ content: "Essa vaga pertence ao caller principal. Use **Transferir Caller** antes de enviá-lo à reserva ou trocar sua vaga.", components: [] });
   if (choice === "reserva" && occupant) {
     await db.upsertSignup({ eventId, userId: occupant.user_id, username: occupant.username, weapon: occupant.weapon, presence: occupant.presence, partyIndex: null, slotIndex: null, manual: false });
   }

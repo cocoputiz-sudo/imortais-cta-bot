@@ -1,5 +1,6 @@
 // Camada de banco (Postgres)
 const { Pool } = require("pg");
+const { transferPrimaryCaller } = require("./caller-transfer");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -1263,6 +1264,7 @@ module.exports = {
   saveSeasonResults, getLastSeasonResults, getLastEndedSeason,
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignupsForEvents, getSignup, getSecondCaller, upsertSignup, deleteSignup, setStatus, setTimeLabel,
+  transferCaller: (args) => transferPrimaryCaller(pool, args),
   getDueReminders, markReminderSent, markCtaFrozen, markConsolidationWarned,
   addNavigationObjective, setNavigationObjective, getNavigationObjective, getNavigationObjectives,
   removeNavigationObjective, startNavigationCarry, completeNavigationObjective, clearNavigationObjective, clearNavigationObjectives,
