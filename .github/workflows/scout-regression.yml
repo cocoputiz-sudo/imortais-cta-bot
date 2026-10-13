@@ -28,6 +28,8 @@ on:
       - "src/killFame.js"
       - "src/season.js"
       - "src/db.js"
+      - "src/caller-transfer.js"
+      - "test/caller-transfer.js"
       - "src/commands.js"
       - "test/scout-regression.js"
       - "test/season-regression.js"
@@ -96,6 +98,8 @@ jobs:
       - run: npm ci
       - name: node --check em todos os src/*.js e test/*.js
         run: find src test -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: CTA primary caller transfer (duas contas, rollback, PT1, 2 Caller)
+        run: node test/caller-transfer.js
       - name: CTA party audit e colisões
         run: node test/cta-party-audit.js
       - name: Scout regression em PostgreSQL temporário
