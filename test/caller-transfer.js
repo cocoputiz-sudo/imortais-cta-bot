@@ -31,6 +31,7 @@ function database(events = {}, signups = []) {
             if (sql.startsWith("SELECT * FROM cta_signups")) return { rows: structuredClone(stored) };
             if (sql.includes("SET party_index=NULL")) {
               const moved = stored.filter(s => String(s.event_id) === String(p[0])
+                && s.party_index != null && s.slot_index != null
                 && Number(s.party_index) === Number(p[1]) && Number(s.slot_index) === 0
                 && String(s.user_id) !== String(p[2]));
               for (const s of moved) { s.party_index = null; s.slot_index = null; s.manual = false; }
