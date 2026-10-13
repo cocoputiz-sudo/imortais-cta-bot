@@ -3,6 +3,7 @@
 // Transferência do caller PRINCIPAL, distinta da inscrição em armas/PTs.
 // Nunca usa displayName para identificar uma pessoa: somente IDs do Discord.
 const CALLER_WEAPONS = Object.freeze(["GOLEM", "MAÇA DE UMA MÃO", "BRUXO DE UMA MÃO", "MONARCA", "HAND OF JUSTICE"]);
+const { WEAPONS } = require("./comps");
 
 class CallerTransferError extends Error {
   constructor(code, message) {
@@ -24,8 +25,8 @@ function validateCallerTransfer(ev, signups, { guildId, fromUserId, toUserId }) 
   const successor = signups.find(s => String(s.user_id) === String(toUserId));
   if (!successor)
     throw new CallerTransferError("not_signed", "O novo caller precisa estar inscrito neste CTA. Adicione-o com /cta_add antes de transferir.");
-  if (!CALLER_WEAPONS.includes(String(successor.weapon || "").toUpperCase()))
-    throw new CallerTransferError("invalid_weapon", "O novo caller deve ter uma arma de caller (Golem, Monarca, Maça ou Bruxo de uma mão).");
+  if (!WEAPONS[String(successor.weapon || "").toUpperCase()])
+    throw new CallerTransferError("invalid_weapon", "O novo caller precisa ter uma arma válida do catálogo do CTA.");
   const firstParty = String(ev.party_list || "0").split(",").map(Number).find(Number.isInteger);
   if (firstParty == null || firstParty < 0)
     throw new CallerTransferError("missing_party", "PT1 indisponível. Abra a PT1 antes de transferir.");
@@ -85,4 +86,73 @@ async function transferPrimaryCaller(pool, args) {
   }
 }
 
-module.exports = { CALLER_WEAPONS, CallerTransferError, validateCallerTransfer, transferPrimaryCaller };
+/**
+ * O posto de caller é definido por cta_events.caller_id, NÃO pela arma.
+ * A conta do caller principal pode usar qualquer arma cadastrada mantendo
+ * PT1 visual, vaga 1 (inclusive MARTELO DE BATALHA).
+ * Lock no evento protege contra transferências concorrentes.
+ */
+async function assignPrimaryCallerWeapon(pool, args) {
+  const client = await pool.connect();
+  let tx = false;
+  try {
+    await client.query("BEGIN");
+    tx = true;
+    const { rows: events } = await client.query(
+      "SELECT id, guild_id, caller_id, status, party_list FROM cta_events WHERE id=$1 FOR UPDATE",
+      [args.eventId]
+    );
+    const ev = events[0];
+    if (!ev || String(ev.guild_id) !== String(args.guildId))
+      throw new CallerTransferError("not_found", "CTA não encontrado neste servidor.");
+    if (ev.status !== "open")
+      throw new CallerTransferError("closed", "Esse CTA já está encerrado ou cancelado.");
+    if (String(ev.caller_id) !== String(args.userId))
+      throw new CallerTransferError("not_caller", "Este CTA já tem outro caller principal. Atualize a planilha.");
+    const weapon = String(args.weapon || "").toUpperCase();
+    if (!WEAPONS[weapon])
+      throw new CallerTransferError("invalid_weapon", "A arma selecionada não pertence ao catálogo do CTA.");
+
+    const party = String(ev.party_list || "0").split(",")
+      .map(v => Number(v.trim())).find(v => Number.isInteger(v) && v >= 0);
+    if (party == null)
+      throw new CallerTransferError("missing_party", "PT1 indisponível. Abra a PT1 antes de escolher sua arma.");
+
+    const { rows: displaced } = await client.query(
+      `UPDATE cta_signups
+          SET party_index=NULL, slot_index=NULL, manual=false
+        WHERE event_id=$1 AND party_index=$2 AND slot_index=0 AND user_id<>$3
+        RETURNING user_id, username, weapon`,
+      [args.eventId, party, args.userId]
+    );
+
+    const { rows: placed } = await client.query(
+      `INSERT INTO cta_signups
+         (event_id, user_id, username, weapon, presence, party_index, slot_index, ip, manual, second_caller)
+       VALUES ($1,$2,$3,$4,$5,$6,0,$7,true,false)
+       ON CONFLICT (event_id, user_id) DO UPDATE SET
+         weapon=EXCLUDED.weapon,
+         presence=EXCLUDED.presence,
+         party_index=EXCLUDED.party_index,
+         slot_index=EXCLUDED.slot_index,
+         ip=COALESCE(EXCLUDED.ip, cta_signups.ip),
+         manual=true,
+         second_caller=false,
+         created_at=now()
+       RETURNING *`,
+      [args.eventId, args.userId, args.username, weapon, args.presence, party, args.ip ?? null]
+    );
+    if (!placed[0]) throw new CallerTransferError("not_placed", "Não foi possível colocar o caller na PT1.");
+
+    await client.query("COMMIT");
+    tx = false;
+    return { signup: placed[0], displaced, partyIndex: party };
+  } catch (err) {
+    if (tx) await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { CALLER_WEAPONS, CallerTransferError, validateCallerTransfer, transferPrimaryCaller, assignPrimaryCallerWeapon };
