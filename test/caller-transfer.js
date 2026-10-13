@@ -97,13 +97,19 @@ const transfer = d => transferPrimaryCaller(d.pool, {
     [{ status: "closed" }, [old, successor], "closed"],
     [{ guild_id: "other-guild" }, [old, successor], "not_found"],
     [{}, [old], "not_signed"],
-    [{}, [old, { ...successor, weapon: "ARCO LONGO" }], "invalid_weapon"],
+    [{}, [old, { ...successor, weapon: "ARMA_INEXISTENTE" }], "invalid_weapon"],
   ]) {
     const d = database(event, rows);
     await assert.rejects(() => transfer(d), e => e instanceof CallerTransferError && e.code === code);
     assert(d.log.some(x => x.sql === "ROLLBACK"), "must rollback on "+code);
     assert.equal(d.state().ev.caller_id, event.caller_id || "caller-main");
   }
+
+  // Caller principal é um cargo do CTA, não o nome de uma arma.
+  const battle = database({}, [old, alt, { ...successor, weapon: "MARTELO DE BATALHA" }]);
+  const battleDone = await transfer(battle);
+  assert.equal(battleDone.successor.weapon, "MARTELO DE BATALHA");
+  assert.equal(battle.state().ev.caller_id, "successor");
 
   // Identical usernames are legal; control by Discord user ID only.
   validateCallerTransfer(db.state().ev, db.state().signups,
