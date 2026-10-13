@@ -118,13 +118,13 @@ const transfer = d => transferPrimaryCaller(d.pool, {
     });
     try {
       await pool.query(`CREATE TEMP TABLE cta_events
-        (id BIGINT PRIMARY KEY, guild_id TEXT, caller_id TEXT, time_label TEXT, status TEXT, party_list TEXT)`);
+        (id BIGINT PRIMARY KEY, guild_id TEXT, caller_id TEXT, time_label TEXT, thread_id TEXT, status TEXT, party_list TEXT)`);
       await pool.query(`CREATE TEMP TABLE cta_signups
         (event_id BIGINT, user_id TEXT, username TEXT, weapon TEXT, presence TEXT,
          party_index INT, slot_index INT, manual BOOLEAN DEFAULT false,
          second_caller BOOLEAN DEFAULT false, PRIMARY KEY(event_id, user_id))`);
       await pool.query(`INSERT INTO cta_events VALUES
-        (169,'guild1','caller-main','17:20','open','0,1')`);
+        (169,'guild1','caller-main','17:20',NULL,'open','0,1')`);
       await pool.query(`INSERT INTO cta_signups
         (event_id,user_id,username,weapon,party_index,slot_index,manual,second_caller) VALUES
         (169,'caller-main','[IM] BadMack','GOLEM',0,0,true,false),
