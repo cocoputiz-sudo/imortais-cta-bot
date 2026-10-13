@@ -745,8 +745,8 @@ async function onTransferCallerChosen(interaction) {
   const signup = await db.getSignup(eventId, selectedId);
   if (!signup)
     return interaction.update({ content: "O jogador não está inscrito nesse CTA. Inscreva-o primeiro usando /cta_add e tente novamente.", components: [] });
-  if (!CALLER_WEAPONS.includes(String(signup.weapon || "").toUpperCase()))
-    return interaction.update({ content: "Essa inscrição não usa uma arma de caller. Ajuste a arma para Golem, Monarca, Maça ou Bruxo de uma mão antes de transferir.", components: [] });
+  if (!WEAPONS[String(signup.weapon || "").toUpperCase()])
+    return interaction.update({ content: "O sucessor precisa estar inscrito com uma arma válida do catálogo do CTA.", components: [] });
   const confirm = new ButtonBuilder()
     .setCustomId(`xferconfirm|${eventId}|${originId}|${selectedId}`)
     .setLabel("Confirmar transferência").setStyle(ButtonStyle.Danger);
@@ -1067,23 +1067,31 @@ async function onPresence(interaction) {
   if (!ev || ev.status !== "open") return interaction.update({ content: es ? "El CTA no está abierto." : "CTA não está aberto.", components: [] });
 
   const isMainCaller = String(interaction.user.id) === String(ev.caller_id);
-  if (isMainCaller && !CALLER_WEAPONS.includes(String(weapon).toUpperCase()))
-    return interaction.update({ content: "👑 Você é o caller principal. Transfira a liderança antes de assumir uma arma que não seja de caller.", components: [] });
   const pl = db.parsePartyList(ev);
-  const existingCaller = isMainCaller ? await db.getSignup(eventId, interaction.user.id) : null;
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
-  if (isMainCaller && existingCaller && Number(existingCaller.party_index) === Number(pl[0])
-      && Number(existingCaller.slot_index) === 0) {
-    // Trocar apenas a arma do próprio caller não pode desocupar temporariamente a PT1.
-    await db.upsertSignup({
-      eventId, userId: interaction.user.id, username, weapon, presence,
-      partyIndex: pl[0], slotIndex: 0, ip, manual: true, secondCaller: false,
-    });
-    refreshRoster(ev);
-    await interaction.editReply({ content: `👑 Arma de caller atualizada para **${shownWeapon}** · PT1 vaga 1.`, components: [] });
-    await logStaff(interaction.guild, `👑 **${username}** mudou sua arma de caller para **${weapon}** · CTA ${ev.time_label}`);
-    return;
+  if (isMainCaller) {
+    // Liderança é vinculada à conta Discord (caller_id), não à arma. PT1 vaga1 aceita
+    // qualquer arma válida do catálogo, inclusive MARTELO DE BATALHA.
+    try {
+      const placement = await db.assignPrimaryCallerWeapon({
+        eventId, guildId: interaction.guildId, userId: interaction.user.id,
+        username, weapon, presence, ip,
+      });
+      refreshRoster(ev);
+      await interaction.editReply({
+        content: `👑 **Caller principal confirmado!** ${shownWeapon} · **PT1 vaga 1**. Você continua com a liderança do CTA.`,
+        components: [],
+      });
+      await logStaff(interaction.guild,
+        `👑 **${username}** escolheu **${weapon}** como caller principal · PT1 vaga 1 · CTA ${ev.time_label}` +
+        (placement.displaced.length ? ` · Ocupante anterior enviado à reserva: ${placement.displaced.map(d => `<@${d.user_id}>`).join(", ")}` : ""));
+      return;
+    } catch (error) {
+      if (error instanceof CallerTransferError)
+        return interaction.editReply({ content: `⚠️ ${error.message}`, components: [] });
+      throw error;
+    }
   }
 
   await db.upsertSignup({
@@ -1377,12 +1385,18 @@ async function onCallerYes(interaction) {
     return interaction.update({ content: "Só o caller principal atual pode ocupar a vaga de caller.", components: [] });
   await interaction.deferUpdate();
   const username = interaction.member?.displayName || interaction.user.username;
-  await db.upsertSignup({
-    eventId, userId: interaction.user.id, username, weapon, presence: "online",
-    partyIndex: 0, slotIndex: 0,
-  });
+  try {
+    await db.assignPrimaryCallerWeapon({
+      eventId, guildId: interaction.guildId, userId: interaction.user.id,
+      username, weapon, presence: "online", ip: null,
+    });
+  } catch (error) {
+    if (error instanceof CallerTransferError)
+      return interaction.editReply({ content: `⚠️ ${error.message}`, components: [] });
+    throw error;
+  }
   await interaction.editReply({ content: `👑 Você é o caller — **${weapon}** na PT1 vaga 1.`, components: [] });
-  await applyReallocation(ev, interaction.guild, null);
+  refreshRoster(ev);
   await logStaff(interaction.guild, `👑 **${username}** assumiu caller (${weapon}) · CTA ${ev.time_label}`);
 }
 
