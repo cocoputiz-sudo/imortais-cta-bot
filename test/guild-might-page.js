@@ -60,12 +60,12 @@ assert(homologSource.includes('app.get("/",(_req,res)=>res.type("html").send(web
   "homolog must serve real War Room HTML, not its own duplicate page");
 assert(homologSource.includes("isSiteAdmin:true"),
   "homolog's isolated test identity must be site admin");
-assert(page.includes("authState.isSiteAdmin?'<button"),
-  "Might edit button must be gated by site-admin");
+assert(page.includes("authState.canEditGuildMight?'<button"),
+  "Might edit button must be gated by scoped Guild Might editors, not general CTA editors");
 assert(page.includes('id="gm-edit-progress"'),
   "Might edit level / season points button must exist");
 assert(page.includes('id="gm-edit-challenge-progress"'),
-  "Challenge editor remains admin-only and flag-dependent");
+  "Challenge editor remains Guild Might-editor-only and flag-dependent");
 assert(page.includes("gmEditManual(sc.snapshot.layout.code)"),
   "Might button must open the real editing flow with category code");
 assert(page.includes("gmEditManual('GUILD_CHALLENGE')"),
