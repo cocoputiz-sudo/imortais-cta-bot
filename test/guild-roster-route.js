@@ -168,12 +168,18 @@ async function testRouteAccessAndResponses() {
     assert.equal((await requestImport("confirm",adminCookie,{text:roster})).status,400,
       "sem previa, importacao recusada");
     assert.equal((await requestImport("confirm",adminCookie,{
+      text:roster,checksum:preflight.json.checksum,
+      expectedImportedAt:preflight.json.expectedImportedAt,previewedAt:preflight.json.previewedAt,
+      previewToken:"0".repeat(64)})).status,400,"assinatura falsificada e recusada");
+    assert.equal((await requestImport("confirm",adminCookie,{
       text:roster+"\\nALTERADO",checksum:preflight.json.checksum,
-      expectedImportedAt:preflight.json.expectedImportedAt
+      expectedImportedAt:preflight.json.expectedImportedAt,previewedAt:preflight.json.previewedAt,
+      previewToken:preflight.json.previewToken
     })).status,400,"texto diferente da previa e recusado");
     const initialConfirm=await requestImport("confirm",adminCookie,{
       text:roster,checksum:preflight.json.checksum,
-      expectedImportedAt:preflight.json.expectedImportedAt});
+      expectedImportedAt:preflight.json.expectedImportedAt,previewedAt:preflight.json.previewedAt,
+      previewToken:preflight.json.previewToken});
     assert.equal(initialConfirm.status,200);
     assert.equal(initialConfirm.json.saved.contributors,3);
     const saved=await contributorWeekly.rosterLatest(db.pool);
@@ -229,7 +235,8 @@ async function testRouteAccessAndResponses() {
     assert.deepEqual(fourPreview.json.groups["4"],["NovoQuatro"]);
     const added=await requestImport("confirm",adminCookie,{
       text:fourText,checksum:fourPreview.json.checksum,
-      expectedImportedAt:fourPreview.json.expectedImportedAt});
+      expectedImportedAt:fourPreview.json.expectedImportedAt,previewedAt:fourPreview.json.previewedAt,
+      previewToken:fourPreview.json.previewToken});
     assert.equal(added.status,200);
     assert.equal(added.json.saved.contributors,4);
     const afterFourth=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
@@ -317,7 +324,8 @@ async function testRouteAccessAndResponses() {
     assert.match(ignoredPreview.get("Repeated"),/duplicado/);
     const ambiguousSave=await requestImport("confirm",adminCookie,{
       text:ambiguousRoster,checksum:ambiguousPreview.json.checksum,
-      expectedImportedAt:ambiguousPreview.json.expectedImportedAt});
+      expectedImportedAt:ambiguousPreview.json.expectedImportedAt,previewedAt:ambiguousPreview.json.previewedAt,
+      previewToken:ambiguousPreview.json.previewToken});
     assert.equal(ambiguousSave.status,200,"G com conflitos deve ser salvo sem HTTP 500");
     const ambiguousJson=ambiguousSave.json;
     const ignored=new Map(ambiguousJson.saved.ignoredMembers.map(x=>[x.player,x.reason]));
@@ -336,11 +344,13 @@ async function testRouteAccessAndResponses() {
     assert.equal(previewTwo.status,200);
     const sameAgain=await requestImport("confirm",adminCookie,{
       text:ambiguousRoster,checksum:previewOne.json.checksum,
-      expectedImportedAt:previewOne.json.expectedImportedAt});
+      expectedImportedAt:previewOne.json.expectedImportedAt,previewedAt:previewOne.json.previewedAt,
+      previewToken:previewOne.json.previewToken});
     assert.equal(sameAgain.status,200);
     const stalePreview=await requestImport("confirm",adminCookie,{
       text:ambiguousRoster,checksum:previewTwo.json.checksum,
-      expectedImportedAt:previewTwo.json.expectedImportedAt});
+      expectedImportedAt:previewTwo.json.expectedImportedAt,previewedAt:previewTwo.json.previewedAt,
+      previewToken:previewTwo.json.previewToken});
     assert.equal(stalePreview.status,409,"previa anterior nao pode sobrepor importacao mais recente");
     assert.equal(stalePreview.json.error,"roster_changed");
 
