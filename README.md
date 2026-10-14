@@ -4,6 +4,22 @@ Bot de Discord para organização de conteúdo de guerra do Albion Online, feito
 
 Stack: **Node.js + discord.js v14 + PostgreSQL**, hospedado no Railway.
 
+## Pré-requisito obrigatório antes do deploy: Server Members Intent
+
+O CTA Bot usa a intent privilegiada `GatewayIntentBits.GuildMembers` para consultar membros do servidor e validar vínculos de cobrança. **Antes de implantar esta versão**, acesse [Discord Developer Portal](https://discord.com/developers/applications) → aplicação do CTA Bot → **Bot** → **Privileged Gateway Intents** → habilite **Server Members Intent**. Salve a configuração antes de iniciar/reiniciar o processo no Railway. Caso a aplicação exija aprovação do Discord para esta intent, obtenha-a antes do deploy.
+
+Se o Discord recusar intents privilegiadas, o gateway pode encerrar a conexão com o código **4014 (disallowed intents)**. O bot registra uma mensagem explícita com a necessidade de habilitar **Server Members Intent**. Sem esse acesso, não prossiga com o deploy.
+
+### Cobranças privadas da aba Contribuintes
+
+- `/contribuinte_vincular`: usuário solicita vínculo com o personagem do Albion e autoriza as mensagens; staff confirma a correspondência no War Room.
+- `/contribuinte_parar`: usuário revoga o aceite e interrompe notificações.
+- A staff pode **recusar** pedidos pendentes ou **revogar** vínculos confirmados, com motivo e auditoria; um pedido recusado libera o personagem para novo vínculo.
+- Cada competência (segunda a segunda, 00:00 UTC) pode ter **baixas manuais** de valor e justificativa, registrando operador e horário. O saldo aberto da semana é `max(0, devido - depósitos - baixas)`; excedentes não são compensados automaticamente.
+- Cada importação válida do extrato bancário, mesmo com **zero depósitos novos**, atualiza a referência de frescor. Envio de DMs exige extrato importado nas últimas 72 horas.
+- As cobranças por DM ficam **desativadas por padrão**; a staff precisa ativá-las explicitamente e o destinatário precisa ter consentido.
+
+
 ---
 
 ## ⚔️ Funcionalidades
