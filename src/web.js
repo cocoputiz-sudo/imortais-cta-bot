@@ -3520,6 +3520,16 @@ const PAGE = `<!doctype html>
       '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
       '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
     if(authState.isSiteAdmin){
+      html+='<details class="panel" id="cw-g-import" style="margin:14px 0;border:1px solid #46698a" open>'+
+        '<summary style="cursor:pointer;font-weight:bold">📋 Atualizar membros e cargos pelo G (somente administrador)</summary>'+
+        '<div class="note" style="margin:10px 0">No Albion: G → Guild → Copiar lista completa de membros com cargos → Colar abaixo. Esta é a única tela que altera os contribuintes. A análise de Guilda Online não salva cargos.</div>'+
+        '<textarea id="cw-roster-text" rows="7" style="width:100%;resize:vertical" spellcheck="false" placeholder="Character Name    Last Seen    Roles"></textarea>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:9px 0">'+
+        '<button type="button" class="btn primary" id="cw-roster-preview-btn">1. Validar e visualizar cargos</button>'+
+        '<button type="button" class="btn ghost" id="cw-roster-confirm-btn" disabled>2. Confirmar substituição</button>'+
+        '<span class="note" id="cw-roster-status"></span></div>'+
+        '<div id="cw-roster-preview" aria-live="polite" class="note">Nenhuma alteração será feita até você conferir e confirmar a prévia.</div>'+
+        '</details>';
       html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (somente admin)</summary>'+
         '<div class="note">Cole o extrato exportado, com colunas Date, Player, Reason, Amount. Datas em UTC, valores inteiros em prata. Só Deposit positivo é armazenado, por até 45 dias; repetir o arquivo não duplica operações.</div>'+
         '<textarea id="cw-bank-text" rows="5" style="width:100%" placeholder="Date TAB Player TAB Reason TAB Amount"></textarea>'+
@@ -3555,7 +3565,7 @@ const PAGE = `<!doctype html>
           '<td>'+esc(bank.found||0)+' registro(s) · '+contribNumber(bank.creditedCandidate)+'<div class="note">Não conferido</div></td>'+
           '<td>'+contribDelta(might.pve)+' / '+contribDelta(might.gathering)+'</td>'+
           '<td>'+contribStatus(x.overallStatus)+'</td></tr>';
-      }).join(''):'<tr><td colspan="10">Nenhum contribuinte nesta categoria. Atualize o G completo em Guilda Online.</td></tr>')+
+      }).join(''):'<tr><td colspan="10">Nenhum contribuinte nesta categoria. Utilize o importador acima em Contribuintes da Semana.</td></tr>')+
       '</tbody></table></div>';
     setView('view-contributors',html);
     document.getElementById('cw-filter').onchange=function(){contribFilter=this.value;drawContributors();};
@@ -3617,12 +3627,11 @@ const PAGE = `<!doctype html>
     return '<details class="panel" id="guild-roster-card" style="border-color:#40536f">'
       +'<summary style="cursor:pointer;font-weight:800;font-size:16px">📋 Cruzar lista da guilda (jogo) × pings × call</summary>'
       +'<div style="margin-top:14px">'
-      +'<div class="note">No jogo: G &gt; Guild &gt; copiar a lista &gt; colar aqui</div>'
+      +'<div class="note">No jogo: G &gt; Guild &gt; copiar a lista &gt; colar aqui. <b>Somente análise do CTA.</b> Não altera Contribuintes. Para atualizar cargos, utilize a aba Contribuintes da Semana (administradores).</div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-top:12px">'
       +'<label style="min-width:190px"><span class="note">CTA</span><select id="guild-roster-event" class="brief-select" style="width:100%">'+guildRosterCtaOptions()+'</select></label>'
       +'<button type="button" class="btn primary" id="guild-roster-analyze">Analisar</button>'
       +'<span id="guild-roster-status" class="note"></span></div>'
-      +'<button type="button" class="btn ghost" id="guild-roster-save" style="margin:8px 0">Salvar lista de cargos sem CTA aberto</button>'
       +'<textarea id="guild-roster-text" class="brief-input" rows="9" autocomplete="off" spellcheck="false" placeholder="Cole aqui a lista exportada da Guild..." style="width:100%;margin-top:10px;resize:vertical"></textarea>'
       +'<div id="guild-roster-result" style="margin-top:14px"></div>'
       +'</div></details>';
@@ -3714,16 +3723,6 @@ const PAGE = `<!doctype html>
     if(!authState.canEdit) return;
     var btn=document.getElementById('guild-roster-analyze');
     if(!btn) return;
-    var saveBtn=document.getElementById('guild-roster-save');
-    if(saveBtn)saveBtn.onclick=function(){
-      var box=document.getElementById('guild-roster-text'),status=document.getElementById('guild-roster-status');
-      saveBtn.disabled=true;status.textContent='Salvando lista da guilda…';
-      fetch('/api/guild-roster/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:box?box.value:''})})
-       .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(guildRosterErrorText(x.error));return x;});})
-       .then(function(x){status.textContent='Lista salva em '+new Date(x.saved.imported_at).toLocaleString('pt-BR')+' · '+x.saved.member_count+' membros · '+x.saved.contributors+' contribuintes';})
-       .catch(function(e){status.textContent='Erro: '+e.message;})
-       .finally(function(){saveBtn.disabled=false;});
-    };
     btn.onclick=function(){
       var textEl=document.getElementById('guild-roster-text');
       var eventEl=document.getElementById('guild-roster-event');
@@ -3746,7 +3745,7 @@ const PAGE = `<!doctype html>
         }
         result.innerHTML=guildRosterResultHtml(x.data);
         bindGuildRosterResult(x.data);
-        if(x.data.savedRoster) status.textContent='Lista e cargos salvos: '+x.data.savedRoster.contributors+' contribuintes';
+        status.textContent='Análise concluída. Cadastro de contribuintes não alterado.';
       }).catch(function(e){
         result.innerHTML='<div class="empty-note">Erro ao analisar: '+esc(e.message)+'</div>';
       }).finally(function(){
