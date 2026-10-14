@@ -185,6 +185,7 @@ async function testRouteAccessAndResponses() {
     const saved=await contributorWeekly.rosterLatest(db.pool);
     assert.equal(saved.members.length,8,"somente confirmacao grava no PostgreSQL");
     assert.equal(saved.members.find(x=>x.name==="Delta").roles[0],"CONTRIBUINTE 1");
+    assert.equal(saved.import_source,"contributors_confirmed","novo registro possui origem auditavel");
     // Mesmo apos uma importacao, a analise de Guilda Online nao pode sobrescreve-la.
     const differentRoster=roster.replace("CONTRIBUINTE 1","CONTRIBUINTE 4");
     assert.equal((await post(base,editorCookie,{text:differentRoster,eventId:ev.id})).status,200);
@@ -205,6 +206,8 @@ async function testRouteAccessAndResponses() {
     const officerReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
     assert.equal(officerReport.status,200,"officer can see contributor report");
     assert.equal(officerReport.json.roster.memberCount,8);
+    assert.equal(officerReport.json.roster.source,"contributors_confirmed");
+    assert.equal(officerReport.json.roster.importedBy,"staff-test");
     assert.equal(officerReport.json.rows.length,3,"read only contributor roles 1, 2 and 3");
     const adminCfg={minima:{"1":{pve:10,gathering:5},"2":{pve:1,gathering:1},"3":{pve:1,gathering:1}},weekday:0,timeUtc:"18:00",reminderEnabled:false};
     assert.equal((await contributorRead(cookieFor({canEdit:false,canViewContributors:true}),"POST",adminCfg)).status,403,
