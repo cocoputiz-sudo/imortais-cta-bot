@@ -259,7 +259,8 @@ async function getReport(pool,{now=new Date()}={}){
   const byKey=new Map(active.map(x=>[x.player_key,x]));
   report.rows=report.rows.map(row=>cycleService.decorate(row,byKey.get(normalizedPlayer(row.player)),
     bank,cta.byPlayer.get(normalizedPlayer(row.player))||[],now,sweeps));
-  report.attendanceSource={countedEvents:cta.events,matching:"exact_normalized_name"};
+  report.attendanceSource={countedEvents:cta.events,matching:"exact_normalized_name",ambiguousNames:cta.ambiguous||[]};
+  if(cta.ambiguous?.length)report.warnings.push("Há "+cta.ambiguous.length+" nickname(s) ambíguos entre contas Discord; presença não atribuída automaticamente.");
   report.bankSource={note:"Extrato importado indica depositos, nao confirma a finalidade do pagamento."};
   return report;
 }
