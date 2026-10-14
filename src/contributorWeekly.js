@@ -1,6 +1,7 @@
 "use strict";
 
 const guildroster=require("./guildroster");
+const crypto=require("node:crypto");
 const cycleService=require("./contributorCycle");
 const guildRankingAuth=require("./guildRankingAuth");
 const guildSeason=require("./guildSeason");
@@ -67,15 +68,51 @@ async function init(pool){
   }
 }
 
-async function saveRoster(pool,text,actor){
-  const result=guildroster.parseGuildRoster(text);
-  if(!result.ok)throw Error(result.error||"lista_invalida");
-  const members=result.members.map(m=>({name:m.name,key:m.key,roles:m.roles}));
+function parsedRoster(text){
+  const parsed=guildroster.parseGuildRoster(text);
+  if(!parsed.ok)throw Error(parsed.error||"lista_invalida");
+  const members=parsed.members.map(m=>({name:m.name,key:m.key,roles:m.roles}));
+  const inspected=cycleService.inspectRoster(members,{duplicateKeys:parsed.duplicateKeys||[]});
+  return {parsed,members,inspected};
+}
+function rosterVersion(row){return row?.imported_at?new Date(row.imported_at).toISOString():null;}
+function rosterChecksum(text){return crypto.createHash("sha256").update(String(text||"")).digest("hex");}
+async function previewRoster(pool,text){
+  const {parsed,members,inspected}=parsedRoster(text);
+  const current=await rosterLatest(pool);
+  if(current?.member_count>=20&&members.length<Math.ceil(current.member_count*0.75))
+    throw Error("roster_partial");
+  const currentAccepted=cycleService.inspectRoster(current?.members||[],{
+    duplicateKeys:(current?.ignored_members||[]).filter(m=>m.reason==="nome duplicado no G").map(m=>m.player)
+  }).found;
+  const incoming=inspected.found;
+  const groups=Object.fromEntries(["1","2","3","4"].map(tier=>[tier,[...incoming.values()]
+    .filter(m=>m.level===tier).map(m=>m.name).sort((a,b)=>a.localeCompare(b,"pt-BR"))]));
+  const added=[...incoming.values()].filter(m=>!currentAccepted.has(m.key)).map(m=>m.name);
+  const removed=[...currentAccepted.values()].filter(m=>!incoming.has(m.key)&&
+    !inspected.protectedKeys.has(m.key)).map(m=>m.name);
+  const changed=[...incoming.values()].filter(m=>currentAccepted.has(m.key)&&
+    currentAccepted.get(m.key).level!==m.level)
+    .map(m=>({player:m.name,from:currentAccepted.get(m.key).level,to:m.level}));
+  return {checksum:rosterChecksum(text),expectedImportedAt:rosterVersion(current),
+    memberCount:members.length,contributorCount:incoming.size,duplicates:parsed.duplicates,
+    skipped:parsed.skipped.length,ignoredMembers:inspected.ignoredMembers,
+    groups,changes:{added,removed,changed},
+    previous:current?{memberCount:current.member_count,importedAt:current.imported_at,
+      importedBy:current.imported_by}:null};
+}
+async function saveRoster(pool,text,actor,{checksum,expectedImportedAt}={}){
+  // Salvar somente depois de uma previa conferida. Validar versao dentro da transacao.
+  if(typeof checksum!=="string"||! /^[a-f0-9]{64}$/.test(checksum)||
+    checksum!==rosterChecksum(text)||expectedImportedAt===undefined)
+    throw Error("preview_required");
+  const {parsed:result,members}=parsedRoster(text);
   const client=await pool.connect();
   try{
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(77831443)");
-    const old=await client.query("SELECT member_count FROM contributor_roster_latest WHERE id=1");
+    const old=await client.query("SELECT member_count,imported_at FROM contributor_roster_latest WHERE id=1 FOR UPDATE");
+    if(rosterVersion(old.rows[0])!==expectedImportedAt)throw Error("roster_changed");
     const reconciliation=await cycleService.reconcile(client,members,new Date(),old.rows[0]?.member_count||0,
       {duplicateKeys:result.duplicateKeys||[]});
     const r=await client.query(
@@ -343,5 +380,5 @@ async function tick(pool,client,{channelId,now=new Date()}={}){
     return {summaryPosted:true};
   }finally{ticking=false;}
 }
-module.exports={init,saveRoster,rosterLatest,getSettings,saveSettings,validateSettings,
+module.exports={init,previewRoster,saveRoster,rosterLatest,getSettings,saveSettings,validateSettings,
   contributorLevel,completeSweeps,selectPair,memberDelta,computeReport,getReport,scheduledForWeek,tick};
