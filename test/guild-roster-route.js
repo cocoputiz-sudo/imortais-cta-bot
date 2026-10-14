@@ -306,6 +306,9 @@ async function testRouteAccessAndResponses() {
     assert.equal(fourth.obligations.paymentRequired,10000000);
     assert.equal(fourth.obligations.ctaRequired,0);
     assert.equal(fourth.assignmentSource,"observed");
+    assert.equal(fourth.cycle.start,new Date(fourth.cycle.start).toISOString());
+    assert.equal(new Date(fourth.cycle.start).getUTCDay(),1,"todos usam segunda UTC");
+    assert.equal(new Date(fourth.cycle.start).getUTCHours(),0);
     // Apenas a administracao pode confirmar data anterior e importar extrato.
     const assignmentUrl=base+"/api/contributors/assignment";
     const assignmentBody={player:"NovoQuatro",assignedAt:new Date(Date.now()-2*86400000).toISOString()};
@@ -330,7 +333,10 @@ async function testRouteAccessAndResponses() {
     const updatedTierFour=afterBank.json.rows.find(x=>x.player==="NovoQuatro");
     assert.equal(updatedTierFour.assignmentSource,"confirmed");
     assert.equal(updatedTierFour.payment.creditedCandidate,10000000);
-    assert.equal(updatedTierFour.payment.verification,"PENDENTE DE CONFERÊNCIA");
+    assert.match(updatedTierFour.payment.verification,/FINALIDADE A CONFERIR/);
+    assert.equal(updatedTierFour.payment.status,"PAGO","depósito deve quitar competência atual");
+    assert(afterBank.json.paymentWeek&&afterBank.json.paymentSummary,
+      "relatorio deve trazer competencia e totais financeiros");
     // O G incompleto nao deve excluir a guilda: transacao e contagem conservadora.
     const dbRoster=await contributorWeekly.rosterLatest(db.pool);
     assert.equal(dbRoster.member_count,9);
