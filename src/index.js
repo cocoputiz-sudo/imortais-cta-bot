@@ -3635,6 +3635,13 @@ async function checkNavigationPlans() {
 }
 
 // ======================  BOOT  =============================================
+// Gateway 4014 sinaliza intents privilegiadas desautorizadas, mesmo se login() já resolveu.
+client.on(Events.ShardDisconnect,(event,shardId)=>{
+  if(event?.code===4014)
+    console.error("[DISCORD BOOT] Disallowed intents (4014) no shard "+shardId+
+      ": habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
+      "ANTES do deploy e reinicie o CTA Bot.");
+});
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Online como ${c.user.tag}`);
   setInterval(checkReminders, 60 * 1000);
@@ -3987,7 +3994,14 @@ const webActions = {
     await contributorBilling.init(db.pool);
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
-    await client.login(CFG.token);
+    try{await client.login(CFG.token);}
+    catch(e){
+      if(/disallowed.?intents|4014/i.test(String(e?.message||e))||e?.code===4014)
+        console.error("[DISCORD BOOT] Login bloqueado por disallowed intents (4014): "+
+          "habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
+          "antes do deploy. O código solicita GatewayIntentBits.GuildMembers.");
+      throw e;
+    }
     runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);
