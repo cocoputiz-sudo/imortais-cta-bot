@@ -10,6 +10,7 @@ process.env.PORT = String(39000 + (process.pid % 1000));
 const db = require("../src/db");
 const telemetry = require("../src/telemetry");
 const contributorWeekly = require("../src/contributorWeekly");
+const contributorCycle = require("../src/contributorCycle");
 const web = require("../src/web");
 
 const G = process.env.GUILD_ID || "guild-test";
@@ -269,6 +270,66 @@ async function testRouteAccessAndResponses() {
     const rosterData = await rosterResponse.json();
     assert.equal(rosterData.parties[0].slots[7].weapon, "PÚTRIDO");
     ok("troca POSTULENTO -> PÚTRIDO: verifica permissao, valida, persiste e devolve roster atualizado");
+
+    // Um contribuinte ambiguo nao deve bloquear a importacao de toda a lista.
+    const ambiguousRoster=fourText+
+      '\n"BadTier"\t"Online"\t"CONTRIBUINTE 1;CONTRIBUINTE 2"'+
+      '\n"Repeated"\t"Online"\t"CONTRIBUINTE 3"'+
+      '\n"[IM] repeated"\t"Online"\t"CONTRIBUINTE 3"';
+    const ambiguousSave=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
+      body:JSON.stringify({text:ambiguousRoster})
+    });
+    assert.equal(ambiguousSave.status,200,"G com conflitos deve ser salvo sem HTTP 500");
+    const ambiguousJson=await ambiguousSave.json();
+    const ignored=new Map(ambiguousJson.saved.ignoredMembers.map(x=>[x.player,x.reason]));
+    assert.match(ignored.get("BadTier"),/conflitantes/);
+    assert.match(ignored.get("Repeated"),/duplicado/);
+    const conflictReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(conflictReport.status,200);
+    assert.equal(conflictReport.json.rows.some(x=>x.player==="BadTier"),false);
+    assert.equal(conflictReport.json.rows.some(x=>x.player==="Repeated"),false);
+    assert(conflictReport.json.warnings.some(x=>x.includes("BadTier")));
+    assert(conflictReport.json.warnings.some(x=>x.includes("Repeated")));
+    ok("Conflitos e nomes duplicados sao ignorados individualmente e avisados");
+
+    // O bootstrap deve suportar um roster previamente salvo que contem cargos conflitantes.
+    await db.pool.query("DELETE FROM contributor_active_assignments");
+    await assert.doesNotReject(()=>contributorWeekly.init(db.pool));
+    const afterBootstrap=await contributorCycle.assignments(db.pool);
+    assert(afterBootstrap.some(x=>x.player_name==="NovoQuatro"));
+    assert(!afterBootstrap.some(x=>x.player_name==="BadTier"||x.player_name==="Repeated"));
+    // Mesmo com uma falha inesperada no bootstrap, o servico nao deve cair.
+    const originalBootstrap=contributorCycle.bootstrap, originalConsoleError=console.error;
+    const bootstrapErrors=[];
+    contributorCycle.bootstrap=async()=>{throw Error("bootstrap simulated failure");};
+    console.error=(...args)=>bootstrapErrors.push(args.map(String).join(" "));
+    try{await assert.doesNotReject(()=>contributorWeekly.init(db.pool));}
+    finally{contributorCycle.bootstrap=originalBootstrap;console.error=originalConsoleError;}
+    assert(bootstrapErrors.some(x=>x.includes("bootstrap simulated failure")));
+    ok("Bootstrap tolera roster conflitante e registra falha inesperada sem interromper inicializacao");
+
+    // Uma fonte auxiliar com erro nao pode transformar /api/contributors/weekly em HTTP 500.
+    const healthyReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(healthyReport.status,200);
+    for(const [source,warning] of [
+      ["attendanceByPlayer","Attendance indisponível nesta consulta"],
+      ["assignments","Vínculos de contribuintes indisponíveis nesta consulta"],
+      ["deposits","Depósitos indisponíveis nesta consulta"]
+    ]){
+      const original=contributorCycle[source];
+      contributorCycle[source]=async()=>{throw Error("test: "+source+" unavailable");};
+      try{
+        const response=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+        assert.equal(response.status,200,source+" nao deve causar erro HTTP");
+        assert(response.json.warnings.includes(warning),source+" deve sinalizar indisponibilidade");
+        assert.deepEqual(response.json.rows.map(x=>[x.player,x.level,x.status,x.pveMight,x.gatheringMight]),
+          healthyReport.json.rows.map(x=>[x.player,x.level,x.status,x.pveMight,x.gatheringMight]),
+          "Classificacao Might permanece intacta sem "+source);
+      }finally{contributorCycle[source]=original;}
+    }
+    ok("Attendance, assignments e deposits com falha: GET permanece HTTP 200 e preserva Might");
+
 
   } finally {
     await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
