@@ -25,7 +25,7 @@ services:
         max-size: "5m"
         max-file: "2"
   app:
-    image: ghcr.io/cocoputiz-sudo/imortais-cta-bot:mackna-btv-arm64
+    image: ghcr.io/cocoputiz-sudo/imortais-cta-bot:mackna-btv-pilot
     platform: linux/arm64
     restart: unless-stopped
     depends_on:
