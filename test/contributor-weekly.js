@@ -53,7 +53,7 @@ const observed=cycles.cycleAt("2026-10-01T12:00:00Z",new Date("2026-10-10T12:00:
 assert.equal(observed.start,"2026-10-08T12:00:00.000Z");
 assert.equal(observed.end,"2026-10-15T12:00:00.000Z");
 assert.equal(cycles.cycleAt("2026-10-15T12:00:00Z",new Date("2026-10-10T12:00:00Z")),null);
-const bank=cycles.parseBankCsv('Date\\tPlayer\\tReason\\tAmount\\n2026-10-07 21:10:59\\tA\\tDeposit\\t4000000\\n2026-10-07 20:00:00\\tB\\tWithdrawal\\t-1000000');
+const bank=cycles.parseBankCsv('Date\tPlayer\tReason\tAmount\n2026-10-07 21:10:59\tA\tDeposit\t4000000\n2026-10-07 20:00:00\tB\tWithdrawal\t-1000000');
 assert.equal(bank.rows.length,1);
 assert.equal(bank.rows[0].amount,4000000);
 assert.equal(bank.skipped,1);
