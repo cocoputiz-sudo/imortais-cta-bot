@@ -3526,8 +3526,9 @@ const PAGE = `<!doctype html>
       '<div class="stat a"><div class="k">ABAIXO (inclui sem evolução)</div><div class="v">'+fmtS(count.below||0)+'</div></div>'+
       '<div class="stat b"><div class="k">SEM DADOS</div><div class="v">'+fmtS(count.noData||0)+'</div></div>'+
       '</div>';
-    html+='<div class="panel"><b>Última lista salva em Guilda Online:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
-      '<div class="note">Cargos CONTRIBUINTE 1 a 4. Vigência começa na primeira observação da tag, salvo confirmação administrativa de data. Saída da guilda elimina o vínculo ativo. Uma lista parcial é recusada.</div>'+
+    html+='<div class="panel"><b>Última lista de membros cadastrada:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
+      '<div class="note">Origem: '+(d.roster?(d.roster.source==='contributors_confirmed'?'importação confirmada nesta aba':'cadastro anterior da aba Guilda Online'):'sem importação')+
+      ' · Registrado por: '+esc(d.roster&&d.roster.importedBy||'não identificado')+'. Cargos CONTRIBUINTE 1 a 4. Vigência começa na primeira observação, salvo confirmação administrativa. Saída da guilda elimina o vínculo após importar G atualizado. Uma lista parcial é recusada.</div>'+
       '<p><b>PvE:</b> '+contribSummaryDate(p)+'</p><p><b>Coleta:</b> '+contribSummaryDate(g)+'</p>'+
       '<div class="note">Might histórico é referência anterior, não cumprimento do ciclo. Might do ciclo usa somente leituras posteriores à atribuição; sem baseline = SEM DADOS. Attendance usa correspondência pelo nome Discord/Albion, e pode exigir revisão de apelidos. Depósitos são indícios, não quitação.</div></div>';
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">'+
