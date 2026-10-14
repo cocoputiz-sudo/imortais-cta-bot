@@ -3508,35 +3508,88 @@ const PAGE = `<!doctype html>
     if(/^\\s*[=+@-]/.test(v))v="'"+v;
     return q+v.replaceAll(q,q+q)+q;
   }
+  function contribShortDate(value){
+    if(!value)return '—';
+    var date=new Date(value);
+    if(!Number.isFinite(date.getTime()))return '—';
+    return String(date.getUTCDate()).padStart(2,'0')+'/'+String(date.getUTCMonth()+1).padStart(2,'0');
+  }
+  function contribWeekLabel(week){
+    return week?contribShortDate(week.start)+' a '+contribShortDate(week.end):'—';
+  }
+  function contribSilver(value){
+    var n=Number(value)||0;
+    return (n/1000000).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:2})+'M';
+  }
+  function contribPaymentLabel(payment){
+    if(!payment||payment.status==='SEM DADOS')return 'Dados indisponíveis';
+    if(!payment.amount)return 'Não pago';
+    if(payment.amount>=payment.due){
+      return contribSilver(payment.amount)+' em '+contribShortDate(payment.paidAt||payment.lastDepositAt)+
+        (payment.excess?' · excedente '+contribSilver(payment.excess):'');
+    }
+    return contribSilver(payment.amount)+' de '+contribSilver(payment.due);
+  }
+  function contribSituation(payment){
+    if(!payment)return 'SEM DADOS';
+    if(payment.status==='PAGO')return 'ATIVO ATÉ '+contribShortDate(payment.validUntil);
+    if(payment.status==='PAGO COM ATRASO')return 'PAGO COM ATRASO · até '+contribShortDate(payment.validUntil);
+    return payment.status||'SEM DADOS';
+  }
+  function contribObligation(row){
+    var c=row.attendance||{},o=row.obligations||{},m=row.cycleMight||{};
+    if(row.level==='4')return 'Isento de CTA';
+    if(row.level==='2')return 'Might: '+(m.meetsMight===true?'meta atingida':m.meetsMight===false?'abaixo da meta':'sem dados')+
+      ' · PvE '+contribDelta(m.pve)+' / Coleta '+contribDelta(m.gathering);
+    return 'CTA '+(c.count==null?'sem dados':c.count)+'/'+(o.ctaRequired||0);
+  }
+  function contribPriorLabel(payment){
+    if(!payment)return 'Sem dados';
+    if(payment.status==='PAGO'||payment.status==='PAGO COM ATRASO')return payment.status;
+    if(payment.status==='NÃO APLICÁVEL')return 'Não era contribuinte confirmado';
+    if(payment.status==='PARCIAL')return 'PARCIAL · '+contribSilver(payment.amount)+' de '+contribSilver(payment.due);
+    return payment.status||'Sem dados';
+  }
+  function contribExportRows(report){
+    var week=contribWeekLabel(report.paymentWeek);
+    var members=(report.rows||[]).map(function(x){
+      return [x.player,'Contribuinte '+x.level,week,contribPaymentLabel(x.payment),
+        contribSituation(x.payment)+' | Semana anterior: '+contribPriorLabel(x.previousPayment),
+        contribObligation(x)];
+    });
+    var unlinked=(report.unlinkedDeposits||[]).map(function(x){
+      return [x.player,'Não vinculado',week,contribSilver(x.amount)+' em '+contribShortDate(x.lastDepositAt),
+        'NÃO VINCULADO',x.reason+(x.suggestion?' · Sugestão: '+x.suggestion:'')];
+    });
+    return {headers:['Jogador','Categoria','Semana','Pagamento','Situação','Obrigação'],members,unlinked};
+  }
   function exportContributors(format){
     var d=contributorReport;
     if(!d)return;
-    var header=['Jogador','Cargo','Primeira observação UTC','Atribuição UTC','Origem da data','Ciclo início UTC','Ciclo fim UTC','CTAs válidas','Meta CTA','Sábado/Domingo','Depósitos identificados','Devido prata','Prata localizada','Conferência pagamento','Might PvE no ciclo','Might Coleta no ciclo','Situação obrigações','Might histórico status','PvE ganho histórico','Coleta ganho histórico','Lista salva UTC','Desatualizado'];
-    var dates=d.categories||{},p=dates.PVE||{},g=dates.GATHERING||{};
-    var records=(d.rows||[]).map(function(x){
-      return [x.player,'CONTRIBUINTE '+x.level,x.firstSeenAt,x.assignedAt,x.assignmentSource,
-        x.cycle&&x.cycle.start,x.cycle&&x.cycle.end,
-        x.attendance&&x.attendance.count,x.obligations&&x.obligations.ctaRequired,
-        x.attendance&&x.attendance.weekendDays.map(function(z){return z[0]+':'+z[1];}).join(' | '),
-        x.payment&&x.payment.found,x.obligations&&x.obligations.paymentRequired,
-        x.payment&&x.payment.creditedCandidate,x.payment&&x.payment.verification,
-        x.cycleMight&&x.cycleMight.pve,x.cycleMight&&x.cycleMight.gathering,
-        x.overallStatus,x.status,x.pveMight,x.gatheringMight,
-        d.roster&&d.roster.importedAt,d.stale?'SIM':'NÃO'];
-    });
+    var data=contribExportRows(d),all=data.members.concat(data.unlinked);
     if(format==='csv'){
-      var lines=[header.map(contribCsvCell).join(';')].concat(records.map(function(r){return r.map(contribCsvCell).join(';');}));
-      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+lines.join('\\r\\n'),'text/csv;charset=utf-8');
+      var records=[data.headers.map(contribCsvCell).join(';')].concat(all.map(function(r){
+        return r.map(contribCsvCell).join(';');
+      }));
+      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+records.join('\r\n'),
+        'text/csv;charset=utf-8');
       return;
     }
-    var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Contribuintes semana</title><style>body{font:14px Arial;margin:24px;color:#20232a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.warning{background:#ffeded;padding:16px;color:#8c1414;font-weight:bold}</style></head><body>';
-    html+='<h1>IMORTAIS · Contribuintes – semana</h1><p>Gerado: '+esc(contribDisplayDate(d.generatedAt))+'</p>';
-    if(d.stale)html+='<div class="warning">DESATUALIZADO: a última varredura integral de PvE ou Coleta tem mais de 7 dias ou não existe. Não tratar estes valores como atuais.</div>';
-    html+='<p>Might histórico: Ativos: '+fmtS(d.counts.active)+' · Abaixo: '+fmtS(d.counts.below)+' · Isentos: '+fmtS(d.counts.exempt||0)+' · Sem dados: '+fmtS(d.counts.noData)+'</p>';
-    html+='<p>PvE: '+contribSummaryDate(p)+'</p><p>Coleta: '+contribSummaryDate(g)+'</p>';
-    html+='<table><thead><tr>'+header.map(function(x){return '<th>'+esc(x)+'</th>';}).join('')+'</tr></thead><tbody>';
-    html+=records.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+esc(x==null?'SEM DADOS':x)+'</td>';}).join('')+'</tr>';}).join('');
-    html+='</tbody></table><p>Vigência estimada a partir da primeira observação do cargo, salvo confirmação manual. Depósitos não equivalem a pagamentos confirmados. CTAs exigem correspondência exata do nome normalizado; Might do ciclo usa apenas varreduras após o início. Might histórico: somente varreduras integrais separadas por pelo menos 6 dias.</p></body></html>';
+    var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Contribuintes</title>'+
+      '<style>body{font:14px Arial;margin:24px;color:#20232a}table{border-collapse:collapse;width:100%}'+
+      'th,td{border:1px solid #bbb;padding:8px;text-align:left;vertical-align:top}th{background:#eee}'+
+      '.note{font-size:12px;color:#555}</style></head><body>';
+    html+='<h1>IMORTAIS · Contribuintes</h1><p>Semana '+esc(contribWeekLabel(d.paymentWeek))+
+      ' · Vencimento até quarta-feira 23:59 UTC. Quitações na quinta a domingo são pagas com atraso.</p>';
+    html+='<table><thead><tr>'+data.headers.map(function(x){return '<th>'+esc(x)+'</th>';}).join('')+
+      '</tr></thead><tbody>';
+    html+=data.members.map(function(row){return '<tr>'+row.map(function(x){return '<td>'+esc(x)+'</td>';}).join('')+'</tr>';}).join('');
+    html+='</tbody></table><h2>Depósitos não vinculados ('+data.unlinked.length+')</h2>';
+    html+='<table><thead><tr>'+data.headers.map(function(x){return '<th>'+esc(x)+'</th>';}).join('')+
+      '</tr></thead><tbody>'+data.unlinked.map(function(row){return '<tr>'+row.map(function(x){
+        return '<td>'+esc(x)+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>';
+    html+='<p class="note">Correspondência somente por nome normalizado, sem vínculo automático para nomes sugeridos. '+ 
+      'Excedentes não são transferidos. A ausência no G não comprova saída da guilda.</p></body></html>';
     gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
   }
   function renderContributors(){
