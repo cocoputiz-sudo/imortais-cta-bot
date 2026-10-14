@@ -46,11 +46,7 @@ async function init(pool){
 }
 // Chamar dentro da transacao que salva contributor_roster_latest. Impede
 // lista parcial de excluir centenas de membros por engano.
-async function reconcile(client,members,observedAt,previousCount,{duplicateKeys=[]}={}){
-  if(previousCount>=20 && members.length<Math.ceil(previousCount*0.75))
-    throw Error("roster_partial");
-  const now=new Date(observedAt);
-  if(!Number.isFinite(now.getTime()))throw Error("data_roster_invalida");
+function inspectRoster(members,{duplicateKeys=[]}={}){
   const found=new Map(),ignoredMembers=[],protectedKeys=new Set();
   // O parser do G pode ter deduplicado as linhas antes desta chamada.
   const duplicated=new Set(duplicateKeys.map(keyOf).filter(Boolean)),counts=new Map();
@@ -79,6 +75,14 @@ async function reconcile(client,members,observedAt,previousCount,{duplicateKeys=
     const level=tierOf(member.roles);
     if(level)found.set(key,{key,name:member.name,level});
   }
+  return {found,ignoredMembers:ignoredMembers.map(({player,reason})=>({player,reason})),protectedKeys};
+}
+async function reconcile(client,members,observedAt,previousCount,options={}){
+  if(previousCount>=20 && members.length<Math.ceil(previousCount*0.75))
+    throw Error("roster_partial");
+  const now=new Date(observedAt);
+  if(!Number.isFinite(now.getTime()))throw Error("data_roster_invalida");
+  const {found,ignoredMembers,protectedKeys}=inspectRoster(members,options);
   for(const member of found.values()){
     await client.query(
       "INSERT INTO contributor_active_assignments"+
@@ -96,7 +100,7 @@ async function reconcile(client,members,observedAt,previousCount,{duplicateKeys=
   // Quem saiu da guilda ou perdeu a tag nao continua como contribuinte ativo.
   await client.query("DELETE FROM contributor_active_assignments WHERE NOT(player_key=ANY($1::text[]))",[[...found.keys(),...protectedKeys]]);
   await client.query("DELETE FROM contributor_bank_deposits WHERE paid_at<now()-interval '45 days'");
-  return {contributors:found.size,ignoredMembers:ignoredMembers.map(({player,reason})=>({player,reason}))};
+  return {contributors:found.size,ignoredMembers};
 }
 async function bootstrap(pool,roster){
   if(!roster?.members?.length)return;
@@ -269,5 +273,5 @@ function withinCycleMight(sweeps,code,key,cycle,now){
   const first=eligible[0].members.get(key),last=eligible[eligible.length-1].members.get(key);
   return last>=first?last-first:null;
 }
-module.exports={DAY_MS,WEEK_MS,DUES,CTA_MINIMA,tierOf,cycleAt,init,reconcile,bootstrap,assignments,
+module.exports={DAY_MS,WEEK_MS,DUES,CTA_MINIMA,tierOf,cycleAt,init,inspectRoster,reconcile,bootstrap,assignments,
   confirmAssignment,parseBankCsv,importBank,deposits,attendanceByPlayer,decorate,withinCycleMight};

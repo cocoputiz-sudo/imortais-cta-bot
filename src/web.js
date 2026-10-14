@@ -231,37 +231,61 @@ function startWebServer(client, opts) {
     try {
       const body = req.body || {};
       const result = await guildroster.analyze(db, { text: body.text, eventId: body.eventId });
-      if (result && result.ok) {
-        result.savedRoster=await contributorWeekly.saveRoster(db.pool,body.text,sess.id);
-        return res.json(result);
-      }
+      if(result&&result.ok)return res.json(result); // Analise nao atualiza o cadastro de contribuintes.
 
       const error = result && result.error ? String(result.error) : "server";
       if (["empty", "unknown_format", "too_large", "too_many_lines", "no_members"].includes(error)) {
         return res.status(400).json({ error });
       }
       if (error === "event_not_found") return res.status(404).json({ error });
-      if (error === "roster_partial") return res.status(409).json({ error });
       return res.status(500).json({ error });
     } catch (e) {
       const error=String(e?.message||"server");
-      if(error==="roster_partial")return res.status(409).json({error});
-      if(error==="cargos_contribuinte_conflitantes")return res.status(400).json({error});
       console.error("/api/guild-roster/analyze:", e?.message || e);
       return res.status(500).json({ error: "server" });
     }
   });
 
-  // Persistent guild paste can also be saved when there is no open CTA.
-  app.post("/api/guild-roster/save", async (req,res)=>{
-    const sess=requireEditor(req,res);if(!sess)return;
+  // Endpoint antigo mantido sem escrita para evitar importacoes involuntarias por clientes antigos.
+  app.post("/api/guild-roster/save",(req,res)=>{
+    if(!requireEditor(req,res))return;
+    res.status(410).json({error:"importacao_movida_para_contribuintes"});
+  });
+  function contributorRosterError(res,e){
+    const error=String(e.message||"server");
+    if(error==="roster_partial"||error==="roster_changed")return res.status(409).json({error});
+    if(["preview_required","empty","unknown_format","too_large","too_many_lines","no_members"].includes(error))
+      return res.status(400).json({error});
+    console.error("[contributor roster import]",e);
+    return res.status(500).json({error:"server"});
+  }
+  function contributorPreviewSignature(adminId,checksum,expectedImportedAt,previewedAt){
+    return crypto.createHmac("sha256",SESSION_SECRET)
+      .update(JSON.stringify([String(adminId),checksum,expectedImportedAt,previewedAt])).digest("hex");
+  }
+  app.post("/api/contributors/roster/preview",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
     try{
-      const saved=await contributorWeekly.saveRoster(db.pool,req.body?.text,sess.id);
-      return res.json({ok:true,saved});
-    }catch(e){
-      const error=String(e.message||"server");
-      return res.status(error==="roster_partial"?409:["empty","unknown_format","too_large","too_many_lines","no_members","cargos_contribuinte_conflitantes"].includes(error)?400:500).json({error});
-    }
+      const preview=await contributorWeekly.previewRoster(db.pool,req.body?.text);
+      const previewedAt=Date.now();
+      res.json({...preview,previewedAt,previewToken:contributorPreviewSignature(
+        sess.id,preview.checksum,preview.expectedImportedAt,previewedAt)});
+    }catch(e){contributorRosterError(res,e);}
+  });
+  app.post("/api/contributors/roster/confirm",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    try{
+      const body=req.body||{},issued=body.previewedAt;
+      if(!Number.isSafeInteger(issued)||issued>Date.now()||Date.now()-issued>10*60000||
+         !/^[a-f0-9]{64}$/.test(String(body.previewToken||"")))
+        return res.status(400).json({error:"preview_required"});
+      const expected=contributorPreviewSignature(sess.id,body.checksum,body.expectedImportedAt,issued);
+      if(!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(body.previewToken)))
+        return res.status(400).json({error:"preview_required"});
+      const saved=await contributorWeekly.saveRoster(db.pool,body.text,sess.id,{
+        checksum:body.checksum,expectedImportedAt:body.expectedImportedAt});
+      res.json({ok:true,saved});
+    }catch(e){contributorRosterError(res,e);}
   });
   // Officers may view; thresholds and weekly reminder may only be changed by admins.
   app.get("/api/contributors/weekly",async(req,res)=>{
@@ -3430,7 +3454,7 @@ const PAGE = `<!doctype html>
   }
 
 
-  var contributorReport=null,contributorSettings=null,contribFilter='todos';
+  var contributorReport=null,contributorSettings=null,contribFilter='todos',contribRosterDraft='';
   function contribNumber(x){return x==null?'SEM DADOS':fmtS(x);}
   function contribDelta(x){return x==null?'—':(Number(x)>0?'+':'')+fmtS(x);}
   function contribDisplayDate(x){return x?gmDate(x):'sem varredura integral';}
@@ -3502,8 +3526,9 @@ const PAGE = `<!doctype html>
       '<div class="stat a"><div class="k">ABAIXO (inclui sem evolução)</div><div class="v">'+fmtS(count.below||0)+'</div></div>'+
       '<div class="stat b"><div class="k">SEM DADOS</div><div class="v">'+fmtS(count.noData||0)+'</div></div>'+
       '</div>';
-    html+='<div class="panel"><b>Última lista salva em Guilda Online:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
-      '<div class="note">Cargos CONTRIBUINTE 1 a 4. Vigência começa na primeira observação da tag, salvo confirmação administrativa de data. Saída da guilda elimina o vínculo ativo. Uma lista parcial é recusada.</div>'+
+    html+='<div class="panel"><b>Última lista de membros cadastrada:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
+      '<div class="note">Origem: '+(d.roster?(d.roster.source==='contributors_confirmed'?'importação confirmada nesta aba':'cadastro anterior da aba Guilda Online'):'sem importação')+
+      ' · Registrado por: '+esc(d.roster&&d.roster.importedBy||'não identificado')+'. Cargos CONTRIBUINTE 1 a 4. Vigência começa na primeira observação, salvo confirmação administrativa. Saída da guilda elimina o vínculo após importar G atualizado. Uma lista parcial é recusada.</div>'+
       '<p><b>PvE:</b> '+contribSummaryDate(p)+'</p><p><b>Coleta:</b> '+contribSummaryDate(g)+'</p>'+
       '<div class="note">Might histórico é referência anterior, não cumprimento do ciclo. Might do ciclo usa somente leituras posteriores à atribuição; sem baseline = SEM DADOS. Attendance usa correspondência pelo nome Discord/Albion, e pode exigir revisão de apelidos. Depósitos são indícios, não quitação.</div></div>';
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">'+
@@ -3511,6 +3536,16 @@ const PAGE = `<!doctype html>
       '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
       '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
     if(authState.isSiteAdmin){
+      html+='<details class="panel" id="cw-g-import" style="margin:14px 0;border:1px solid #46698a" open>'+
+        '<summary style="cursor:pointer;font-weight:bold">📋 Atualizar membros e cargos pelo G (somente administrador)</summary>'+
+        '<div class="note" style="margin:10px 0">No Albion: G → Guild → Copiar lista completa de membros com cargos → Colar abaixo. Esta é a única tela que altera os contribuintes. A análise de Guilda Online não salva cargos.</div>'+
+        '<textarea id="cw-roster-text" rows="7" style="width:100%;resize:vertical" spellcheck="false" placeholder="Character Name    Last Seen    Roles"></textarea>'+
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:9px 0">'+
+        '<button type="button" class="btn primary" id="cw-roster-preview-btn">1. Validar e visualizar cargos</button>'+
+        '<button type="button" class="btn ghost" id="cw-roster-confirm-btn" disabled>2. Confirmar substituição</button>'+
+        '<span class="note" id="cw-roster-status"></span></div>'+
+        '<div id="cw-roster-preview" aria-live="polite" class="note">Nenhuma alteração será feita até você conferir e confirmar a prévia.</div>'+
+        '</details>';
       html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (somente admin)</summary>'+
         '<div class="note">Cole o extrato exportado, com colunas Date, Player, Reason, Amount. Datas em UTC, valores inteiros em prata. Só Deposit positivo é armazenado, por até 45 dias; repetir o arquivo não duplica operações.</div>'+
         '<textarea id="cw-bank-text" rows="5" style="width:100%" placeholder="Date TAB Player TAB Reason TAB Amount"></textarea>'+
@@ -3546,7 +3581,7 @@ const PAGE = `<!doctype html>
           '<td>'+esc(bank.found||0)+' registro(s) · '+contribNumber(bank.creditedCandidate)+'<div class="note">Não conferido</div></td>'+
           '<td>'+contribDelta(might.pve)+' / '+contribDelta(might.gathering)+'</td>'+
           '<td>'+contribStatus(x.overallStatus)+'</td></tr>';
-      }).join(''):'<tr><td colspan="10">Nenhum contribuinte nesta categoria. Atualize o G completo em Guilda Online.</td></tr>')+
+      }).join(''):'<tr><td colspan="10">Nenhum contribuinte nesta categoria. Utilize o importador acima em Contribuintes da Semana.</td></tr>')+
       '</tbody></table></div>';
     setView('view-contributors',html);
     document.getElementById('cw-filter').onchange=function(){contribFilter=this.value;drawContributors();};
@@ -3555,6 +3590,86 @@ const PAGE = `<!doctype html>
     document.getElementById('cw-html').onclick=function(){exportContributors('html');};
 
     if(authState.isSiteAdmin){
+      (function(){
+        var box=document.getElementById('cw-roster-text'),previewBtn=document.getElementById('cw-roster-preview-btn'),
+          confirmBtn=document.getElementById('cw-roster-confirm-btn'),status=document.getElementById('cw-roster-status'),
+          target=document.getElementById('cw-roster-preview'),validated=null,validatedText='';
+        box.value=contribRosterDraft;
+        function errorMessage(code){
+          var messages={empty:'Cole a lista completa do G.',unknown_format:'Formato não reconhecido: copie diretamente do jogo.',
+            no_members:'A lista não contém jogadores válidos.',roster_partial:'Lista parcial recusada: copie a guilda completa.',
+            roster_changed:'Outra importação foi salva. Gere uma nova prévia antes de confirmar.',
+            preview_required:'A prévia não corresponde ao conteúdo atual. Valide novamente.',
+            forbidden:'Somente administradores podem atualizar os cargos.'};
+          return messages[code]||code||'Falha desconhecida';
+        }
+        function postRoster(path,body){
+          return fetch('/api/contributors/roster/'+path,{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(body)}).then(function(r){return r.json().then(function(v){
+              if(!r.ok)throw Error(errorMessage(v.error));return v;
+            });});
+        }
+        function names(items){
+          return items.length?items.map(function(n){return esc(n);}).join(', '):'nenhum';
+        }
+        function renderPreview(p){
+          var c=p.changes||{},parts=p.groups||{},ignored=p.ignoredMembers||[];
+          var html='<div class="panel" style="padding:12px;margin-top:12px">'+
+            '<b>Prévia sem gravação · '+esc(p.memberCount)+' membros da guilda · '+esc(p.contributorCount)+' contribuintes válidos</b>'+
+            '<div class="note">Lista anterior: '+(p.previous?esc(contribDisplayDate(p.previous.importedAt))+' · '+esc(p.previous.memberCount)+' membros':'nenhuma')+
+            ' · linhas duplicadas: '+esc(p.duplicates||0)+' · linhas inválidas: '+esc(p.skipped||0)+'</div>';
+          ['1','2','3','4'].forEach(function(tier){
+            var players=parts[tier]||[];
+            html+='<details style="padding:8px 0;border-top:1px solid #34465a"><summary><b>CONTRIBUINTE '+tier+' · '+players.length+' jogador(es)</b></summary>'+
+              '<div class="note" style="margin:8px">'+names(players)+'</div></details>';
+          });
+          html+='<div class="note"><b>Comparação com cadastro anterior:</b> novos '+(c.added||[]).length+
+            ', saídas/perda de cargo '+(c.removed||[]).length+', mudanças de categoria '+(c.changed||[]).length+'.</div>'+
+            '<details><summary>Ver nomes novos e removidos</summary><div class="note">Novos: '+names(c.added||[])+
+            '</div><div class="note">Removidos: '+names(c.removed||[])+
+            '</div><div class="note">Mudaram: '+((c.changed||[]).length?(c.changed||[]).map(function(x){
+              return esc(x.player)+' ('+esc(x.from)+' → '+esc(x.to)+')';}).join(', '):'nenhum')+'</div></details>';
+          if(ignored.length)html+='<div class="note" style="color:#ffb4b4;margin-top:8px"><b>Ignorados por segurança:</b> '+
+            ignored.map(function(x){return esc(x.player)+' ('+esc(x.reason)+')';}).join('; ')+'</div>';
+          return html+'<div class="note" style="margin-top:8px">Ao confirmar, esta lista substituirá a anterior; jogadores que saíram ou perderam a tag serão retirados do cadastro ativo.</div></div>';
+        }
+        box.oninput=function(){
+          contribRosterDraft=box.value;
+          validated=null;validatedText='';confirmBtn.disabled=true;
+          status.textContent='Texto alterado: gere uma nova prévia.';
+          target.textContent='Aguardando validação.';
+        };
+        previewBtn.onclick=function(){
+          validated=null;validatedText='';confirmBtn.disabled=true;previewBtn.disabled=true;
+          status.textContent='Validando sem gravar...';
+          target.textContent='';
+          var text=box.value;
+          postRoster('preview',{text:text}).then(function(result){
+            if(box.value!==text){status.textContent='Texto alterado, valide novamente.';return;}
+            validated=result;validatedText=text;target.innerHTML=renderPreview(result);
+            confirmBtn.disabled=false;status.textContent='Prévia pronta. Confira os cargos e confirme.';
+          }).catch(function(e){status.textContent='Erro: '+e.message;})
+            .finally(function(){previewBtn.disabled=false;});
+        };
+        confirmBtn.onclick=function(){
+          if(!validated||validatedText!==box.value){status.textContent='Valide o conteúdo atual primeiro.';return;}
+          var counts=validated.changes||{};
+          if(!confirm('CONFIRMAR ATUALIZAÇÃO DO G?\\n'+validated.memberCount+' membros, '+
+            validated.contributorCount+' contribuintes.\\n'+(counts.removed||[]).length+
+            ' contribuintes deixarão a lista ativa. A análise da Guilda Online não altera este cadastro.'))return;
+          confirmBtn.disabled=true;previewBtn.disabled=true;status.textContent='Salvando lista confirmada...';
+          postRoster('confirm',{text:validatedText,checksum:validated.checksum,
+            expectedImportedAt:validated.expectedImportedAt,previewedAt:validated.previewedAt,
+            previewToken:validated.previewToken}).then(function(result){
+            validated=null;validatedText='';contribRosterDraft='';
+            alert('Importação confirmada: '+result.saved.contributors+' contribuintes atualizados.');
+            renderContributors();
+          }).catch(function(e){
+            validated=null;validatedText='';
+            status.textContent='Importação NÃO realizada: '+e.message+' Gere nova prévia.';
+          }).finally(function(){previewBtn.disabled=false;});
+        };
+      })();
       Array.prototype.forEach.call(document.querySelectorAll('[data-cw-confirm]'),function(btn){
         btn.onclick=function(){
           var player=decodeURIComponent(btn.getAttribute('data-cw-confirm'));
@@ -3608,12 +3723,11 @@ const PAGE = `<!doctype html>
     return '<details class="panel" id="guild-roster-card" style="border-color:#40536f">'
       +'<summary style="cursor:pointer;font-weight:800;font-size:16px">📋 Cruzar lista da guilda (jogo) × pings × call</summary>'
       +'<div style="margin-top:14px">'
-      +'<div class="note">No jogo: G &gt; Guild &gt; copiar a lista &gt; colar aqui</div>'
+      +'<div class="note">No jogo: G &gt; Guild &gt; copiar a lista &gt; colar aqui. <b>Somente análise do CTA.</b> Não altera Contribuintes. Para atualizar cargos, utilize a aba Contribuintes da Semana (administradores).</div>'
       +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-top:12px">'
       +'<label style="min-width:190px"><span class="note">CTA</span><select id="guild-roster-event" class="brief-select" style="width:100%">'+guildRosterCtaOptions()+'</select></label>'
       +'<button type="button" class="btn primary" id="guild-roster-analyze">Analisar</button>'
       +'<span id="guild-roster-status" class="note"></span></div>'
-      +'<button type="button" class="btn ghost" id="guild-roster-save" style="margin:8px 0">Salvar lista de cargos sem CTA aberto</button>'
       +'<textarea id="guild-roster-text" class="brief-input" rows="9" autocomplete="off" spellcheck="false" placeholder="Cole aqui a lista exportada da Guild..." style="width:100%;margin-top:10px;resize:vertical"></textarea>'
       +'<div id="guild-roster-result" style="margin-top:14px"></div>'
       +'</div></details>';
@@ -3705,16 +3819,6 @@ const PAGE = `<!doctype html>
     if(!authState.canEdit) return;
     var btn=document.getElementById('guild-roster-analyze');
     if(!btn) return;
-    var saveBtn=document.getElementById('guild-roster-save');
-    if(saveBtn)saveBtn.onclick=function(){
-      var box=document.getElementById('guild-roster-text'),status=document.getElementById('guild-roster-status');
-      saveBtn.disabled=true;status.textContent='Salvando lista da guilda…';
-      fetch('/api/guild-roster/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:box?box.value:''})})
-       .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(guildRosterErrorText(x.error));return x;});})
-       .then(function(x){status.textContent='Lista salva em '+new Date(x.saved.imported_at).toLocaleString('pt-BR')+' · '+x.saved.member_count+' membros · '+x.saved.contributors+' contribuintes';})
-       .catch(function(e){status.textContent='Erro: '+e.message;})
-       .finally(function(){saveBtn.disabled=false;});
-    };
     btn.onclick=function(){
       var textEl=document.getElementById('guild-roster-text');
       var eventEl=document.getElementById('guild-roster-event');
@@ -3737,7 +3841,7 @@ const PAGE = `<!doctype html>
         }
         result.innerHTML=guildRosterResultHtml(x.data);
         bindGuildRosterResult(x.data);
-        if(x.data.savedRoster) status.textContent='Lista e cargos salvos: '+x.data.savedRoster.contributors+' contribuintes';
+        status.textContent='Análise concluída. Cadastro de contribuintes não alterado.';
       }).catch(function(e){
         result.innerHTML='<div class="empty-note">Erro ao analisar: '+esc(e.message)+'</div>';
       }).finally(function(){
