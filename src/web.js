@@ -8,6 +8,7 @@
 // ============================================================================
 const express = require("express");
 const db = require("./db");
+const { healthResult } = require("./mackna-health");
 const { PARTIES, WEAPONS } = require("./comps");
 const { isSecondCaller } = require("./roster");
 const crypto = require("crypto");
@@ -216,8 +217,9 @@ function startWebServer(client, opts) {
       database = true;
     } catch (_) {}
     const discord = !!(_client && typeof _client.isReady === "function" && _client.isReady());
-    const ok = database && discord;
-    res.status(ok ? 200 : 503).json({ ok, database, discord, at: new Date().toISOString() });
+    const preview = process.env.MACKNA_BTV_PREVIEW === "1";
+    const result = healthResult({ database, discord, preview });
+    res.status(result.ok ? 200 : 503).json(result);
   });
 
   app.get("/api/events", async (req, res) => {
@@ -326,7 +328,10 @@ function startWebServer(client, opts) {
   });
 
   app.get("/auth/login", (_req, res) => {
-    if (!CLIENT_SECRET) return res.status(503).send("Login ainda não configurado (falta DISCORD_CLIENT_SECRET no Railway).");
+    if (process.env.MACKNA_BTV_PREVIEW === "1") {
+      return res.status(503).type("text/plain").send("MackNa Cloud: preview isolado sem login Discord. Para autenticar, configure OAuth e guilda de testes em uma etapa posterior.");
+    }
+    if (!CLIENT_SECRET) return res.status(503).send("Login ainda não configurado (falta DISCORD_CLIENT_SECRET).");
     const state = crypto.randomBytes(16).toString("hex");
     states.set(state, Date.now());
     const url = "https://discord.com/api/oauth2/authorize?" + new URLSearchParams({
@@ -1322,7 +1327,8 @@ const PAGE = `<!doctype html>
       .then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ return {ok:r.ok,j:j}; }); })
       .then(function(x){
         if(x.ok && x.j && x.j.ok){
-          setLive(streamLive?'● conectado · CTA ao vivo':'● conectado','var(--green)');
+          if(x.j.mode==='preview') setLive('● MackNa preview · Discord desativado','var(--amber)');
+          else setLive(streamLive?'● conectado · CTA ao vivo':'● conectado','var(--green)');
         } else if(x.j && !x.j.discord){
           setLive('● Discord desconectado','var(--red)');
         } else if(x.j && !x.j.database){
