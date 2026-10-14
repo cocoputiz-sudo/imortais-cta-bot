@@ -231,37 +231,46 @@ function startWebServer(client, opts) {
     try {
       const body = req.body || {};
       const result = await guildroster.analyze(db, { text: body.text, eventId: body.eventId });
-      if (result && result.ok) {
-        result.savedRoster=await contributorWeekly.saveRoster(db.pool,body.text,sess.id);
-        return res.json(result);
-      }
+      if(result&&result.ok)return res.json(result); // Analise nao atualiza o cadastro de contribuintes.
 
       const error = result && result.error ? String(result.error) : "server";
       if (["empty", "unknown_format", "too_large", "too_many_lines", "no_members"].includes(error)) {
         return res.status(400).json({ error });
       }
       if (error === "event_not_found") return res.status(404).json({ error });
-      if (error === "roster_partial") return res.status(409).json({ error });
       return res.status(500).json({ error });
     } catch (e) {
       const error=String(e?.message||"server");
-      if(error==="roster_partial")return res.status(409).json({error});
-      if(error==="cargos_contribuinte_conflitantes")return res.status(400).json({error});
       console.error("/api/guild-roster/analyze:", e?.message || e);
       return res.status(500).json({ error: "server" });
     }
   });
 
-  // Persistent guild paste can also be saved when there is no open CTA.
-  app.post("/api/guild-roster/save", async (req,res)=>{
-    const sess=requireEditor(req,res);if(!sess)return;
+  // Endpoint antigo mantido sem escrita para evitar importacoes involuntarias por clientes antigos.
+  app.post("/api/guild-roster/save",(req,res)=>{
+    if(!requireEditor(req,res))return;
+    res.status(410).json({error:"importacao_movida_para_contribuintes"});
+  });
+  function contributorRosterError(res,e){
+    const error=String(e.message||"server");
+    if(error==="roster_partial"||error==="roster_changed")return res.status(409).json({error});
+    if(["preview_required","empty","unknown_format","too_large","too_many_lines","no_members"].includes(error))
+      return res.status(400).json({error});
+    console.error("[contributor roster import]",e);
+    return res.status(500).json({error:"server"});
+  }
+  app.post("/api/contributors/roster/preview",async(req,res)=>{
+    if(!requireSiteAdmin(req,res))return;
+    try{res.json(await contributorWeekly.previewRoster(db.pool,req.body?.text));}
+    catch(e){contributorRosterError(res,e);}
+  });
+  app.post("/api/contributors/roster/confirm",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
     try{
-      const saved=await contributorWeekly.saveRoster(db.pool,req.body?.text,sess.id);
-      return res.json({ok:true,saved});
-    }catch(e){
-      const error=String(e.message||"server");
-      return res.status(error==="roster_partial"?409:["empty","unknown_format","too_large","too_many_lines","no_members","cargos_contribuinte_conflitantes"].includes(error)?400:500).json({error});
-    }
+      const saved=await contributorWeekly.saveRoster(db.pool,req.body?.text,sess.id,{
+        checksum:req.body?.checksum,expectedImportedAt:req.body?.expectedImportedAt});
+      res.json({ok:true,saved});
+    }catch(e){contributorRosterError(res,e);}
   });
   // Officers may view; thresholds and weekly reminder may only be changed by admins.
   app.get("/api/contributors/weekly",async(req,res)=>{
