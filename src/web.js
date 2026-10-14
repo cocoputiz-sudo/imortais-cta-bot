@@ -317,13 +317,13 @@ function startWebServer(client, opts) {
       res.json({ok:true,saved});
     }catch(e){contributorRosterError(res,e);}
   });
-  // Officers may view; thresholds and weekly reminder may only be changed by admins.
+  // Oficiais consultam; administracao e Police da Guild editam nesta secao.
   app.get("/api/contributors/weekly",async(req,res)=>{
     if(!requireContributorViewer(req,res))return;
     try{res.json(await contributorWeekly.getReport(db.pool));}
     catch(e){console.error("[contributor report]",e);res.status(500).json({error:"report_failed"});}
   });
-  // Admin-only: alterar a data precisa evidência manual; cargos vêm somente do G.
+  // Edicao restrita a administracao e Police da Guild; cargos vem somente do G.
   app.post("/api/contributors/assignment",async(req,res)=>{
     const sess=requireContributorEditor(req,res);if(!sess)return;
     try{res.json(await require("./contributorCycle").confirmAssignment(db.pool,{
@@ -3540,7 +3540,7 @@ const PAGE = `<!doctype html>
     gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
   }
   function renderContributors(){
-    if(!authState.canViewContributors&&!authState.canEditContributors){setView('view-contributors','<div class="empty-note">Acesso exclusivo de administradores e oficiais.</div>');return;}
+    if(!authState.canViewContributors&&!authState.canEditContributors){setView('view-contributors','<div class="empty-note">Acesso de administração, oficiais e Police da Guild.</div>');return;}
     loading('view-contributors','📅 Contribuintes – semana');
     Promise.all([
       fetch('/api/contributors/weekly',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Relatório HTTP '+r.status);return r.json();}),
@@ -3572,8 +3572,8 @@ const PAGE = `<!doctype html>
       '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
     if(authState.canEditContributors){
       html+='<details class="panel" id="cw-g-import" style="margin:14px 0;border:1px solid #46698a" open>'+
-        '<summary style="cursor:pointer;font-weight:bold">📋 Atualizar membros e cargos pelo G (somente administrador)</summary>'+
-        '<div class="note" style="margin:10px 0">No Albion: G → Guild → Copiar lista completa de membros com cargos → Colar abaixo. Esta é a única tela que altera os contribuintes. A análise de Guilda Online não salva cargos.</div>'+
+        '<summary style="cursor:pointer;font-weight:bold">📋 Atualizar membros e cargos pelo G (administração e Police da Guild)</summary>'+
+        '<div class="note" style="margin:10px 0">No Albion: G → Guild → Copiar lista completa de membros com cargos → Colar abaixo. A importação e atualização dos contribuintes é permitida a administradores e Police da Guild. A análise de Guilda Online não salva cargos.</div>'+
         '<textarea id="cw-roster-text" rows="7" style="width:100%;resize:vertical" spellcheck="false" placeholder="Character Name    Last Seen    Roles"></textarea>'+
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:9px 0">'+
         '<button type="button" class="btn primary" id="cw-roster-preview-btn">1. Validar e visualizar cargos</button>'+
@@ -3581,12 +3581,12 @@ const PAGE = `<!doctype html>
         '<span class="note" id="cw-roster-status"></span></div>'+
         '<div id="cw-roster-preview" aria-live="polite" class="note">Nenhuma alteração será feita até você conferir e confirmar a prévia.</div>'+
         '</details>';
-      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (somente admin)</summary>'+
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (administração e Police da Guild)</summary>'+
         '<div class="note">Cole o extrato exportado, com colunas Date, Player, Reason, Amount. Datas em UTC, valores inteiros em prata. Só Deposit positivo é armazenado, por até 45 dias; repetir o arquivo não duplica operações.</div>'+
         '<textarea id="cw-bank-text" rows="5" style="width:100%" placeholder="Date TAB Player TAB Reason TAB Amount"></textarea>'+
         '<button class="btn primary" id="cw-import-bank">Importar extrato</button> <span id="cw-bank-status" class="note"></span></details>';
       var minimum=(cfg.minima||{});
-      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (somente admin)</summary>'+
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (administração e Police da Guild)</summary>'+
         '<div class="note">Padrão: pelo menos +1 Might em PvE OU +1 em Coleta. Os mínimos podem ser ajustados individualmente; a comparação sempre exige os dois pares de varreduras.</div>'+
         '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Cargo</th><th>Mínimo PvE</th><th>Mínimo Coleta</th></tr></thead><tbody>'+
         ['1','2','3'].map(function(tier){var row=minimum[tier]||{pve:1,gathering:1};return '<tr><td>CONTRIBUINTE '+tier+'</td>'+
