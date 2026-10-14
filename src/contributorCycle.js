@@ -21,14 +21,34 @@ function tierOf(roles){
   const found=contributorTiers(roles);
   return found.size===1?[...found][0]:null; // conflitos sao ignorados, nunca impedem relatorios
 }
-function cycleAt(assignedAt,now=new Date()){
-  const anchor=Date.parse(assignedAt),t=new Date(now).getTime();
-  if(!Number.isFinite(anchor)||!Number.isFinite(t)||anchor>t) return null;
-  const index=Math.floor((t-anchor)/WEEK_MS);
-  const start=new Date(anchor+index*WEEK_MS).toISOString();
-  const end=new Date(anchor+(index+1)*WEEK_MS).toISOString();
-  return {start,end,index:index+1,daysElapsed:Math.min(7,Math.floor((t-Date.parse(start))/DAY_MS)),
-    endsInMs:Date.parse(end)-t};
+// A mesma competência para todos: segunda 00:00 UTC (inclusiva) a próxima segunda (exclusiva).
+function weekAt(now=new Date(),offset=0){
+  const instant=new Date(now),time=instant.getTime();
+  if(!Number.isFinite(time))throw Error("data_competencia_invalida");
+  const monday=new Date(Date.UTC(instant.getUTCFullYear(),instant.getUTCMonth(),instant.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate()-(monday.getUTCDay()+6)%7+offset*7);
+  const end=new Date(monday.getTime()+WEEK_MS);
+  return {start:monday.toISOString(),end:end.toISOString(),cutoff:new Date(monday.getTime()+3*DAY_MS).toISOString()};
+}
+// Argumento legado assignedAt ignorado deliberadamente. A atribuição só aparece nos detalhes.
+function cycleAt(_assignedAt,now=new Date()){return weekAt(now);}
+function paymentForWeek(bankRows,key,tier,week,now=new Date()){
+  const due=DUES[String(tier)]||0,nowMs=new Date(now).getTime();
+  const relevant=(bankRows||[]).filter(r=>r.player_key===key&&
+    Date.parse(r.paid_at)>=Date.parse(week.start)&&Date.parse(r.paid_at)<Date.parse(week.end)&&
+    Date.parse(r.paid_at)<=nowMs).sort((a,b)=>Date.parse(a.paid_at)-Date.parse(b.paid_at));
+  let total=0,completedAt=null;
+  for(const r of relevant){
+    total+=Number(r.amount);
+    if(completedAt===null&&total>=due)completedAt=r.paid_at;
+  }
+  const status=total>=due
+    ?(Date.parse(completedAt)<Date.parse(week.cutoff)?"PAGO":"PAGO COM ATRASO")
+    :total>0?"PARCIAL":nowMs>=Date.parse(week.end)?"NÃO PAGO":"PENDENTE";
+  return {status,due,amount:total,found:relevant.length,paidAt:completedAt,
+    lastDepositAt:relevant.length?relevant[relevant.length-1].paid_at:null,
+    excess:Math.max(0,total-due),missing:Math.max(0,due-total),validUntil:week.end,
+    start:week.start,end:week.end};
 }
 async function init(pool){
   await pool.query(
@@ -198,17 +218,17 @@ async function importBank(pool,text,actor){
 }
 async function deposits(pool,now=new Date()){
   const r=await pool.query(
-    "SELECT player_key,paid_at,amount FROM contributor_bank_deposits WHERE paid_at >= $1 AND paid_at <= $2",
+    "SELECT player_key,player_name,paid_at,amount FROM contributor_bank_deposits WHERE paid_at >= $1 AND paid_at <= $2",
     [new Date(now.getTime()-BANK_RETENTION_DAYS*DAY_MS),now]);
   return r.rows;
 }
 async function attendanceByPlayer(now=new Date()){
   const guildId=process.env.GUILD_ID||"683411304408416285";
-  const start=new Date(now.getTime()-WEEK_MS-DAY_MS);
+  const week=weekAt(now),start=new Date(Date.parse(week.start)-DAY_MS);
   const all=await db.getEventsInRange(guildId,start,now);
   const list=attendance.selectCountedEvents(all).events.filter(ev=>{
     const w=attendance.windowFor(ev);
-    return w&&w.end<=now&&w.start>=new Date(now.getTime()-WEEK_MS);
+    return w&&w.end<=now&&w.start>=new Date(week.start)&&w.start<new Date(week.end);
   });
   const ctx=await attendance.__test.loadEventsContext(guildId,list);
   const found=new Map(),ownerByNick=new Map(),ambiguous=new Set();
@@ -230,23 +250,24 @@ async function attendanceByPlayer(now=new Date()){
   return {events:list.length,byPlayer:found,ambiguous:[...ambiguous]};
 }
 function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[]){
-  const level=String(row.level),cycle=assignment?cycleAt(assignment.assigned_at,now):null;
-  const paymentRequired=DUES[level]||null,ctaRequired=CTA_MINIMA[level]??null;
-  const record=cycle?bankRows.filter(r=>r.player_key===keyOf(row.player)&&Date.parse(r.paid_at)>=Date.parse(cycle.start)&&Date.parse(r.paid_at)<Date.parse(cycle.end)):[];
-  const paid=record.reduce((sum,r)=>sum+Number(r.amount),0);
-  const cta=cycle?(attendanceRows||[]).filter(r=>Date.parse(r.at)>=Date.parse(cycle.start)&&Date.parse(r.at)<Date.parse(cycle.end)):[];
+  const level=String(row.level),cycle=weekAt(now),priorCycle=weekAt(now,-1);
+  const paymentRequired=DUES[level]||null,ctaRequired=CTA_MINIMA[level]??null,key=keyOf(row.player);
+  const payment=paymentForWeek(bankRows,key,level,cycle,now);
+  const previousPayment=paymentForWeek(bankRows,key,level,priorCycle,now);
+  const cta=(attendanceRows||[]).filter(r=>Date.parse(r.at)>=Date.parse(cycle.start)&&
+    Date.parse(r.at)<Date.parse(cycle.end));
   const perDay={};
   for(const e of cta)perDay[e.day]=(perDay[e.day]||0)+1;
   const weekend=Object.entries(perDay).filter(([day])=>[0,6].includes(new Date(day+"T12:00:00Z").getUTCDay()));
-  // Might exige baseline no proprio ciclo, nunca usa a varredura anterior a atribuicao.
-  const pve=cycle?withinCycleMight(sweeps,"PVE",keyOf(row.player),cycle,now):null;
-  const gathering=cycle?withinCycleMight(sweeps,"GATHERING",keyOf(row.player),cycle,now):null;
+  // C2: somente duas capturas INTEGRAIS dentro da competencia global, independentemente da atribuicao.
+  const pve=withinCycleMight(sweeps,"PVE",key,cycle,now);
+  const gathering=withinCycleMight(sweeps,"GATHERING",key,cycle,now);
   const mightMinimum=row.minimum||{pve:1,gathering:1};
   const meetsMight=level!=="2"?null:pve==null||gathering==null?null:
     (pve>0&&pve>=mightMinimum.pve)||(gathering>0&&gathering>=mightMinimum.gathering);
   const meetsCta=ctaRequired==null?null:ctaRequired===0?true:
     cta.length===0?null:cta.length>=ctaRequired;
-  const overallStatus=!cycle?"SEM DATA":level==="4"?"ISENTO DE CTA · CONFERIR PRATA":
+  const overallStatus=level==="4"?"ISENTO DE CTA · CONFERIR PRATA":
     level==="2"?(meetsMight===true?"META MIGHT ATINGIDA · VERIFICAR ZVZ":
       meetsMight===false?"MIGHT ABAIXO DA META":"MIGHT SEM DADOS"):
     meetsCta===true?"META CTA ATINGIDA · OUTRAS OBRIGAÇÕES A CONFERIR":
@@ -258,8 +279,10 @@ function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[
     cycle,
     obligations:{paymentRequired,ctaRequired,resetDay:level==="1"||level==="2"?"OBRIGATÓRIO · VERIFICAR":"NÃO EXIGIDO",weekendRequired:level==="1"||level==="2",
       discordRequired:level!=="4",mightRequired:level==="2"},
-    payment:{found:record.length,creditedCandidate:record.length?paid:null,verification:"PENDENTE DE CONFERÊNCIA"},
-    attendance:{count:cta.length|| (level==="4"?0:null),weekendDays:weekend,
+    payment:{...payment,creditedCandidate:payment.found?payment.amount:null,
+      verification:"VALOR DO DEPÓSITO; FINALIDADE A CONFERIR"},
+    previousPayment,
+    attendance:{count:cta.length,weekendDays:weekend,
       matchedName:cta.length>0,verification:"CORRESPONDÊNCIA POR NOME, SEM COMPROVAÇÃO DE AUSÊNCIA"},
     cycleMight:{pve,gathering,verifiedWindow:pve!=null&&gathering!=null,meetsMight},
     ctaTargetMet:meetsCta,
@@ -267,11 +290,11 @@ function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[
   };
 }
 function withinCycleMight(sweeps,code,key,cycle,now){
-  const a=Date.parse(cycle.start),end=Math.min(Date.parse(cycle.end),new Date(now).getTime());
+  const a=Date.parse(cycle.start),end=Math.min(Date.parse(cycle.end)-1,new Date(now).getTime());
   const eligible=sweeps.filter(s=>s.code===code&&Date.parse(s.capturedAt)>=a&&Date.parse(s.capturedAt)<=end&&s.members.has(key));
   if(eligible.length<2)return null;
   const first=eligible[0].members.get(key),last=eligible[eligible.length-1].members.get(key);
   return last>=first?last-first:null;
 }
-module.exports={DAY_MS,WEEK_MS,DUES,CTA_MINIMA,tierOf,cycleAt,init,inspectRoster,reconcile,bootstrap,assignments,
+module.exports={DAY_MS,WEEK_MS,DUES,CTA_MINIMA,tierOf,weekAt,cycleAt,paymentForWeek,init,inspectRoster,reconcile,bootstrap,assignments,
   confirmAssignment,parseBankCsv,importBank,deposits,attendanceByPlayer,decorate,withinCycleMight};
