@@ -229,7 +229,7 @@ function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[
     assignedAt:assignment?.assigned_at||null,
     assignmentSource:assignment?.assignment_source||"not_recorded",
     cycle,
-    obligations:{paymentRequired,ctaRequired,resetDay:"VERIFICAR",weekendRequired:level==="1"||level==="2",
+    obligations:{paymentRequired,ctaRequired,resetDay:level==="1"||level==="2"?"OBRIGATÓRIO · VERIFICAR":"NÃO EXIGIDO",weekendRequired:level==="1"||level==="2",
       discordRequired:level!=="4",mightRequired:level==="2"},
     payment:{found:record.length,creditedCandidate:record.length?paid:null,verification:"PENDENTE DE CONFERÊNCIA"},
     attendance:{count:cta.length|| (level==="4"?0:null),weekendDays:weekend,
