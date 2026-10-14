@@ -3574,6 +3574,83 @@ const PAGE = `<!doctype html>
     document.getElementById('cw-html').onclick=function(){exportContributors('html');};
 
     if(authState.isSiteAdmin){
+      (function(){
+        var box=document.getElementById('cw-roster-text'),previewBtn=document.getElementById('cw-roster-preview-btn'),
+          confirmBtn=document.getElementById('cw-roster-confirm-btn'),status=document.getElementById('cw-roster-status'),
+          target=document.getElementById('cw-roster-preview'),validated=null,validatedText='';
+        function errorMessage(code){
+          var messages={empty:'Cole a lista completa do G.',unknown_format:'Formato não reconhecido: copie diretamente do jogo.',
+            no_members:'A lista não contém jogadores válidos.',roster_partial:'Lista parcial recusada: copie a guilda completa.',
+            roster_changed:'Outra importação foi salva. Gere uma nova prévia antes de confirmar.',
+            preview_required:'A prévia não corresponde ao conteúdo atual. Valide novamente.',
+            forbidden:'Somente administradores podem atualizar os cargos.'};
+          return messages[code]||code||'Falha desconhecida';
+        }
+        function postRoster(path,body){
+          return fetch('/api/contributors/roster/'+path,{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(body)}).then(function(r){return r.json().then(function(v){
+              if(!r.ok)throw Error(errorMessage(v.error));return v;
+            });});
+        }
+        function names(items){
+          return items.length?items.map(function(n){return esc(n);}).join(', '):'nenhum';
+        }
+        function renderPreview(p){
+          var c=p.changes||{},parts=p.groups||{},ignored=p.ignoredMembers||[];
+          var html='<div class="panel" style="padding:12px;margin-top:12px">'+
+            '<b>Prévia sem gravação · '+esc(p.memberCount)+' membros da guilda · '+esc(p.contributorCount)+' contribuintes válidos</b>'+
+            '<div class="note">Lista anterior: '+(p.previous?esc(contribDisplayDate(p.previous.importedAt))+' · '+esc(p.previous.memberCount)+' membros':'nenhuma')+
+            ' · linhas duplicadas: '+esc(p.duplicates||0)+' · linhas inválidas: '+esc(p.skipped||0)+'</div>';
+          ['1','2','3','4'].forEach(function(tier){
+            var players=parts[tier]||[];
+            html+='<details style="padding:8px 0;border-top:1px solid #34465a"><summary><b>CONTRIBUINTE '+tier+' · '+players.length+' jogador(es)</b></summary>'+
+              '<div class="note" style="margin:8px">'+names(players)+'</div></details>';
+          });
+          html+='<div class="note"><b>Comparação com cadastro anterior:</b> novos '+(c.added||[]).length+
+            ', saídas/perda de cargo '+(c.removed||[]).length+', mudanças de categoria '+(c.changed||[]).length+'.</div>'+
+            '<details><summary>Ver nomes novos e removidos</summary><div class="note">Novos: '+names(c.added||[])+
+            '</div><div class="note">Removidos: '+names(c.removed||[])+
+            '</div><div class="note">Mudaram: '+((c.changed||[]).length?(c.changed||[]).map(function(x){
+              return esc(x.player)+' ('+esc(x.from)+' → '+esc(x.to)+')';}).join(', '):'nenhum')+'</div></details>';
+          if(ignored.length)html+='<div class="note" style="color:#ffb4b4;margin-top:8px"><b>Ignorados por segurança:</b> '+
+            ignored.map(function(x){return esc(x.player)+' ('+esc(x.reason)+')';}).join('; ')+'</div>';
+          return html+'<div class="note" style="margin-top:8px">Ao confirmar, esta lista substituirá a anterior; jogadores que saíram ou perderam a tag serão retirados do cadastro ativo.</div></div>';
+        }
+        box.oninput=function(){
+          validated=null;validatedText='';confirmBtn.disabled=true;
+          status.textContent='Texto alterado: gere uma nova prévia.';
+          target.textContent='Aguardando validação.';
+        };
+        previewBtn.onclick=function(){
+          validated=null;validatedText='';confirmBtn.disabled=true;previewBtn.disabled=true;
+          status.textContent='Validando sem gravar...';
+          target.textContent='';
+          var text=box.value;
+          postRoster('preview',{text:text}).then(function(result){
+            if(box.value!==text){status.textContent='Texto alterado, valide novamente.';return;}
+            validated=result;validatedText=text;target.innerHTML=renderPreview(result);
+            confirmBtn.disabled=false;status.textContent='Prévia pronta. Confira os cargos e confirme.';
+          }).catch(function(e){status.textContent='Erro: '+e.message;})
+            .finally(function(){previewBtn.disabled=false;});
+        };
+        confirmBtn.onclick=function(){
+          if(!validated||validatedText!==box.value){status.textContent='Valide o conteúdo atual primeiro.';return;}
+          var counts=validated.changes||{};
+          if(!confirm('CONFIRMAR ATUALIZAÇÃO DO G?\\n'+validated.memberCount+' membros, '+
+            validated.contributorCount+' contribuintes.\\n'+(counts.removed||[]).length+
+            ' contribuintes deixarão a lista ativa. A análise da Guilda Online não altera este cadastro.'))return;
+          confirmBtn.disabled=true;previewBtn.disabled=true;status.textContent='Salvando lista confirmada...';
+          postRoster('confirm',{text:validatedText,checksum:validated.checksum,
+            expectedImportedAt:validated.expectedImportedAt}).then(function(result){
+            validated=null;validatedText='';
+            alert('Importação confirmada: '+result.saved.contributors+' contribuintes atualizados.');
+            renderContributors();
+          }).catch(function(e){
+            validated=null;validatedText='';
+            status.textContent='Importação NÃO realizada: '+e.message+' Gere nova prévia.';
+          }).finally(function(){previewBtn.disabled=false;});
+        };
+      })();
       Array.prototype.forEach.call(document.querySelectorAll('[data-cw-confirm]'),function(btn){
         btn.onclick=function(){
           var player=decodeURIComponent(btn.getAttribute('data-cw-confirm'));
