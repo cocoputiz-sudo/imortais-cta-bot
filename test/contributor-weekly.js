@@ -61,9 +61,12 @@ assert.equal(ignoredReport.rows.length,0,"conflitos/duplicatas nao devem aparece
 assert(ignoredReport.warnings.some(x=>x.includes("Invalido")));
 assert(ignoredReport.warnings.some(x=>x.includes("Duplicado")));
 const observed=cycles.cycleAt("2026-10-01T12:00:00Z",new Date("2026-10-10T12:00:00Z"));
-assert.equal(observed.start,"2026-10-08T12:00:00.000Z");
-assert.equal(observed.end,"2026-10-15T12:00:00.000Z");
-assert.equal(cycles.cycleAt("2026-10-15T12:00:00Z",new Date("2026-10-10T12:00:00Z")),null);
+assert.equal(observed.start,"2026-10-05T00:00:00.000Z");
+assert.equal(observed.end,"2026-10-12T00:00:00.000Z");
+assert.equal(cycles.cycleAt("2026-10-15T12:00:00Z",new Date("2026-10-10T12:00:00Z")).start,
+  observed.start,"assigned_at nao altera competencia global");
+assert.equal(cycles.weekAt(new Date("2026-10-12T00:00:00Z")).start,"2026-10-12T00:00:00.000Z");
+assert.equal(cycles.weekAt(new Date("2026-10-18T23:59:59Z")).end,"2026-10-19T00:00:00.000Z");
 const bank=cycles.parseBankCsv('Date\tPlayer\tReason\tAmount\n2026-10-07 21:10:59\tA\tDeposit\t4000000\n2026-10-07 20:00:00\tB\tWithdrawal\t-1000000');
 assert.equal(bank.rows.length,1);
 assert.equal(bank.rows[0].amount,4000000);
@@ -82,6 +85,76 @@ assert.equal(decorated.obligations.paymentRequired,10000000);
 assert.equal(decorated.obligations.ctaRequired,0);
 assert.equal(decorated.cycleMight.pve,null);
 assert.equal(decorated.payment.creditedCandidate,null);
+assert.equal(decorated.payment.creditedCandidate,null);
+// Competencia UTC da segunda 00:00 inclusiva ate a proxima segunda exclusiva.
+const currentNow=new Date("2026-10-15T15:00:00Z");
+const currentWeek=cycles.weekAt(currentNow),previousWeek=cycles.weekAt(currentNow,-1);
+const makeDeposit=(player,at,amount)=>({player_key:player.toLowerCase(),player_name:player,paid_at:at,amount});
+const sunday=makeDeposit("Aldora","2026-10-11T23:00:00Z",4000000);
+const monday=makeDeposit("Aldora","2026-10-12T00:30:00Z",4000000);
+assert.equal(cycles.paymentForWeek([sunday,monday],"aldora","1",previousWeek,currentNow).amount,4000000,
+  "domingo 23:00 UTC pertence a competencia anterior");
+assert.equal(cycles.paymentForWeek([sunday,monday],"aldora","1",currentWeek,currentNow).amount,4000000,
+  "segunda 00:30 UTC pertence a nova competencia");
+assert.equal(cycles.paymentForWeek([monday],"aldora","1",currentWeek,currentNow).status,"PAGO");
+const split=[
+ makeDeposit("Aldora","2026-10-12T01:00:00Z",2000000),
+ makeDeposit("Aldora","2026-10-14T23:59:00Z",2000000)
+];
+const splitPayment=cycles.paymentForWeek(split,"aldora","1",currentWeek,currentNow);
+assert.equal(splitPayment.status,"PAGO","dois depositos de 2M quitam C1 ate quarta");
+assert.equal(splitPayment.amount,4000000);
+assert.equal(splitPayment.validUntil,"2026-10-19T00:00:00.000Z");
+assert.equal(cycles.paymentForWeek([makeDeposit("Aldora","2026-10-15T00:00:00Z",4000000)],
+  "aldora","1",currentWeek,currentNow).status,"PAGO COM ATRASO","quinta 00:00 UTC e atraso");
+assert.equal(cycles.paymentForWeek([makeDeposit("Aldora","2026-10-18T23:59:00Z",4000000)],
+  "aldora","1",currentWeek,new Date("2026-10-18T23:59:59Z")).status,"PAGO COM ATRASO");
+assert.equal(cycles.paymentForWeek(split.slice(0,1),"aldora","1",currentWeek,currentNow).status,"PARCIAL");
+assert.equal(cycles.paymentForWeek([],"aldora","1",currentWeek,currentNow).status,"PENDENTE");
+assert.equal(cycles.paymentForWeek([],"aldora","1",previousWeek,currentNow).status,"NÃO PAGO");
+const extra=cycles.paymentForWeek([makeDeposit("Aldora","2026-10-12T10:00:00Z",8000000)],
+ "aldora","1",currentWeek,currentNow);
+assert.equal(extra.excess,4000000);
+assert.equal(cycles.paymentForWeek([makeDeposit("Aldora","2026-10-12T10:00:00Z",8000000)],
+ "aldora","1",cycles.weekAt(new Date("2026-10-19T10:00:00Z")),new Date("2026-10-19T10:00:00Z")).status,
+ "PENDENTE","excedente nao passa para a semana seguinte");
+const firstSeen=new Date("2026-10-14T12:00:00Z").toISOString();
+const newContributor=cycles.decorate({player:"Aldora",level:"1"},{
+ first_seen_at:firstSeen,assigned_at:firstSeen,assignment_source:"observed"
+},[makeDeposit("Aldora","2026-10-12T00:30:00Z",4000000)],
+ [{at:"2026-10-12T03:00:00Z",day:"2026-10-12",level:"INTEGRAL"}],currentNow);
+assert.equal(newContributor.payment.status,"PAGO","pagamento anterior a primeira observacao no G vale na semana");
+assert.equal(newContributor.attendance.count,1,"CTA anterior a primeira observacao no G conta");
+assert.equal(newContributor.previousPayment.status,"NÃO APLICÁVEL","novato nao e cobrado por semana anterior");
+const mightSweeps=[
+ {code:"PVE",capturedAt:"2026-10-12T02:00:00Z",members:new Map([["aldora",100]])},
+ {code:"PVE",capturedAt:"2026-10-15T02:00:00Z",members:new Map([["aldora",130]])},
+ {code:"GATHERING",capturedAt:"2026-10-12T02:00:00Z",members:new Map([["aldora",5]])},
+ {code:"GATHERING",capturedAt:"2026-10-15T02:00:00Z",members:new Map([["aldora",5]])}
+];
+const newMighter=cycles.decorate({player:"Aldora",level:"2",minimum:{pve:1,gathering:1}},{
+ first_seen_at:firstSeen,assigned_at:firstSeen
+},[],[],currentNow,mightSweeps);
+assert.equal(newMighter.cycleMight.pve,30,"Might anterior a atribuicao e dentro da semana conta para C2");
+assert.equal(newMighter.cycleMight.meetsMight,true);
+assert.equal(cycles.withinCycleMight([{code:"PVE",capturedAt:"2026-10-11T22:00:00Z",
+ members:new Map([["aldora",0]])},mightSweeps[1]],"PVE","aldora",currentWeek,currentNow),null,
+ "baseline da competencia anterior nao e permitido");
+const unlinkedRoster={members:[
+ {name:"Aldora",roles:["CONTRIBUINTE 1"]},{name:"Patrulheiro",roles:["Officer"]}
+]};
+const reportMembers=[{player:"Aldora"}];
+const unlinked=weekly.unlinkedDeposits([
+ makeDeposit("Aldorra","2026-10-12T11:00:00Z",4000000),
+ makeDeposit("Patrulheiro","2026-10-13T11:00:00Z",4000000)
+],unlinkedRoster,{rows:reportMembers},currentNow);
+assert.equal(unlinked.length,2,"nomes nao associados aparecem em secao separada");
+assert.equal(unlinked.find(x=>x.player==="Aldorra").reason,"Nome não encontrado no G");
+assert.equal(unlinked.find(x=>x.player==="Aldorra").suggestion,"Aldora");
+assert.equal(unlinked.find(x=>x.player==="Patrulheiro").reason,"Está no G sem cargo de contribuinte");
+assert.equal(weekly.unlinkedDeposits([makeDeposit("Aldora","2026-10-12T11:00:00Z",4000000)],
+ unlinkedRoster,{rows:reportMembers},currentNow).length,0);
+
 assert.equal(contributorLevel(["Contribuinte 3x"]),null);
 assert.throws(()=>validateSettings({...cfg,minima:{"1":{pve:-1,gathering:1},"2":{pve:1,gathering:1},"3":{pve:1,gathering:1}}}));
 assert.equal(scheduledForWeek(new Date("2026-10-10T15:00:00Z"),{weekday:0,timeUtc:"18:00"}).toISOString(),"2026-10-11T18:00:00.000Z");

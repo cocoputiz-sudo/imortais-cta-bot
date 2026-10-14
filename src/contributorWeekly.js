@@ -21,6 +21,54 @@ const DEFAULT_MINIMA=Object.freeze({
 
 function contributorLevel(roles){return cycleService.tierOf(roles);}
 function normalizedPlayer(x){return guildroster.normName(x);}
+// Apenas sugestao para triagem; nunca cria credito nem altera vinculos automaticamente.
+function nameDistance(a,b){
+  const prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    let diag=prev[0];prev[0]=i;
+    for(let j=1;j<=b.length;j++){
+      const old=prev[j];
+      prev[j]=Math.min(prev[j]+1,prev[j-1]+1,diag+(a[i-1]===b[j-1]?0:1));
+      diag=old;
+    }
+  }
+  return prev[b.length];
+}
+function closestGuildName(key,members){
+  if(!key)return null;
+  let best=null,score=Infinity;
+  for(const m of members||[]){
+    const candidate=normalizedPlayer(m.name);
+    if(!candidate||candidate===key||Math.abs(candidate.length-key.length)>3)continue;
+    const distance=nameDistance(key,candidate);
+    if(distance<score){best=m.name;score=distance;}
+  }
+  return score<=Math.min(3,Math.max(1,Math.floor(key.length*0.3)))?best:null;
+}
+function unlinkedDeposits(bank,roster,report,now){
+  const week=cycleService.weekAt(now),allMembers=roster?.members||[];
+  const valid=new Set((report.rows||[]).map(r=>normalizedPlayer(r.player)));
+  const byKey=new Map(allMembers.map(m=>[normalizedPlayer(m.name),m]));
+  const ignored=new Set((roster?.ignored_members||[]).map(m=>normalizedPlayer(m.player)));
+  const grouped=new Map();
+  for(const deposit of bank||[]){
+    const at=Date.parse(deposit.paid_at),key=deposit.player_key;
+    if(!key||valid.has(key)||at<Date.parse(week.start)||at>=Date.parse(week.end)||at>new Date(now).getTime())continue;
+    let entry=grouped.get(key);
+    if(!entry){
+      const found=byKey.get(key);
+      const reason=ignored.has(key)?"Cadastro ambíguo no G":
+        found?"Está no G sem cargo de contribuinte":"Nome não encontrado no G";
+      entry={player:deposit.player_name,key,amount:0,count:0,lastDepositAt:null,reason,
+        suggestion:found?null:closestGuildName(key,allMembers)};
+      grouped.set(key,entry);
+    }
+    entry.amount+=Number(deposit.amount);
+    entry.count++;
+    if(!entry.lastDepositAt||at>Date.parse(entry.lastDepositAt))entry.lastDepositAt=deposit.paid_at;
+  }
+  return [...grouped.values()].sort((a,b)=>a.player.localeCompare(b.player,"pt-BR"));
+}
 function thresholds(value){
   if(!value||typeof value!=="object")return JSON.parse(JSON.stringify(DEFAULT_MINIMA));
   const result={};
@@ -319,9 +367,18 @@ async function getReport(pool,{now=new Date()}={}){
   const byKey=new Map(active.map(x=>[x.player_key,x]));
   report.rows=report.rows.map(row=>cycleService.decorate(row,byKey.get(normalizedPlayer(row.player)),
     bank,cta.byPlayer.get(normalizedPlayer(row.player))||[],now,sweeps));
+  const bankAvailable=results[1].status==="fulfilled";
+  // Falha do banco não pode transformar ausência de dados em inadimplência.
+  if(!bankAvailable)report.rows=report.rows.map(row=>({...row,
+    payment:{...row.payment,status:"SEM DADOS"},previousPayment:{...row.previousPayment,status:"SEM DADOS"}}));
+  report.unlinkedDeposits=bankAvailable?unlinkedDeposits(bank,roster,report,now):[];
+  report.paymentWeek=cycleService.weekAt(now);
+  report.paymentSummary={paid:report.rows.filter(r=>["PAGO","PAGO COM ATRASO"].includes(r.payment.status)).length,
+    pending:report.rows.filter(r=>["PENDENTE","PARCIAL"].includes(r.payment.status)).length,
+    unlinked:report.unlinkedDeposits.length,available:bankAvailable};
   report.attendanceSource={countedEvents:cta.events,matching:"exact_normalized_name",ambiguousNames:cta.ambiguous||[]};
   if(cta.ambiguous?.length)report.warnings.push("Há "+cta.ambiguous.length+" nickname(s) ambíguos entre contas Discord; presença não atribuída automaticamente.");
-  report.bankSource={note:"Extrato importado indica depositos, nao confirma a finalidade do pagamento."};
+  report.bankSource={note:"Depósitos classificados por competência UTC e jogador do G. A finalidade ainda pode exigir conferência humana; pagamentos sem correspondência nunca são vinculados automaticamente."};
   return report;
 }
 function mondayUtc(now){
@@ -384,4 +441,4 @@ async function tick(pool,client,{channelId,now=new Date()}={}){
   }finally{ticking=false;}
 }
 module.exports={init,previewRoster,saveRoster,rosterLatest,getSettings,saveSettings,validateSettings,
-  contributorLevel,completeSweeps,selectPair,memberDelta,computeReport,getReport,scheduledForWeek,tick};
+  contributorLevel,completeSweeps,selectPair,memberDelta,unlinkedDeposits,closestGuildName,computeReport,getReport,scheduledForWeek,tick};

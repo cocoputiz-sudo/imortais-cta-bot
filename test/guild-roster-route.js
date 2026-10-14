@@ -306,6 +306,9 @@ async function testRouteAccessAndResponses() {
     assert.equal(fourth.obligations.paymentRequired,10000000);
     assert.equal(fourth.obligations.ctaRequired,0);
     assert.equal(fourth.assignmentSource,"observed");
+    assert.equal(fourth.cycle.start,new Date(fourth.cycle.start).toISOString());
+    assert.equal(new Date(fourth.cycle.start).getUTCDay(),1,"todos usam segunda UTC");
+    assert.equal(new Date(fourth.cycle.start).getUTCHours(),0);
     // Apenas a administracao pode confirmar data anterior e importar extrato.
     const assignmentUrl=base+"/api/contributors/assignment";
     const assignmentBody={player:"NovoQuatro",assignedAt:new Date(Date.now()-2*86400000).toISOString()};
@@ -330,7 +333,26 @@ async function testRouteAccessAndResponses() {
     const updatedTierFour=afterBank.json.rows.find(x=>x.player==="NovoQuatro");
     assert.equal(updatedTierFour.assignmentSource,"confirmed");
     assert.equal(updatedTierFour.payment.creditedCandidate,10000000);
-    assert.equal(updatedTierFour.payment.verification,"PENDENTE DE CONFERÊNCIA");
+    assert.match(updatedTierFour.payment.verification,/FINALIDADE A CONFERIR/);
+    assert.equal(updatedTierFour.payment.status,"PAGO","depósito deve quitar competência atual");
+    assert(afterBank.json.paymentWeek&&afterBank.json.paymentSummary,
+      "relatorio deve trazer competencia e totais financeiros");
+    // Regressao ponta a ponta: nome inexistente com sugestao jamais credita o similar.
+    const wrongName="NovoQuatr0",wrongBankTsv="Date\tPlayer\tReason\tAmount\n"+
+      bankAt+"\t"+wrongName+"\tDeposit\t4000000\n";
+    const importedUnknown=await fetch(bankUrl,{method:"POST",headers:{
+      "Content-Type":"application/json",Cookie:policeCookie},body:JSON.stringify({text:wrongBankTsv})});
+    assert.equal(importedUnknown.status,200);
+    const afterUnknown=await contributorRead(policeCookie);
+    assert.equal(afterUnknown.status,200);
+    const unmatchedEntry=afterUnknown.json.unlinkedDeposits.find(x=>x.player===wrongName);
+    assert(unmatchedEntry,"deposito de nome inexistente precisa aparecer como nao vinculado");
+    assert.equal(unmatchedEntry.reason,"Nome não encontrado no G");
+    assert.equal(unmatchedEntry.suggestion,"NovoQuatro","sugestao sem vinculo automatico");
+    assert.equal(unmatchedEntry.amount,4000000);
+    assert.equal(afterUnknown.json.rows.find(x=>x.player==="NovoQuatro").payment.amount,10000000,
+      "valor nao associado nao pode aumentar o saldo de outro contribuinte");
+
     // O G incompleto nao deve excluir a guilda: transacao e contagem conservadora.
     const dbRoster=await contributorWeekly.rosterLatest(db.pool);
     assert.equal(dbRoster.member_count,9);
