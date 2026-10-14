@@ -17,13 +17,16 @@ const G = process.env.GUILD_ID || "guild-test";
 
 function ok(name) { console.log("✅ " + name); }
 
-function cookieFor({ canEdit, canViewContributors=false, isSiteAdmin=false }) {
+function cookieFor({ canEdit, canViewContributors=false, isSiteAdmin=false,
+  canEditGuildMight=false, canEditContributors=false }) {
   const sid = web.__test.signSession({
     id: canEdit ? "staff-test" : "member-test",
     name: canEdit ? "Staff Test" : "Member Test",
     isMember: true,
     canEdit: !!canEdit,
     canViewContributors:!!canViewContributors,
+    canEditGuildMight:!!canEditGuildMight,
+    canEditContributors:!!canEditContributors,
     isSiteAdmin:!!isSiteAdmin,
     exp: Date.now() + 60 * 60 * 1000,
   });
@@ -149,6 +152,31 @@ async function testRouteAccessAndResponses() {
     const adminCookie=cookieFor({canEdit:true,isSiteAdmin:true});
     const officerCookie=cookieFor({canEdit:false,canViewContributors:true});
     const editorCookie=cookieFor({canEdit:true});
+    // Cargo Police da Guild: permitido APENAS editar Guild Might e Contribuintes.
+    const policeRoleId="1392859981371412671";
+    assert(web.__test.hasPoliceGuildRole([policeRoleId]));
+    assert.equal(web.__test.hasPoliceGuildRole(["1392859981371412672"]),false,
+      "somente o ID exato tem autorizacao");
+    assert(web.__test.canEditGuildMight([policeRoleId],"police-test","Police"));
+    assert(web.__test.canEditContributors([policeRoleId],"police-test","Police"));
+    assert(web.__test.canViewContributors([policeRoleId],"police-test","Police"));
+    assert.equal(web.__test.canEditContributors([],"member-test","Member"),false);
+    const policeCookie=cookieFor({canEdit:false,canViewContributors:true,
+      canEditGuildMight:true,canEditContributors:true});
+    const policeSession=await fetch(base+"/auth/me",{headers:{Cookie:policeCookie}}).then(r=>r.json());
+    assert.equal(policeSession.isSiteAdmin,false);
+    assert.equal(policeSession.canEdit,false,"nao habilita edicao de CTA/War Room geral");
+    assert.equal(policeSession.canManageDevices,false);
+    assert.equal(policeSession.canManageBomb,false);
+    assert.equal(policeSession.canEditGuildMight,true);
+    assert.equal(policeSession.canEditContributors,true);
+    assert.equal(policeSession.canViewContributors,true);
+    assert.equal((await requestImport("preview",policeCookie,{text:roster})).status,200,
+      "Police pode validar lista G em Contribuintes");
+    assert.equal((await post(base,policeCookie,{text:roster,eventId:ev.id})).status,403,
+      "Police nao ganha permissao para editar/analisar CTAs");
+    assert.equal((await fetch(base+"/api/telemetry/guild-might-ingest-status",{
+      headers:{Cookie:policeCookie}})).status,403,"diagnosticos sensiveis continuam admin-only");
     assert.equal((await requestImport("preview",editorCookie,{text:roster})).status,403,
       "editor nao deve atualizar cadastro sem ser administrador");
     assert.equal((await requestImport("confirm",officerCookie,{text:roster})).status,403,
@@ -182,6 +210,14 @@ async function testRouteAccessAndResponses() {
       previewToken:preflight.json.previewToken});
     assert.equal(initialConfirm.status,200);
     assert.equal(initialConfirm.json.saved.contributors,3);
+    // Police tem acesso ao mesmo fluxo protegido preview + confirmação que site-admin.
+    const previewPolice=await requestImport("preview",policeCookie,{text:roster});
+    assert.equal(previewPolice.status,200);
+    const confirmPolice=await requestImport("confirm",policeCookie,{
+      text:roster,checksum:previewPolice.json.checksum,
+      expectedImportedAt:previewPolice.json.expectedImportedAt,previewedAt:previewPolice.json.previewedAt,
+      previewToken:previewPolice.json.previewToken});
+    assert.equal(confirmPolice.status,200,"Police pode confirmar importacao do G");
     const saved=await contributorWeekly.rosterLatest(db.pool);
     assert.equal(saved.members.length,8,"somente confirmacao grava no PostgreSQL");
     assert.equal(saved.members.find(x=>x.name==="Delta").roles[0],"CONTRIBUINTE 1");
@@ -203,6 +239,8 @@ async function testRouteAccessAndResponses() {
       "regular guild member cannot see contributor report");
     assert.equal((await contributorRead(cookieFor({canEdit:true}))).status,403,
       "a caller without admin/officer role cannot see contributor report");
+    const policeReport=await contributorRead(policeCookie);
+    assert.equal(policeReport.status,200,"Police pode abrir relatorio de contribuintes");
     const officerReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
     assert.equal(officerReport.status,200,"officer can see contributor report");
     assert.equal(officerReport.json.roster.memberCount,8);
@@ -217,6 +255,25 @@ async function testRouteAccessAndResponses() {
     const storedSettings=await contributorWeekly.getSettings(db.pool);
     assert.equal(storedSettings.minima["1"].pve,10);
     assert.equal(storedSettings.reminderEnabled,false);
+    const policeConfig=await contributorRead(policeCookie,"POST",adminCfg);
+    assert.equal(policeConfig.status,200,"Police pode salvar os mesmos limites e lembretes que o admin");
+    const progressApi=base+"/api/telemetry/guild-progress";
+    async function postProgress(cookie,categoryCode="PVE"){
+      const response=await fetch(progressApi,{method:"POST",headers:{
+        "Content-Type":"application/json",Cookie:cookie},
+        body:JSON.stringify({categoryCode,level:15,seasonPoints:12345})});
+      return {status:response.status,json:await response.json()};
+    }
+    assert.equal((await postProgress(cookieFor({canEdit:false}))).status,403,
+      "membro regular nao altera Guild Might");
+    assert.equal((await postProgress(cookieFor({canEdit:false,canViewContributors:true}))).status,403,
+      "oficial com acesso de leitura nao edita Guild Might");
+    const manual=await postProgress(policeCookie);
+    assert.equal(manual.status,200,"Police salva Guild Might categoria PVE");
+    assert.equal(manual.json.level,15);
+    const levelRead=await fetch(progressApi,{headers:{Cookie:policeCookie}}).then(r=>r.json());
+    assert(levelRead.rows.some(x=>x.categoryCode==="PVE"&&x.level===15&&x.updatedBy==="member-test"),
+      "Guild Might registra autor da edicao do Police");
     const names = (key) => good.json.groups[key].map((x) => x.name);
     assert.deepEqual(names("pronto"), ["Alfa"]);
     assert.deepEqual(names("naCallSemPing"), ["Bravo"]);
@@ -255,6 +312,7 @@ async function testRouteAccessAndResponses() {
     const confirm=(cookie)=>fetch(assignmentUrl,{method:"POST",headers:{
       "Content-Type":"application/json",Cookie:cookie},body:JSON.stringify(assignmentBody)});
     assert.equal((await confirm(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
+    assert.equal((await confirm(policeCookie)).status,200,"Police pode definir data do contribuinte");
     assert.equal((await confirm(cookieFor({canEdit:true,isSiteAdmin:true}))).status,200);
     const bankAt=new Date().toISOString().slice(0,19).replace("T"," ");
     const bankTsv="Date\tPlayer\tReason\tAmount\n"+bankAt+"\tNovoQuatro\tDeposit\t10000000\n";
@@ -262,7 +320,8 @@ async function testRouteAccessAndResponses() {
     const submitBank=(cookie)=>fetch(bankUrl,{method:"POST",headers:{
       "Content-Type":"application/json",Cookie:cookie},body:JSON.stringify({text:bankTsv})});
     assert.equal((await submitBank(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
-    const firstBank=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
+    const firstBank=await submitBank(policeCookie);
+    assert.equal(firstBank.status,200,"Police pode importar extrato do banco");
     assert.equal(firstBank.status,200);
     assert.equal((await firstBank.json()).inserted,1);
     const repeat=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
