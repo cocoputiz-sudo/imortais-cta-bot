@@ -17,6 +17,7 @@ async function init(pool){
     "player_key TEXT PRIMARY KEY,player_name TEXT NOT NULL,discord_user_id TEXT NOT NULL UNIQUE,"+
     "status TEXT NOT NULL CHECK(status IN ('pending','confirmed','revoked')),"+
     "consented_at TIMESTAMPTZ NOT NULL,reviewed_by TEXT,reviewed_at TIMESTAMPTZ,updated_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+  await pool.query("ALTER TABLE contributor_discord_links ADD COLUMN IF NOT EXISTS review_reason TEXT");
   await pool.query("CREATE TABLE IF NOT EXISTS contributor_prior_debts("+
     "player_key TEXT PRIMARY KEY,amount BIGINT NOT NULL CHECK(amount>=0),note TEXT NOT NULL DEFAULT '',"+
     "updated_by TEXT NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now())");
@@ -25,6 +26,12 @@ async function init(pool){
     "due BIGINT NOT NULL CHECK(due>0),paid_total BIGINT NOT NULL DEFAULT 0 CHECK(paid_total>=0),"+
     "first_week BOOLEAN NOT NULL DEFAULT false,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"+
     "PRIMARY KEY(player_key,week_key))");
+  await pool.query("CREATE TABLE IF NOT EXISTS contributor_weekly_adjustments("+
+    "id BIGSERIAL PRIMARY KEY,player_key TEXT NOT NULL,week_key DATE NOT NULL,"+
+    "amount BIGINT NOT NULL CHECK(amount>0),reason TEXT NOT NULL,"+
+    "adjusted_by TEXT NOT NULL,adjusted_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_contrib_adjustments_player_week "+
+    "ON contributor_weekly_adjustments(player_key,week_key)");
   await pool.query("CREATE TABLE IF NOT EXISTS contributor_dm_settings("+
     "id SMALLINT PRIMARY KEY CHECK(id=1),enabled BOOLEAN NOT NULL DEFAULT false,"+
     "updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_by TEXT)");
@@ -48,12 +55,16 @@ async function requestLink(pool,{player,discordId}){
   const own=await pool.query("SELECT player_key,status FROM contributor_discord_links WHERE discord_user_id=$1",[id]);
   if(own.rows.length&&own.rows[0].player_key!==key)fail("discord_ja_vinculado_outro_jogador");
   const linked=await pool.query("SELECT discord_user_id,status FROM contributor_discord_links WHERE player_key=$1",[key]);
-  if(linked.rows.length&&linked.rows[0].discord_user_id!==id)fail("jogador_ja_vinculado_outro_discord");
+  if(linked.rows.length&&linked.rows[0].discord_user_id!==id&&linked.rows[0].status!=="revoked")
+    fail("jogador_ja_vinculado_outro_discord");
   const r=await pool.query(
     "INSERT INTO contributor_discord_links(player_key,player_name,discord_user_id,status,consented_at) "+
     "VALUES($1,$2,$3,'pending',now()) ON CONFLICT(player_key) DO UPDATE SET "+
-    "player_name=EXCLUDED.player_name,status=CASE WHEN contributor_discord_links.status='confirmed' "+
-    "THEN 'confirmed' ELSE 'pending' END,consented_at=now(),updated_at=now() RETURNING status",
+    "player_name=EXCLUDED.player_name,discord_user_id=EXCLUDED.discord_user_id,"+
+    "status=CASE WHEN contributor_discord_links.status='confirmed' THEN 'confirmed' ELSE 'pending' END,"+
+    "reviewed_by=CASE WHEN contributor_discord_links.status='revoked' THEN NULL ELSE contributor_discord_links.reviewed_by END,"+
+    "reviewed_at=CASE WHEN contributor_discord_links.status='revoked' THEN NULL ELSE contributor_discord_links.reviewed_at END,"+
+    "review_reason=NULL,consented_at=now(),updated_at=now() RETURNING status",
     [key,member.name,id]);
   return {player:member.name,status:r.rows[0].status};
 }
@@ -75,6 +86,45 @@ async function review(pool,{player,editor,client}){
     "WHERE player_key=$1 AND status='pending' RETURNING player_name,discord_user_id",[key,String(editor)]);
   if(!updated.rowCount)fail("vinculo_ja_alterado");
   return {player:updated.rows[0].player_name,discordId:updated.rows[0].discord_user_id,status:"confirmed"};
+}
+async function closeLink(pool,{player,editor,reason,action}){
+  const key=keyOf(player),text=String(reason||"").trim();
+  if(!key||!text||text.length>240)fail("motivo_vinculo_obrigatorio");
+  if(!["reject","revoke"].includes(action))fail("acao_vinculo_invalida");
+  const expected=action==="reject"?"pending":"confirmed";
+  const r=await pool.query("UPDATE contributor_discord_links "+
+    "SET status='revoked',reviewed_by=$2,reviewed_at=now(),review_reason=$3,updated_at=now() "+
+    "WHERE player_key=$1 AND status=$4 RETURNING player_name,discord_user_id,status",
+    [key,String(editor),text,expected]);
+  if(!r.rowCount)fail("status_vinculo_invalido");
+  return {player:r.rows[0].player_name,discordId:r.rows[0].discord_user_id,
+    status:"revoked",action,reason:text};
+}
+async function adjustWeek(pool,{player,weekKey,amount,reason,editor}){
+  const key=keyOf(player),text=String(reason||"").trim(),n=Number(amount),date=String(weekKey||"");
+  if(!key||!/^d{4}-d{2}-d{2}$/.test(date)||!Number.isFinite(Date.parse(date+"T00:00:00Z"))||
+    new Date(date+"T00:00:00Z").toISOString().slice(0,10)!==date||
+    new Date(date+"T00:00:00Z").getUTCDay()!==1||
+    !Number.isSafeInteger(n)||n<=0||n>100000000000||!text||text.length>240)
+    fail("baixa_invalida");
+  // Serialização por linha da competência: não permitir baixa acima do saldo.
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    const record=await client.query("SELECT due,paid_total FROM contributor_weekly_obligations "+
+      "WHERE player_key=$1 AND week_key=$2::date FOR UPDATE",[key,date]);
+    if(!record.rowCount)fail("competencia_nao_encontrada");
+    const prior=await client.query("SELECT COALESCE(SUM(amount),0) AS total FROM contributor_weekly_adjustments "+
+      "WHERE player_key=$1 AND week_key=$2::date",[key,date]);
+    const outstanding=Math.max(0,Number(record.rows[0].due)-Number(record.rows[0].paid_total)-Number(prior.rows[0].total));
+    if(n>outstanding)fail("baixa_superior_ao_saldo");
+    const r=await client.query("INSERT INTO contributor_weekly_adjustments "+
+      "(player_key,week_key,amount,reason,adjusted_by) VALUES($1,$2::date,$3,$4,$5) "+
+      "RETURNING id,amount,reason,adjusted_by,adjusted_at",[key,date,n,text,String(editor)]);
+    await client.query("COMMIT");
+    return {...r.rows[0],playerKey:key,weekKey:date,remaining:outstanding-n};
+  }catch(e){await client.query("ROLLBACK");throw e;}
+  finally{client.release();}
 }
 async function priorDebt(pool,{player,enabled,amount,note,editor}){
   const key=keyOf(player),{found}=await activeRoster(pool);
