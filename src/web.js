@@ -259,16 +259,31 @@ function startWebServer(client, opts) {
     console.error("[contributor roster import]",e);
     return res.status(500).json({error:"server"});
   }
+  function contributorPreviewSignature(adminId,checksum,expectedImportedAt,previewedAt){
+    return crypto.createHmac("sha256",SESSION_SECRET)
+      .update(JSON.stringify([String(adminId),checksum,expectedImportedAt,previewedAt])).digest("hex");
+  }
   app.post("/api/contributors/roster/preview",async(req,res)=>{
-    if(!requireSiteAdmin(req,res))return;
-    try{res.json(await contributorWeekly.previewRoster(db.pool,req.body?.text));}
-    catch(e){contributorRosterError(res,e);}
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    try{
+      const preview=await contributorWeekly.previewRoster(db.pool,req.body?.text);
+      const previewedAt=Date.now();
+      res.json({...preview,previewedAt,previewToken:contributorPreviewSignature(
+        sess.id,preview.checksum,preview.expectedImportedAt,previewedAt)});
+    }catch(e){contributorRosterError(res,e);}
   });
   app.post("/api/contributors/roster/confirm",async(req,res)=>{
     const sess=requireSiteAdmin(req,res);if(!sess)return;
     try{
-      const saved=await contributorWeekly.saveRoster(db.pool,req.body?.text,sess.id,{
-        checksum:req.body?.checksum,expectedImportedAt:req.body?.expectedImportedAt});
+      const body=req.body||{},issued=body.previewedAt;
+      if(!Number.isSafeInteger(issued)||issued>Date.now()||Date.now()-issued>10*60000||
+         !/^[a-f0-9]{64}$/.test(String(body.previewToken||"")))
+        return res.status(400).json({error:"preview_required"});
+      const expected=contributorPreviewSignature(sess.id,body.checksum,body.expectedImportedAt,issued);
+      if(!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(body.previewToken)))
+        return res.status(400).json({error:"preview_required"});
+      const saved=await contributorWeekly.saveRoster(db.pool,body.text,sess.id,{
+        checksum:body.checksum,expectedImportedAt:body.expectedImportedAt});
       res.json({ok:true,saved});
     }catch(e){contributorRosterError(res,e);}
   });
@@ -3641,7 +3656,8 @@ const PAGE = `<!doctype html>
             ' contribuintes deixarão a lista ativa. A análise da Guilda Online não altera este cadastro.'))return;
           confirmBtn.disabled=true;previewBtn.disabled=true;status.textContent='Salvando lista confirmada...';
           postRoster('confirm',{text:validatedText,checksum:validated.checksum,
-            expectedImportedAt:validated.expectedImportedAt}).then(function(result){
+            expectedImportedAt:validated.expectedImportedAt,previewedAt:validated.previewedAt,
+            previewToken:validated.previewToken}).then(function(result){
             validated=null;validatedText='';
             alert('Importação confirmada: '+result.saved.contributors+' contribuintes atualizados.');
             renderContributors();
