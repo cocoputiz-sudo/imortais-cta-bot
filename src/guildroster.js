@@ -25,7 +25,7 @@ const { normName } = require("./playerName");
 const MAX_CHARS = 600_000;
 const MAX_LINES = 3_000;
 // Cargos que nao entram na cobranca de ausencia do CTA, inclusive o nome legado.
-const DEFAULT_EXEMPT_ROLES = ["contribuinte", "contribuinte 1", "contribuinte 2", "contribuinte 3"];
+const DEFAULT_EXEMPT_ROLES = ["contribuinte", "contribuinte 1", "contribuinte 2", "contribuinte 3", "contribuinte 4"];
 
 // Mesma regra de nomes usada no resto do projeto: tira "!", espaços e tags
 // de guilda/nacionalidade do começo ([IM], [ESP]...), em minúsculas.
