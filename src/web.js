@@ -28,6 +28,8 @@ const STAFF_ROLE_ID = process.env.STAFF_ROLE_ID || null;
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || null;
 const BOMB_LEADER_ROLE_ID = process.env.BOMB_LEADER_ROLE_ID || null;
 const SITE_ADMIN_IDS = new Set(String(process.env.SITE_ADMIN_IDS || "").split(",").map(x => x.trim()).filter(Boolean));
+// Cargo Discord Police da Guild: edita somente Guild Might e Contribuintes.
+const POLICE_GUILD_ROLE_ID = "1392859981371412671";
 
 // Sessao stateless: cookie assinado (HMAC). Sobrevive a deploy/restart sem estado em memoria.
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
@@ -73,7 +75,25 @@ function requireMember(req, res) {
 function requireContributorViewer(req,res){
   const sess=requireMember(req,res);
   if(!sess)return null;
-  if(!sess.canViewContributors&&!sess.isSiteAdmin){res.status(403).json({error:"officer_or_admin_only"});return null;}
+  if(!sess.canViewContributors&&!sess.canEditContributors&&!sess.isSiteAdmin){
+    res.status(403).json({error:"officer_or_admin_only"});return null;
+  }
+  return sess;
+}
+function requireContributorEditor(req,res){
+  const sess=requireMember(req,res);
+  if(!sess)return null;
+  if(!sess.canEditContributors&&!sess.isSiteAdmin){
+    res.status(403).json({error:"contributors_editor_only"});return null;
+  }
+  return sess;
+}
+function requireGuildMightEditor(req,res){
+  const sess=requireMember(req,res);
+  if(!sess)return null;
+  if(!sess.canEditGuildMight&&!sess.isSiteAdmin){
+    res.status(403).json({error:"guild_might_editor_only"});return null;
+  }
   return sess;
 }
 function requireSiteAdmin(req,res) {
@@ -88,8 +108,17 @@ function requireEditor(req, res) {
   if (!sess.canEdit) { res.status(403).json({ error: "no_edit" }); return null; }
   return sess;
 }
+function hasPoliceGuildRole(roles){
+  return Array.isArray(roles)&&roles.some(id=>String(id)===POLICE_GUILD_ROLE_ID);
+}
+function canEditGuildMight(roles,userId,name){
+  return !!(isSiteAdmin(roles,userId,name)||hasPoliceGuildRole(roles));
+}
+function canEditContributors(roles,userId,name){
+  return !!(isSiteAdmin(roles,userId,name)||hasPoliceGuildRole(roles));
+}
 function canViewContributors(roles,userId,name){
-  if(isSiteAdmin(roles,userId,name))return true;
+  if(canEditContributors(roles,userId,name))return true;
   const allowed=new Set(String(process.env.OFFICER_ROLE_IDS||"").split(",").map(x=>x.trim()).filter(Boolean));
   if(roles.some(id=>allowed.has(String(id))))return true;
   const g=_client&&_client.guilds&&_client.guilds.cache.get(GUILD_ID);
@@ -207,7 +236,8 @@ function startWebServer(client, opts) {
   const app = express();
   app.set("trust proxy", 1); // Railway edge/proxy: req.ip passa a refletir o cliente real.
   app.use(express.json({ limit: "12mb" }));
-  telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager, requireAdmin:requireSiteAdmin });
+  telemetry.installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager,
+    requireAdmin:requireSiteAdmin, requireGuildMightEditor });
 
   app.get("/api/health", async (_req, res) => {
     let database = false;
@@ -264,7 +294,7 @@ function startWebServer(client, opts) {
       .update(JSON.stringify([String(adminId),checksum,expectedImportedAt,previewedAt])).digest("hex");
   }
   app.post("/api/contributors/roster/preview",async(req,res)=>{
-    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    const sess=requireContributorEditor(req,res);if(!sess)return;
     try{
       const preview=await contributorWeekly.previewRoster(db.pool,req.body?.text);
       const previewedAt=Date.now();
@@ -273,7 +303,7 @@ function startWebServer(client, opts) {
     }catch(e){contributorRosterError(res,e);}
   });
   app.post("/api/contributors/roster/confirm",async(req,res)=>{
-    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    const sess=requireContributorEditor(req,res);if(!sess)return;
     try{
       const body=req.body||{},issued=body.previewedAt;
       if(!Number.isSafeInteger(issued)||issued>Date.now()||Date.now()-issued>10*60000||
@@ -287,15 +317,15 @@ function startWebServer(client, opts) {
       res.json({ok:true,saved});
     }catch(e){contributorRosterError(res,e);}
   });
-  // Officers may view; thresholds and weekly reminder may only be changed by admins.
+  // Oficiais consultam; administracao e Police da Guild editam nesta secao.
   app.get("/api/contributors/weekly",async(req,res)=>{
     if(!requireContributorViewer(req,res))return;
     try{res.json(await contributorWeekly.getReport(db.pool));}
     catch(e){console.error("[contributor report]",e);res.status(500).json({error:"report_failed"});}
   });
-  // Admin-only: alterar a data precisa evidência manual; cargos vêm somente do G.
+  // Edicao restrita a administracao e Police da Guild; cargos vem somente do G.
   app.post("/api/contributors/assignment",async(req,res)=>{
-    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    const sess=requireContributorEditor(req,res);if(!sess)return;
     try{res.json(await require("./contributorCycle").confirmAssignment(db.pool,{
       player:req.body?.player,assignedAt:req.body?.assignedAt,actor:sess.id}));}
     catch(e){
@@ -305,7 +335,7 @@ function startWebServer(client, opts) {
   });
   // O extrato do jogo fornece indicios, sem declaracao automatica de quitacao.
   app.post("/api/contributors/bank-import",async(req,res)=>{
-    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    const sess=requireContributorEditor(req,res);if(!sess)return;
     try{res.json(await require("./contributorCycle").importBank(db.pool,req.body?.text,sess.id));}
     catch(e){
       const error=String(e.message||"server");
@@ -318,7 +348,7 @@ function startWebServer(client, opts) {
     catch(e){res.status(500).json({error:"settings_failed"});}
   });
   app.post("/api/contributors/settings",async(req,res)=>{
-    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    const sess=requireContributorEditor(req,res);if(!sess)return;
     try{res.json(await contributorWeekly.saveSettings(db.pool,req.body||{},sess.id));}
     catch(e){
       const err=String(e.message||"");
@@ -384,6 +414,8 @@ function startWebServer(client, opts) {
         canManageBomb: canManageBomb(roles, me.id, name),
         canManageCastleRoaming: canManageCastleRoaming(roles, me.id, name),
         isSiteAdmin: isSiteAdmin(roles, me.id, name),
+        canEditGuildMight: canEditGuildMight(roles,me.id,name),
+        canEditContributors: canEditContributors(roles,me.id,name),
         canViewContributors: canViewContributors(roles,me.id,name),
         isMember: !!member,
         exp: Date.now() + SESSION_TTL_MS
@@ -404,7 +436,9 @@ function startWebServer(client, opts) {
       canManageBomb: !!s.canManageBomb,
       canManageCastleRoaming: !!s.canManageCastleRoaming,
       isSiteAdmin: !!s.isSiteAdmin,
-      canViewContributors: !!s.canViewContributors||!!s.isSiteAdmin,
+      canEditGuildMight: !!s.canEditGuildMight||!!s.isSiteAdmin,
+      canEditContributors: !!s.canEditContributors||!!s.isSiteAdmin,
+      canViewContributors: !!s.canViewContributors||!!s.canEditContributors||!!s.isSiteAdmin,
       member: !!s.isMember
     } : { logged: false });
   });
@@ -1317,7 +1351,8 @@ const PAGE = `<!doctype html>
 <script>
   var authState={
     logged:false,member:false,canEdit:false,canManageDevices:false,
-    canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,name:''
+    canManageBomb:false,canManageCastleRoaming:false,isSiteAdmin:false,
+    canEditGuildMight:false,canEditContributors:false,canViewContributors:false,name:''
   };
   var current=null, es=null, tes=null, selTime=null, selImg=null;
   var openEventsCache=[];
@@ -3196,7 +3231,7 @@ const PAGE = `<!doctype html>
   }
   function gmManual(code){return guildProgressRows.find(function(p){return p.categoryCode===code;})||null;}
   function gmEditManual(code){
-    if(!authState.isSiteAdmin)return;
+    if(!authState.canEditGuildMight)return;
     var old=gmManual(code)||{}, level=window.prompt('Nível (vazio = não informado)',old.level==null?'':String(old.level));
     if(level===null)return;
     var sp=window.prompt('Season Points (vazio = não informado)',old.seasonPoints==null?'':String(old.seasonPoints));
@@ -3402,7 +3437,7 @@ const PAGE = `<!doctype html>
         +'<div class="note"><b>📅 Comparação semanal para contribuintes:</b> '+(snap&&snap.weekly
           ?fmtS(snap.weekly.comparedPlayers)+' jogadores com base de 7 dias; '+fmtS(snap.weekly.missingBaselinePlayers)+' sem base. Diferença total apenas dos comparáveis: '+gmWeekNumber(snap.weekly.comparedPlayers?snap.weekly.observedDelta:null)
           :'sem histórico comparável')+'. Data de referência: '+esc(gmDate(snap&&snap.weekly&&snap.weekly.referenceAt))+'. Sem captura anterior não equivale a 0 de Might.</div>'
-        +(catCode&&authState.isSiteAdmin?'<button class="gm-action" id="gm-edit-progress" type="button">Editar nível / SP</button>':'')+'<div class="note">Ranking consolidado: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' jogadores · '+gmAge(snap&&snap.oldestMemberAt)+' · '+(snap&&snap.complete?'COBERTURA INTEGRAL POR VARREDURA':snap&&snap.sweepComplete?'Última varredura integral '+esc(snap.sweepCoverage||'?')+' · atualização parcial posterior':'Varredura integral ainda não comprovada')+' · última varredura completa '+esc(gmDate(snap&&snap.lastCompleteAt))+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
+        +(catCode&&authState.canEditGuildMight?'<button class="gm-action" id="gm-edit-progress" type="button">Editar nível / SP</button>':'')+'<div class="note">Ranking consolidado: '+esc(gmDate(snap&&snap.capturedAt))+' · '+members.length+'/'+(snap&&snap.totalMembers||'?')+' jogadores · '+gmAge(snap&&snap.oldestMemberAt)+' · '+(snap&&snap.complete?'COBERTURA INTEGRAL POR VARREDURA':snap&&snap.sweepComplete?'Última varredura integral '+esc(snap.sweepCoverage||'?')+' · atualização parcial posterior':'Varredura integral ainda não comprovada')+' · última varredura completa '+esc(gmDate(snap&&snap.lastCompleteAt))+' · níveis/Season Points não disponíveis'+(snap&&snap.category&&snap.category.nameTentative?' · identificação de categoria provisória':'')+'</div>'
         +(snap?gmRows(members,'might')+'<div class="note">Marcadores diferentes na mesma varredura não invalidam cobertura. Apenas uma varredura integral posterior, do mesmo dispositivo e com total de membros estável, comprova saídas. Isso não é reconciliação de um único instante Photon.</div>'+(snap.historicalMembers&&snap.historicalMembers.length?'<h4>Histórico desatualizado ('+snap.historicalMembers.length+')</h4>'+gmRows(snap.historicalMembers,'might'):''):'<div class="empty-note">Abra a categoria no Albion com o Combat Client conectado para gerar o snapshot correspondente.</div>')
         +'</div>';
     } else {
@@ -3422,7 +3457,7 @@ const PAGE = `<!doctype html>
     if(meta.materializationError)html+='<div class="note">Erro ao materializar Might: '+esc(meta.materializationError)+'</div>';
     var challengeProg=gmManual('GUILD_CHALLENGE');
     if(guildChallengeVisible)html+='<div class="note">Guild Challenge: Nível '+(challengeProg&&challengeProg.level!=null?fmtS(challengeProg.level):'não capturado')+' · SP '+(challengeProg&&challengeProg.seasonPoints!=null?fmtS(challengeProg.seasonPoints):'não capturado')+(challengeProg?' · ADMIN MANUAL':'')+'</div>';
-    if(guildChallengeVisible&&authState.isSiteAdmin)html+='<button class="gm-action" id="gm-edit-challenge-progress">Editar nível / SP Challenge</button>';
+    if(guildChallengeVisible&&authState.canEditGuildMight)html+='<button class="gm-action" id="gm-edit-challenge-progress">Editar nível / SP Challenge</button>';
     if(guildChallengeVisible&&ch.error)html+='<div class="note">Guild Challenge indisponível: '+esc(ch.error)+'</div>';
     setView('view-might',html);
     Array.prototype.forEach.call(document.querySelectorAll('[data-gm-card]'),function(btn){
@@ -3505,7 +3540,7 @@ const PAGE = `<!doctype html>
     gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
   }
   function renderContributors(){
-    if(!authState.canViewContributors){setView('view-contributors','<div class="empty-note">Acesso exclusivo de administradores e oficiais.</div>');return;}
+    if(!authState.canViewContributors&&!authState.canEditContributors){setView('view-contributors','<div class="empty-note">Acesso de administração, oficiais e Police da Guild.</div>');return;}
     loading('view-contributors','📅 Contribuintes – semana');
     Promise.all([
       fetch('/api/contributors/weekly',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Relatório HTTP '+r.status);return r.json();}),
@@ -3518,7 +3553,7 @@ const PAGE = `<!doctype html>
   function drawContributors(){
     var d=contributorReport||{},cfg=contributorSettings||{},count=d.counts||{},cats=d.categories||{},p=cats.PVE||{},g=cats.GATHERING||{};
     var html='<div class="modhead">📅 Contribuintes – semana</div>'+
-      '<div class="note">Acesso exclusivo da administração e oficiais. Somente registros Photon verificados de varreduras integrais e dispositivos pareados.</div>';
+      '<div class="note">Consulta para administração, oficiais e Police da Guild. Edição autorizada para administração e Police da Guild. Might usa varreduras Photon verificadas.</div>';
     if(d.stale)html+='<div class="panel" role="alert" style="background:#3b181c;border:2px solid #e95757;color:#ffb6b6;padding:20px;font-weight:bold;font-size:16px">⚠️ DESATUALIZADO. Última varredura integral de PvE/Coleta há mais de 7 dias ou ausente. Os números abaixo são históricos, NÃO são resultados atuais.</div>';
     if(d.warnings&&d.warnings.length)html+='<div class="panel" style="padding:12px;margin:10px 0">'+d.warnings.map(function(w){return '<div class="note">⚠️ '+esc(w)+'</div>';}).join('')+'</div>';
     html+='<div class="statgrid" style="margin:12px 0">'+
@@ -3535,10 +3570,10 @@ const PAGE = `<!doctype html>
       '<button class="btn primary" id="cw-refresh">↻ Atualizar relatório</button>'+
       '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
       '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
-    if(authState.isSiteAdmin){
+    if(authState.canEditContributors){
       html+='<details class="panel" id="cw-g-import" style="margin:14px 0;border:1px solid #46698a" open>'+
-        '<summary style="cursor:pointer;font-weight:bold">📋 Atualizar membros e cargos pelo G (somente administrador)</summary>'+
-        '<div class="note" style="margin:10px 0">No Albion: G → Guild → Copiar lista completa de membros com cargos → Colar abaixo. Esta é a única tela que altera os contribuintes. A análise de Guilda Online não salva cargos.</div>'+
+        '<summary style="cursor:pointer;font-weight:bold">📋 Atualizar membros e cargos pelo G (administração e Police da Guild)</summary>'+
+        '<div class="note" style="margin:10px 0">No Albion: G → Guild → Copiar lista completa de membros com cargos → Colar abaixo. A importação e atualização dos contribuintes é permitida a administradores e Police da Guild. A análise de Guilda Online não salva cargos.</div>'+
         '<textarea id="cw-roster-text" rows="7" style="width:100%;resize:vertical" spellcheck="false" placeholder="Character Name    Last Seen    Roles"></textarea>'+
         '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:9px 0">'+
         '<button type="button" class="btn primary" id="cw-roster-preview-btn">1. Validar e visualizar cargos</button>'+
@@ -3546,12 +3581,12 @@ const PAGE = `<!doctype html>
         '<span class="note" id="cw-roster-status"></span></div>'+
         '<div id="cw-roster-preview" aria-live="polite" class="note">Nenhuma alteração será feita até você conferir e confirmar a prévia.</div>'+
         '</details>';
-      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (somente admin)</summary>'+
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (administração e Police da Guild)</summary>'+
         '<div class="note">Cole o extrato exportado, com colunas Date, Player, Reason, Amount. Datas em UTC, valores inteiros em prata. Só Deposit positivo é armazenado, por até 45 dias; repetir o arquivo não duplica operações.</div>'+
         '<textarea id="cw-bank-text" rows="5" style="width:100%" placeholder="Date TAB Player TAB Reason TAB Amount"></textarea>'+
         '<button class="btn primary" id="cw-import-bank">Importar extrato</button> <span id="cw-bank-status" class="note"></span></details>';
       var minimum=(cfg.minima||{});
-      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (somente admin)</summary>'+
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (administração e Police da Guild)</summary>'+
         '<div class="note">Padrão: pelo menos +1 Might em PvE OU +1 em Coleta. Os mínimos podem ser ajustados individualmente; a comparação sempre exige os dois pares de varreduras.</div>'+
         '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Cargo</th><th>Mínimo PvE</th><th>Mínimo Coleta</th></tr></thead><tbody>'+
         ['1','2','3'].map(function(tier){var row=minimum[tier]||{pve:1,gathering:1};return '<tr><td>CONTRIBUINTE '+tier+'</td>'+
@@ -3573,7 +3608,7 @@ const PAGE = `<!doctype html>
         var cycle=x.cycle||{},ob=x.obligations||{},bank=x.payment||{},cta=x.attendance||{},might=x.cycleMight||{};
         return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
           '<td>'+esc(contribDisplayDate(x.assignedAt))+'<div class="note">'+(x.assignmentSource==='confirmed'?'Confirmado pela staff':'Primeiro registro, data estimada')+'</div>'+
-          (authState.isSiteAdmin?'<button class="btn ghost" data-cw-confirm="'+encodeURIComponent(x.player)+'" type="button">Definir data</button>':'')+'</td>'+
+          (authState.canEditContributors?'<button class="btn ghost" data-cw-confirm="'+encodeURIComponent(x.player)+'" type="button">Definir data</button>':'')+'</td>'+
           '<td>'+esc(contribDisplayDate(cycle.start))+' até '+esc(contribDisplayDate(cycle.end))+'</td>'+
           '<td>'+esc(cta.count==null?'SEM DADOS':cta.count)+'</td>'+
           '<td>'+esc(ob.ctaRequired==null?'A definir':ob.ctaRequired===0?'Isento':ob.ctaRequired)+'</td>'+
@@ -3589,7 +3624,7 @@ const PAGE = `<!doctype html>
     document.getElementById('cw-csv').onclick=function(){exportContributors('csv');};
     document.getElementById('cw-html').onclick=function(){exportContributors('html');};
 
-    if(authState.isSiteAdmin){
+    if(authState.canEditContributors){
       (function(){
         var box=document.getElementById('cw-roster-text'),previewBtn=document.getElementById('cw-roster-preview-btn'),
           confirmBtn=document.getElementById('cw-roster-confirm-btn'),status=document.getElementById('cw-roster-status'),
@@ -3966,13 +4001,15 @@ const PAGE = `<!doctype html>
         canManageBomb:!!a.canManageBomb,
         canManageCastleRoaming:!!a.canManageCastleRoaming,
         isSiteAdmin:!!a.isSiteAdmin,
+        canEditGuildMight:!!a.canEditGuildMight,
+        canEditContributors:!!a.canEditContributors,
         canViewContributors:!!a.canViewContributors,
         name:a.name||''
       };
       renderAuthHeader();
       var devicesNav=document.querySelector('.nav[data-view="devices"]');
       if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
-      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=authState.canViewContributors?'':'none';});
+      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=(authState.canViewContributors||authState.canEditContributors)?'':'none';});
       var navBomb=document.getElementById('nav-bomb');
       var navCastelo=document.getElementById('nav-castelo');
       var navRoaming=document.getElementById('nav-roaming');
@@ -4011,5 +4048,6 @@ module.exports = {
   renderWarRoomPage,
   notifyRosterChange,
   buildRosterData,
-  __test: { signSession, verifySession, PAGE, renderWarRoomPage }
+  __test: { signSession, verifySession, PAGE, renderWarRoomPage, hasPoliceGuildRole,
+    canEditGuildMight, canEditContributors, canViewContributors }
 };
