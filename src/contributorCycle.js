@@ -210,6 +210,16 @@ function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[
   // Might exige baseline no proprio ciclo, nunca usa a varredura anterior a atribuicao.
   const pve=cycle?withinCycleMight(sweeps,"PVE",keyOf(row.player),cycle,now):null;
   const gathering=cycle?withinCycleMight(sweeps,"GATHERING",keyOf(row.player),cycle,now):null;
+  const mightMinimum=row.minimum||{pve:1,gathering:1};
+  const meetsMight=level!=="2"?null:pve==null||gathering==null?null:
+    (pve>0&&pve>=mightMinimum.pve)||(gathering>0&&gathering>=mightMinimum.gathering);
+  const meetsCta=ctaRequired==null?null:ctaRequired===0?true:
+    cta.length===0?null:cta.length>=ctaRequired;
+  const overallStatus=!cycle?"SEM DATA":level==="4"?"ISENTO DE CTA · CONFERIR PRATA":
+    level==="2"?(meetsMight===true?"META MIGHT ATINGIDA · VERIFICAR ZVZ":
+      meetsMight===false?"MIGHT ABAIXO DA META":"MIGHT SEM DADOS"):
+    meetsCta===true?"META CTA ATINGIDA · OUTRAS OBRIGAÇÕES A CONFERIR":
+    meetsCta===false?"CTA EM ANDAMENTO":"CTA SEM EVIDÊNCIA";
   return {...row,
     firstSeenAt:assignment?.first_seen_at||null,
     assignedAt:assignment?.assigned_at||null,
@@ -218,9 +228,11 @@ function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[
     obligations:{paymentRequired,ctaRequired,resetDay:"VERIFICAR",weekendRequired:level==="1"||level==="2",
       discordRequired:level!=="4",mightRequired:level==="2"},
     payment:{found:record.length,creditedCandidate:record.length?paid:null,verification:"PENDENTE DE CONFERÊNCIA"},
-    attendance:{count:cta.length,weekendDays:weekend,verification:"CORRESPONDÊNCIA POR NOME"},
-    cycleMight:{pve,gathering,verifiedWindow:pve!=null&&gathering!=null},
-    overallStatus:!cycle?"SEM DATA":level==="4"?"CONFERIR PAGAMENTO":"EM ACOMPANHAMENTO"
+    attendance:{count:cta.length|| (level==="4"?0:null),weekendDays:weekend,
+      matchedName:cta.length>0,verification:"CORRESPONDÊNCIA POR NOME, SEM COMPROVAÇÃO DE AUSÊNCIA"},
+    cycleMight:{pve,gathering,verifiedWindow:pve!=null&&gathering!=null,meetsMight},
+    ctaTargetMet:meetsCta,
+    overallStatus
   };
 }
 function withinCycleMight(sweeps,code,key,cycle,now){
