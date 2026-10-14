@@ -20,6 +20,7 @@ const perfil = require("./perfil");
 const web = require("./web");
 const telemetry = require("./telemetry");
 const contributorWeekly = require("./contributorWeekly");
+const contributorBilling = require("./contributorBilling");
 const navigation = require("./navigation");
 const roaming = require("./roaming");
 const castelo = require("./castelo");
@@ -48,7 +49,7 @@ const CFG = {
 };
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
   partials: [Partials.Channel],
 });
 
@@ -1910,6 +1911,28 @@ telemetry.setZoneChangeHandler((change) => {
 async function onSlash(interaction) {
   const name = interaction.commandName;
 
+  if (name === "contribuinte_vincular" || name === "contribuinte_parar") {
+    if (interaction.guildId !== (process.env.GUILD_ID||"683411304408416285"))
+      return interaction.reply({content:"Use este comando no servidor da IMORTAIS.",flags:MessageFlags.Ephemeral});
+    await interaction.deferReply({flags:MessageFlags.Ephemeral});
+    try {
+      if (name === "contribuinte_parar") {
+        const r=await contributorBilling.stopLink(db.pool,interaction.user.id);
+        return interaction.editReply({content:r.revoked?
+          "✅ Avisos privados de contribuição desativados para sua conta.":
+          "Nenhum vínculo ativo de cobrança foi encontrado para sua conta."});
+      }
+      const player=interaction.options.getString("jogador");
+      const r=await contributorBilling.requestLink(db.pool,{player,discordId:interaction.user.id});
+      return interaction.editReply({content:r.status==="confirmed"?
+        "✅ Seu vínculo de "+r.player+" está confirmado e você aceitou receber avisos. Use /contribuinte_parar para interrompê-los.":
+        "📋 Solicitação recebida para **"+r.player+"**. Você autorizou avisos privados de contribuição, "+
+        "mas eles só poderão ser enviados após a staff confirmar seu vínculo com o personagem. "+
+        "Use /contribuinte_parar para cancelar."});
+    }catch(e){
+      return interaction.editReply({content:"Não foi possível vincular: "+String(e.message||e)});
+    }
+  }
   if (name === "cta_rank")    return slashRank(interaction, false);
   if (name === "cta_meurank") return slashRank(interaction, true);
 
@@ -3612,6 +3635,13 @@ async function checkNavigationPlans() {
 }
 
 // ======================  BOOT  =============================================
+// Gateway 4014 sinaliza intents privilegiadas desautorizadas, mesmo se login() já resolveu.
+client.on(Events.ShardDisconnect,(event,shardId)=>{
+  if(event?.code===4014)
+    console.error("[DISCORD BOOT] Disallowed intents (4014) no shard "+shardId+
+      ": habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
+      "ANTES do deploy e reinicie o CTA Bot.");
+});
 client.once(Events.ClientReady, async (c) => {
   console.log(`✅ Online como ${c.user.tag}`);
   setInterval(checkReminders, 60 * 1000);
@@ -3621,6 +3651,10 @@ client.once(Events.ClientReady, async (c) => {
   const checkContributorWeekly=()=>contributorWeekly.tick(db.pool,client,{channelId:CFG.staffLogChannelId})
     .catch(e=>console.error("[contributor weekly scheduler]",e?.message||e));
   setInterval(checkContributorWeekly, 5 * 60 * 1000);
+  const checkContributorBilling=()=>contributorBilling.tick(db.pool,client)
+    .catch(e=>console.error("[contributor billing scheduler]",e?.message||e));
+  setInterval(checkContributorBilling,5*60*1000);
+  checkContributorBilling();
   checkContributorWeekly();
   checkNavigationPlans().catch(() => {});
   for (const [gid] of c.guilds.cache) {
@@ -3957,9 +3991,17 @@ const webActions = {
     await perfil.initSchema(db.pool);
     await telemetry.initSchema(db.pool);
     await contributorWeekly.init(db.pool);
+    await contributorBilling.init(db.pool);
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
-    await client.login(CFG.token);
+    try{await client.login(CFG.token);}
+    catch(e){
+      if(/disallowed.?intents|4014/i.test(String(e?.message||e))||e?.code===4014)
+        console.error("[DISCORD BOOT] Login bloqueado por disallowed intents (4014): "+
+          "habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
+          "antes do deploy. O código solicita GatewayIntentBits.GuildMembers.");
+      throw e;
+    }
     runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);

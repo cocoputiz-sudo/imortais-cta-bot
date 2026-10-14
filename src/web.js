@@ -15,6 +15,7 @@ const telemetry = require("./telemetry");
 const scout = require("./scout");
 const guildroster = require("./guildroster");
 const contributorWeekly = require("./contributorWeekly");
+const contributorBilling = require("./contributorBilling");
 const path = require("path");
 // Challenge appears only when explicitly enabled by the dedicated feature flag.
 const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
@@ -354,6 +355,76 @@ function startWebServer(client, opts) {
       const err=String(e.message||"");
       res.status(["minima_invalidos","horario_invalido","lembrete_invalido"].includes(err)?400:500).json({error:err||"settings_failed"});
     }
+  });
+
+  // Cobranças e vínculo Discord são isolados das outras permissões do bot.
+  // Apenas a staff autorizada em Contribuintes pode confirmar, editar ou enviar.
+  function billingError(res,e){
+    const code=String(e.message||"server");
+    if(code==="contribuinte_nao_encontrado"||code==="jogador_nao_e_contribuinte_no_G"||
+      code==="vinculo_pendente_nao_encontrado"||code==="competencia_nao_encontrada")return res.status(404).json({error:code});
+    if(["debito_anterior_invalido","marcacao_invalida","configuracao_invalida",
+      "discord_sem_vinculo_confirmado","discord_nao_e_membro","mensagens_desativadas",
+      "jogador_ja_vinculado_outro_discord","motivo_vinculo_obrigatorio","acao_vinculo_invalida",
+      "status_vinculo_invalido","baixa_invalida","baixa_superior_ao_saldo"].includes(code))
+      return res.status(400).json({error:code});
+    console.error("[contributor billing]",e);
+    res.status(500).json({error:"billing_failed"});
+  }
+  app.get("/api/contributors/billing",async(req,res)=>{
+    if(!requireContributorViewer(req,res))return;
+    try{res.json(await contributorBilling.dashboard(db.pool));}
+    catch(e){console.error("[contributor billing dashboard]",e);res.status(500).json({error:"billing_failed"});}
+  });
+  app.get("/api/contributors/billing/search",async(req,res)=>{
+    if(!requireContributorEditor(req,res))return;
+    const q=String(req.query.q||"").trim();
+    if(q.length<3||q.length>60)return res.status(400).json({error:"busca_invalida"});
+    try{
+      const guild=_client?.guilds?.cache?.get(GUILD_ID);
+      if(!guild)return res.status(503).json({error:"discord_offline"});
+      const found=await guild.members.fetch({query:q,limit:10});
+      res.json({members:[...found.values()].map(m=>({discordId:m.id,
+        name:m.user.globalName||m.user.username,serverName:m.displayName}))});
+    }catch(e){console.error("[billing Discord lookup]",e);res.status(503).json({error:"busca_indisponivel"});}
+  });
+  app.post("/api/contributors/billing/approve",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.review(db.pool,{
+      player:req.body?.player,editor:sess.id,client:_client}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/link-close",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.closeLink(db.pool,{
+      player:req.body?.player,action:req.body?.action,reason:req.body?.reason,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/writeoff",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.adjustWeek(db.pool,{
+      player:req.body?.player,weekKey:req.body?.weekKey,amount:req.body?.amount,
+      reason:req.body?.reason,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/prior",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.priorDebt(db.pool,{
+      player:req.body?.player,enabled:req.body?.enabled,amount:req.body?.amount,
+      note:req.body?.note,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/settings",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.setSettings(db.pool,{
+      enabled:req.body?.enabled,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/send",async(req,res)=>{
+    if(!requireContributorEditor(req,res))return;
+    try{res.json(await contributorBilling.sendOne(db.pool,_client,{
+      player:req.body?.player,stage:"manual"}));}
+    catch(e){billingError(res,e);}
   });
 
   app.get("/api/roster", async (req, res) => {
@@ -3489,7 +3560,7 @@ const PAGE = `<!doctype html>
   }
 
 
-  var contributorReport=null,contributorSettings=null,contribFilter='todos',contribRosterDraft='';
+  var contributorReport=null,contributorSettings=null,contributorBilling=null,contribFilter='todos',contribRosterDraft='';
   function contribNumber(x){return x==null?'SEM DADOS':fmtS(x);}
   function contribDelta(x){return x==null?'—':(Number(x)>0?'+':'')+fmtS(x);}
   function contribDisplayDate(x){return x?gmDate(x):'sem varredura integral';}
@@ -3597,9 +3668,11 @@ const PAGE = `<!doctype html>
     loading('view-contributors','📅 Contribuintes – semana');
     Promise.all([
       fetch('/api/contributors/weekly',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Relatório HTTP '+r.status);return r.json();}),
-      fetch('/api/contributors/settings',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Configuração HTTP '+r.status);return r.json();})
+      fetch('/api/contributors/settings',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Configuração HTTP '+r.status);return r.json();}),
+      fetch('/api/contributors/billing',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error('Cobranças HTTP '+r.status);return r.json();})
+        .catch(function(e){return {error:e.message,rows:[],settings:{enabled:false}};})
     ]).then(function(results){
-      contributorReport=results[0];contributorSettings=results[1];
+      contributorReport=results[0];contributorSettings=results[1];contributorBilling=results[2];
       drawContributors();
     }).catch(function(e){setView('view-contributors','<div class="empty-note">Erro ao carregar relatório: '+esc(e.message)+'</div>');});
   }
@@ -3707,7 +3780,167 @@ const PAGE = `<!doctype html>
         }).join(''):'<tr><td colspan="5">Nenhum depósito não vinculado nesta competência.</td></tr>')+
         '</tbody></table></div></div>';
     }
+    // Vínculos Discord, débitos anteriores e notificações, sem alterar a grade principal.
+    var billing=contributorBilling||{},br=billing.rows||[];
+    html+='<details class="panel" id="cb-dashboard" style="margin:16px 0;border:1px solid #46698a" open>'+
+      '<summary style="cursor:pointer;font-weight:bold">✉️ Cobranças Discord e débitos anteriores · '+br.length+' contribuintes</summary>'+
+      '<div class="note" style="margin:10px 0">Vínculo obrigatório: o jogador usa /contribuinte_vincular e autoriza mensagens; a staff confirma o pedido. '+
+      'Mensagens automáticas só para vínculos confirmados, nunca por apelido parecido. '+
+      'Segunda, quarta, quinta e domingo após 15:00 UTC, no máximo quatro avisos por semana. '+
+      'A automação vem desligada. Confira o extrato atualizado antes de ativar.</div>';
+    if(billing.error)html+='<div class="note" role="alert">⚠️ Cobranças indisponíveis: '+esc(billing.error)+'</div>';
+    else{
+      html+='<div class="note">A semana nova cobra o valor integral, mesmo com dívidas anteriores. '+
+        'A primeira adesão pode mencionar apenas o saldo que falta para completar a primeira semana. '+
+        'As semanas antigas em aberto e ajustes manuais aparecem separadamente.</div>';
+      if(authState.canEditContributors){
+        html+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">'+
+          '<label><input type="checkbox" id="cb-enabled"'+(billing.settings&&billing.settings.enabled?' checked':'')+
+          '> Habilitar cobrança automática por DM</label>'+
+          '<button id="cb-save-settings" type="button" class="btn ghost">Salvar configuração</button>'+
+          '<span class="note" id="cb-settings-status"></span></div>'+
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0">'+
+          '<input id="cb-search" class="input" style="max-width:240px;margin:0" placeholder="Buscar membro no Discord (3+ letras)">'+
+          '<button class="btn ghost" id="cb-search-btn">Pesquisar</button>'+
+          '<span class="note">Busca apenas sugere candidatos; não cria vínculos.</span></div>'+
+          '<div id="cb-search-result" class="note"></div>';
+      }
+      html+='<div style="overflow-x:auto"><table class="dtable"><thead><tr>'+
+        '<th>Jogador</th><th>Discord</th><th>Esta semana</th><th>Outras dívidas</th><th>Controle</th>'+
+        '</tr></thead><tbody>'+
+        (br.length?br.map(function(x){
+          var link=x.link||{},status=link.status==='confirmed'?'Confirmado · '+link.discord_user_id:
+            link.status==='pending'?'Aguardando conferência · '+link.discord_user_id:
+            link.status==='revoked'?'Vínculo revogado'+(link.review_reason?' · Motivo: '+link.review_reason:''):'Sem vínculo';
+          var other=(x.totalOtherDebt||0)>0?contribSilver(x.totalOtherDebt):'Nenhuma registrada';
+          var manage='';
+          if(authState.canEditContributors){
+            if(link.status==='pending'){
+              manage+='<button class="btn primary" type="button" data-cb-approve="'+encodeURIComponent(x.player)+'">Confirmar vínculo</button> ';
+              manage+='<button class="btn ghost" type="button" data-cb-close="reject" data-cb-player="'+encodeURIComponent(x.player)+'">Recusar pedido</button> ';
+            }
+            if(link.status==='confirmed'){
+              manage+='<button class="btn ghost" type="button" data-cb-send="'+encodeURIComponent(x.player)+'">Enviar lembrete</button> ';
+              manage+='<button class="btn ghost" type="button" data-cb-close="revoke" data-cb-player="'+encodeURIComponent(x.player)+'">Revogar vínculo</button> ';
+            }
+            if(x.currentRemaining>0)
+              manage+='<button class="btn ghost" type="button" data-cb-writeoff="'+encodeURIComponent(x.player)+
+                '" data-cb-week="'+esc(x.currentWeekKey)+'" data-cb-remaining="'+x.currentRemaining+
+                '">Dar baixa '+esc(contribShortDate(x.week))+'</button> ';
+            (x.overdue||[]).forEach(function(o){
+              manage+='<button class="btn ghost" type="button" data-cb-writeoff="'+encodeURIComponent(x.player)+
+                '" data-cb-week="'+esc(o.weekKey)+'" data-cb-remaining="'+o.amount+
+                '">Dar baixa '+esc(o.week)+'</button> ';
+            });
+            manage+='<details class="note" style="margin-top:6px"><summary>Marcar débito anterior</summary>'+
+              '<label><input type="checkbox" data-cb-debt-check'+(x.manualDebt>0?' checked':'')+'> Existe outro débito anterior</label>'+
+              '<div style="margin-top:6px"><input data-cb-debt-amount type="number" min="0" step="1" class="input" style="max-width:160px" placeholder="Valor em prata" value="'+(Number(x.manualDebt)||0)+'"></div>'+
+              '<div style="margin-top:5px"><input data-cb-debt-note class="input" style="max-width:250px" maxlength="240" placeholder="Motivo e período" value="'+esc(x.manualNote||'')+'"></div>'+
+              '<button type="button" class="btn ghost" data-cb-save-debt="'+encodeURIComponent(x.player)+'">Salvar débito</button>'+
+              '</details>';
+          }
+          return '<tr><td><b>'+esc(x.player)+'</b><div class="note">C'+esc(x.level)+' · '+contribSilver(x.due)+'/semana</div></td>'+
+            '<td>'+esc(status)+'</td><td>'+esc(x.paymentStatus)+'<div class="note">Depositado: '+contribSilver(x.paid)+
+            ' · Baixas: '+contribSilver(x.currentAdjusted||0)+' · Saldo: '+contribSilver(x.currentRemaining||0)+'</div></td>'+
+            '<td>'+esc(other)+'<div class="note">'+x.overdueWeeks+' semana(s) em aberto no histórico'+
+            (x.manualDebt?' · ajuste manual: '+contribSilver(x.manualDebt):'')+'</div>'+
+            (x.overdue&&x.overdue.length?'<details class="note"><summary>Ver semanas anteriores</summary>'+
+              x.overdue.map(function(o){return esc(o.week)+' · '+contribSilver(o.amount);}).join('; ')+'</details>':'')+
+            '</td><td>'+manage+'</td></tr>';
+        }).join(''):'<tr><td colspan="5">Nenhum contribuinte cadastrado no G.</td></tr>')+
+        '</tbody></table></div>';
+      html+='<details class="note" style="margin-top:10px"><summary>Histórico de avisos</summary>'+
+        ((billing.logs||[]).length?(billing.logs||[]).slice(0,40).map(function(log){
+          return '<div>'+esc(log.player_key)+' · '+esc(log.stage)+' · '+esc(log.status)+
+            (log.detail?' ('+esc(log.detail)+')':'')+'</div>';
+        }).join(''):'Nenhum aviso registrado')+'</details>';
+    }
+    html+='</details>';
     setView('view-contributors',html);
+    // Ações de cobrança com privilégio restrito aos editores de Contribuintes.
+    if(authState.canEditContributors&&!(contributorBilling||{}).error){
+      function cbPost(route,body){
+        return fetch('/api/contributors/billing/'+route,{method:'POST',
+          headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+          .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(x.error||'falha');return x;});});
+      }
+      var cbSettingsBtn=document.getElementById('cb-save-settings');
+      if(cbSettingsBtn)cbSettingsBtn.onclick=function(){
+        var enabled=document.getElementById('cb-enabled').checked;
+        if(enabled&&!confirm('Ativar mensagens privadas automáticas apenas para vínculos confirmados e que aceitaram notificações? O extrato precisa estar atualizado.'))return;
+        cbSettingsBtn.disabled=true;
+        cbPost('settings',{enabled:enabled}).then(renderContributors)
+          .catch(function(e){alert('Erro: '+e.message);}).finally(function(){cbSettingsBtn.disabled=false;});
+      };
+      var searchBtn=document.getElementById('cb-search-btn');
+      if(searchBtn)searchBtn.onclick=function(){
+        var q=document.getElementById('cb-search').value.trim(),target=document.getElementById('cb-search-result');
+        if(q.length<3){target.textContent='Digite pelo menos 3 caracteres.';return;}
+        target.textContent='Pesquisando...';
+        fetch('/api/contributors/billing/search?q='+encodeURIComponent(q)).then(function(r){
+          return r.json().then(function(x){if(!r.ok)throw Error(x.error||'falha');return x;});
+        }).then(function(x){
+          target.textContent=(x.members||[]).map(function(m){return m.serverName+' ('+m.name+') · Discord ID '+m.discordId;}).join(' | ')||'Nenhum resultado.';
+        }).catch(function(e){target.textContent='Busca indisponível: '+e.message;});
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-approve]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-approve'));
+          if(!confirm('Confirmar que o Discord ID apresentado pertence ao personagem '+player+'? Não confirme apenas por semelhança de apelido.'))return;
+          btn.disabled=true;cbPost('approve',{player:player}).then(renderContributors)
+            .catch(function(e){alert('Não confirmado: '+e.message);btn.disabled=false;});
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-send]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-send'));
+          if(!confirm('Enviar uma cobrança privada a '+player+'? A conta precisa ter autorizado os avisos.'))return;
+          btn.disabled=true;cbPost('send',{player:player}).then(function(x){
+            alert(x.sent?'Mensagem enviada.':'Não enviada: '+(x.skipped||x.error||'sem detalhes'));renderContributors();
+          }).catch(function(e){alert('Não enviado: '+e.message);btn.disabled=false;});
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-close]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-player')),
+            action=btn.getAttribute('data-cb-close'),
+            reason=prompt((action==='reject'?'Motivo para RECUSAR o pedido de ':'Motivo para REVOGAR o vínculo de ')+player+':');
+          if(!reason||!reason.trim())return;
+          if(!confirm((action==='reject'?'Recusar pedido':'Revogar vínculo')+' de '+player+'?'))return;
+          btn.disabled=true;cbPost('link-close',{player:player,action:action,reason:reason.trim()})
+            .then(renderContributors).catch(function(e){alert('Não alterado: '+e.message);btn.disabled=false;});
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-writeoff]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-writeoff')),
+            weekKey=btn.getAttribute('data-cb-week'),remaining=Number(btn.getAttribute('data-cb-remaining'));
+          var amountText=prompt('Dar baixa na semana '+weekKey+' de '+player+
+            '. Saldo: '+contribSilver(remaining)+'. Digite o valor EM PRATA:',String(remaining));
+          if(amountText==null)return;
+          var amount=Number(amountText.trim()),reason=prompt('Justificativa obrigatória para a baixa da semana '+weekKey+':');
+          if(!Number.isSafeInteger(amount)||amount<=0||amount>remaining||!reason||!reason.trim()){
+            alert('Informe um valor positivo não superior ao saldo e uma justificativa.');return;
+          }
+          if(!confirm('Registrar baixa manual de '+contribSilver(amount)+' para '+player+
+            ' na competência '+weekKey+'? A operação ficará auditada.'))return;
+          btn.disabled=true;cbPost('writeoff',{player:player,weekKey:weekKey,amount:amount,reason:reason.trim()})
+            .then(renderContributors).catch(function(e){alert('Baixa recusada: '+e.message);btn.disabled=false;});
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-save-debt]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-save-debt')),detail=btn.closest('details'),
+          enabled=detail.querySelector('[data-cb-debt-check]').checked,
+          amount=Number(detail.querySelector('[data-cb-debt-amount]').value),
+          note=detail.querySelector('[data-cb-debt-note]').value.trim();
+          if(enabled&&(!amount||!note)){alert('Informe o valor em prata e a justificativa do débito anterior.');return;}
+          if(!confirm(enabled?'Registrar dívida adicional de '+contribSilver(amount)+' para '+player+'?':'Retirar o ajuste manual de dívida anterior de '+player+'?'))return;
+          btn.disabled=true;cbPost('prior',{player:player,enabled:enabled,amount:amount,note:note})
+            .then(renderContributors).catch(function(e){alert('Não salvo: '+e.message);btn.disabled=false;});
+        };
+      });
+    }
     document.getElementById('cw-filter').onchange=function(){contribFilter=this.value;drawContributors();};
     document.getElementById('cw-refresh').onclick=renderContributors;
     document.getElementById('cw-csv').onclick=function(){exportContributors('csv');};

@@ -32,6 +32,10 @@ on:
       - "test/caller-transfer.js"
       - "test/primary-caller-weapon.js"
       - "src/commands.js"
+      - "src/contributorBilling.js"
+      - "src/contributorWeekly.js"
+      - "src/contributorCycle.js"
+      - "test/contributor-billing.js"
       - "test/scout-regression.js"
       - "test/season-regression.js"
       - "test/presence-forces.js"
@@ -143,6 +147,8 @@ jobs:
         run: node test/guild-legacy-repair.js
       - name: Relatório semanal de contribuintes
         run: node test/contributor-weekly.js
+      - name: Cobranças Discord, consentimento e dívida semanal em PostgreSQL
+        run: node test/contributor-billing.js
       - name: Guild Might worker e snapshots em Postgres
         run: node test/guild-might-worker.js
       - name: Guild Might e Challenge - testes especificos do PR 66

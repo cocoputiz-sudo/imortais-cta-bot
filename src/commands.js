@@ -19,6 +19,12 @@ function commandDefs() {
   const armaOpt = (o) => o.setName("arma").setDescription("Arma").setAutocomplete(true);
 
   return [
+    new SlashCommandBuilder().setName("contribuinte_vincular")
+      .setDescription("Autoriza avisos privados de contribuição e solicita vinculação ao seu personagem")
+      .addStringOption(o=>o.setName("jogador").setDescription("Nome exato do personagem no Albion")
+        .setRequired(true).setMaxLength(80)),
+    new SlashCommandBuilder().setName("contribuinte_parar")
+      .setDescription("Cancela autorização e interrompe avisos privados de cobrança"),
     new SlashCommandBuilder().setName("cta_show").setDescription("Abre mais uma PT no CTA (flex, press ou pt6teste)")
       .addStringOption(ctaOpt)
       .addStringOption((o) => o.setName("tipo").setDescription("Qual PT abrir").setRequired(true).addChoices(

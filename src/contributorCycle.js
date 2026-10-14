@@ -63,6 +63,12 @@ async function init(pool){
     "paid_at TIMESTAMPTZ NOT NULL, amount BIGINT NOT NULL CHECK(amount>0),"+
     "imported_at TIMESTAMPTZ NOT NULL DEFAULT now(), imported_by TEXT NOT NULL)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_contributor_bank_player_date ON contributor_bank_deposits(player_key,paid_at)");
+  // Cada importação bem-sucedida comprova uma consulta recente ao extrato, ainda
+  // que todas as operações já existam ou não haja depósitos válidos no arquivo.
+  await pool.query("CREATE TABLE IF NOT EXISTS contributor_bank_imports("+
+    "id BIGSERIAL PRIMARY KEY,imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),"+
+    "imported_by TEXT NOT NULL,parsed_count INT NOT NULL,inserted_count INT NOT NULL,"+
+    "duplicates INT NOT NULL,skipped_count INT NOT NULL)");
 }
 // Chamar dentro da transacao que salva contributor_roster_latest. Impede
 // lista parcial de excluir centenas de membros por engano.
@@ -194,7 +200,6 @@ function parseBankCsv(input){
     rows.push({key,name,date:date.toISOString(),amount,
       fingerprint:crypto.createHash("sha256").update(base+"|"+occurrence).digest("hex")});
   }
-  if(!rows.length)throw Error("extrato_sem_depositos");
   return {rows,skipped};
 }
 async function importBank(pool,text,actor){
@@ -210,6 +215,9 @@ async function importBank(pool,text,actor){
       inserted+=res.rowCount;
     }
     await client.query("DELETE FROM contributor_bank_deposits WHERE paid_at<now()-interval '45 days'");
+    await client.query("INSERT INTO contributor_bank_imports(imported_by,parsed_count,inserted_count,duplicates,skipped_count) "+
+      "VALUES($1,$2,$3,$4,$5)",[String(actor||"staff"),parsed.rows.length,inserted,
+        parsed.rows.length-inserted,parsed.skipped]);
     await client.query("COMMIT");
     return {ok:true,parsed:parsed.rows.length,inserted,duplicates:parsed.rows.length-inserted,skipped:parsed.skipped,
       note:"Depositos importados como indicios; conferência de finalidade/pagamento permanece com a staff."};
