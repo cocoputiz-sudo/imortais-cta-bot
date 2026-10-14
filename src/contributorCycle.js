@@ -13,11 +13,13 @@ const BANK_RETENTION_DAYS=45;
 const DUES=Object.freeze({"1":4000000,"2":4000000,"3":6000000,"4":10000000});
 const CTA_MINIMA=Object.freeze({"1":10,"2":null,"3":6,"4":0});
 function keyOf(name){return guildroster.normName(name);}
-function tierOf(roles){
-  const found=new Set((roles||[]).map(x=>String(x).normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase())
+function contributorTiers(roles){
+  return new Set((roles||[]).map(x=>String(x).normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase())
     .map(x=>/^contribuinte\s*([1-4])$/.exec(x)).filter(Boolean).map(x=>x[1]));
-  if(found.size>1)throw Error("cargos_contribuinte_conflitantes");
-  return [...found][0]||null;
+}
+function tierOf(roles){
+  const found=contributorTiers(roles);
+  return found.size===1?[...found][0]:null; // conflitos sao ignorados, nunca impedem relatorios
 }
 function cycleAt(assignedAt,now=new Date()){
   const anchor=Date.parse(assignedAt),t=new Date(now).getTime();
@@ -44,19 +46,38 @@ async function init(pool){
 }
 // Chamar dentro da transacao que salva contributor_roster_latest. Impede
 // lista parcial de excluir centenas de membros por engano.
-async function reconcile(client,members,observedAt,previousCount){
+async function reconcile(client,members,observedAt,previousCount,{duplicateKeys=[]}={}){
   if(previousCount>=20 && members.length<Math.ceil(previousCount*0.75))
     throw Error("roster_partial");
   const now=new Date(observedAt);
   if(!Number.isFinite(now.getTime()))throw Error("data_roster_invalida");
-  const found=new Map();
+  const found=new Map(),ignoredMembers=[],protectedKeys=new Set();
+  // O parser do G pode ter deduplicado as linhas antes desta chamada.
+  const duplicated=new Set(duplicateKeys.map(keyOf).filter(Boolean)),counts=new Map();
   for(const member of members){
-    const level=tierOf(member.roles);
-    if(level){
-      const key=keyOf(member.name);
-      if(!key||found.has(key))throw Error("jogador_duplicado");
-      found.set(key,{key,name:member.name,level});
+    const key=keyOf(member.name);
+    if(key)counts.set(key,(counts.get(key)||0)+1);
+  }
+  for(const [key,count] of counts)if(count>1)duplicated.add(key);
+  for(const member of members){
+    const key=keyOf(member.name),tiers=contributorTiers(member.roles);
+    if(!key){
+      ignoredMembers.push({player:String(member.name||"(sem nome)"),reason:"nome inválido"});
+      continue;
     }
+    if(duplicated.has(key)){
+      protectedKeys.add(key);
+      if(!ignoredMembers.some(x=>x.key===key))
+        ignoredMembers.push({player:member.name,key,reason:"nome duplicado no G"});
+      continue;
+    }
+    if(tiers.size>1){
+      protectedKeys.add(key);
+      ignoredMembers.push({player:member.name,key,reason:"cargos de contribuinte conflitantes"});
+      continue;
+    }
+    const level=tierOf(member.roles);
+    if(level)found.set(key,{key,name:member.name,level});
   }
   for(const member of found.values()){
     await client.query(
@@ -73,9 +94,9 @@ async function reconcile(client,members,observedAt,previousCount){
       [member.key,member.name,member.level,now]);
   }
   // Quem saiu da guilda ou perdeu a tag nao continua como contribuinte ativo.
-  await client.query("DELETE FROM contributor_active_assignments WHERE NOT(player_key=ANY($1::text[]))",[[...found.keys()]]);
+  await client.query("DELETE FROM contributor_active_assignments WHERE NOT(player_key=ANY($1::text[]))",[[...found.keys(),...protectedKeys]]);
   await client.query("DELETE FROM contributor_bank_deposits WHERE paid_at<now()-interval '45 days'");
-  return found.size;
+  return {contributors:found.size,ignoredMembers:ignoredMembers.map(({player,reason})=>({player,reason}))};
 }
 async function bootstrap(pool,roster){
   if(!roster?.members?.length)return;
