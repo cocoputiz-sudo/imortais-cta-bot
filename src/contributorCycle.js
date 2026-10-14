@@ -184,19 +184,23 @@ async function attendanceByPlayer(now=new Date()){
     return w&&w.end<=now&&w.start>=new Date(now.getTime()-WEEK_MS);
   });
   const ctx=await attendance.__test.loadEventsContext(guildId,list);
-  const found=new Map();
+  const found=new Map(),ownerByNick=new Map(),ambiguous=new Set();
   for(const ev of list){
     const win=attendance.windowFor(ev);
     const rows=await attendance.processEvent(ev,ctx);
-    for(const item of rows.values()){
+    for(const [userId,item] of rows){
       if(!["INTEGRAL","PARCIAL"].includes(item.level))continue;
       const key=keyOf(item.username);
       if(!key)continue;
+      if(ownerByNick.has(key)&&ownerByNick.get(key)!==String(userId))ambiguous.add(key);
+      else ownerByNick.set(key,String(userId));
       if(!found.has(key))found.set(key,[]);
       found.get(key).push({at:win.start.toISOString(),day:attendance.eventDay(ev,win),level:item.level});
     }
   }
-  return {events:list.length,byPlayer:found};
+  // Dois Discord IDs usando mesmo nome nao comprovam identidade com o Albion.
+  for(const key of ambiguous)found.delete(key);
+  return {events:list.length,byPlayer:found,ambiguous:[...ambiguous]};
 }
 function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[]){
   const level=String(row.level),cycle=assignment?cycleAt(assignment.assigned_at,now):null;
