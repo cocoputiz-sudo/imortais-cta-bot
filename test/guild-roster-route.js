@@ -224,10 +224,10 @@ async function testRouteAccessAndResponses() {
     assert.equal((await repeat.json()).duplicates,1);
     const afterBank=await contributorRead(cookieFor({canEdit:true,isSiteAdmin:true}));
     assert.equal(afterBank.status,200);
-    const updated=afterBank.json.rows.find(x=>x.player==="NovoQuatro");
-    assert.equal(updated.assignmentSource,"confirmed");
-    assert.equal(updated.payment.creditedCandidate,10000000);
-    assert.equal(updated.payment.verification,"PENDENTE DE CONFERÊNCIA");
+    const updatedTierFour=afterBank.json.rows.find(x=>x.player==="NovoQuatro");
+    assert.equal(updatedTierFour.assignmentSource,"confirmed");
+    assert.equal(updatedTierFour.payment.creditedCandidate,10000000);
+    assert.equal(updatedTierFour.payment.verification,"PENDENTE DE CONFERÊNCIA");
     // O G incompleto nao deve excluir a guilda: transacao e contagem conservadora.
     const dbRoster=await contributorWeekly.rosterLatest(db.pool);
     assert.equal(dbRoster.member_count,9);
