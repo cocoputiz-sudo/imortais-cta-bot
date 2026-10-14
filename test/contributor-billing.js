@@ -74,7 +74,7 @@ async function main(){
     /debito_anterior_invalido/);
   await billing.priorDebt(pool,{player:playerA,enabled:true,amount:6000000,note:"saldo anterior conferido",editor:"staff"});
   const bank="Date\tPlayer\tReason\tAmount\n2026-10-13 13:00:00\t"+playerA+"\tDeposit\t2000000";
-  const imported=await cycle.importBank(pool,bank,"staff");
+  const imported=await cycle.importBank(pool,bank,"billing-regression");
   assert.equal(imported.inserted,1);
   const paid=await billing.dashboard(pool,now),p=paid.rows.find(x=>x.player===playerA);
   assert.equal(p.paid,2000000);
@@ -90,14 +90,15 @@ async function main(){
   await pool.query("UPDATE contributor_bank_imports SET imported_at='2026-10-01T00:00:00Z'");
   assert.equal((await billing.sendOne(pool,discordClient,{player:playerA,stage:"manual",now})).skipped,
     "extrato_desatualizado","importação antiga bloqueia cobrança");
-  const repeated=await cycle.importBank(pool,bank,"staff");
+  const repeated=await cycle.importBank(pool,bank,"billing-regression");
   assert.equal(repeated.inserted,0,"reimportar mesmo extrato não duplica depósitos");
   assert.equal(repeated.duplicates,1);
   const empty=await cycle.importBank(pool,"Date\tPlayer\tReason\tAmount\n"+
-    "2026-10-14 12:00:00\tCobrancaTesteA\tWithdrawal\t-4000000","staff");
+    "2026-10-14 12:00:00\tCobrancaTesteA\tWithdrawal\t-4000000","billing-regression");
   assert.equal(empty.inserted,0,"arquivo sem depósitos novos também é importação válida");
   assert.equal(empty.parsed,0);
-  const freshness=await pool.query("SELECT count(*)::int AS total,max(imported_at) AS latest FROM contributor_bank_imports");
+  const freshness=await pool.query("SELECT count(*)::int AS total,max(imported_at) AS latest "+
+    "FROM contributor_bank_imports WHERE imported_by='billing-regression'");
   assert.equal(freshness.rows[0].total,3,"cada importação bem-sucedida deve ser auditada");
   assert(new Date(freshness.rows[0].latest).getTime()>Date.parse("2026-10-12T00:00:00Z"),
     "reimportação sem operações novas renova frescor");
