@@ -3959,7 +3959,13 @@ const webActions = {
     await contributorWeekly.init(db.pool);
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
-    await client.login(CFG.token);
+    if (process.env.MACKNA_BTV_PREVIEW === "1") {
+      // Pilot BTV11: inicializa o backend completo e o War Room com banco
+      // separado, mas NAO conecta o bot no Discord para evitar 2 sessoes reais.
+      console.log("[MackNa BTV] Preview ativo: login Discord desativado.");
+    } else {
+      await client.login(CFG.token);
+    }
     runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);

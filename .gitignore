@@ -3,3 +3,6 @@ node_modules/
 src/*.before-telemetry.js
 
 node_modules/
+
+# MackNa Cloud: nunca versionar senhas locais de homologacao
+mackna-btv/.env.btv
