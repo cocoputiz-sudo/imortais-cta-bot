@@ -3,6 +3,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const vm=require("node:vm");
 const weekly=require("../src/contributorWeekly");
+const cycles=require("../src/contributorCycle");
 const {completeSweeps,selectPair,computeReport,contributorLevel,scheduledForWeek,validateSettings}=weekly;
 const t=Date.parse("2026-10-10T15:00:00Z"),day=86400000,iso=x=>new Date(x).toISOString();
 const page=(code,at,offset,items,deviceId="d1")=>({
@@ -46,6 +47,41 @@ assert.equal(report.counts.noData,1);
 assert.equal(report.stale,false);
 assert.equal(computeReport({roster,settings:cfg,sweeps,now:new Date(t+9*day)}).stale,true);
 assert.equal(contributorLevel(["Contribuinte 3"]),"3");
+assert.equal(contributorLevel(["CONTRIBUINTE 4"]),"4");
+assert.equal(contributorLevel(["CONTRIBUINTE 2","CONTRIBUINTE 4"]),null,
+  "cargo conflitante nao interrompe a renderizacao do relatorio");
+const ignoredRoster={members:[
+  {name:"Invalido",roles:["CONTRIBUINTE 2","CONTRIBUINTE 4"]},
+  {name:"Duplicado",roles:["CONTRIBUINTE 1"]}
+],member_count:2,imported_at:iso(t),
+  ignored_members:[{player:"Invalido",reason:"cargos de contribuinte conflitantes"},
+    {player:"Duplicado",reason:"nome duplicado no G"}]};
+const ignoredReport=computeReport({roster:ignoredRoster,settings:cfg,sweeps,now:new Date(t)});
+assert.equal(ignoredReport.rows.length,0,"conflitos/duplicatas nao devem aparecer na apuracao");
+assert(ignoredReport.warnings.some(x=>x.includes("Invalido")));
+assert(ignoredReport.warnings.some(x=>x.includes("Duplicado")));
+const observed=cycles.cycleAt("2026-10-01T12:00:00Z",new Date("2026-10-10T12:00:00Z"));
+assert.equal(observed.start,"2026-10-08T12:00:00.000Z");
+assert.equal(observed.end,"2026-10-15T12:00:00.000Z");
+assert.equal(cycles.cycleAt("2026-10-15T12:00:00Z",new Date("2026-10-10T12:00:00Z")),null);
+const bank=cycles.parseBankCsv('Date\tPlayer\tReason\tAmount\n2026-10-07 21:10:59\tA\tDeposit\t4000000\n2026-10-07 20:00:00\tB\tWithdrawal\t-1000000');
+assert.equal(bank.rows.length,1);
+assert.equal(bank.rows[0].amount,4000000);
+assert.equal(bank.skipped,1);
+assert.equal(cycles.DUES["4"],10000000);
+assert.equal(cycles.CTA_MINIMA["4"],0);
+const tier4Roster={members:[{name:"Totalmente",roles:["Contribuinte 4"]}],member_count:1,imported_at:iso(t)};
+const exempt=computeReport({roster:tier4Roster,settings:cfg,sweeps,now:new Date(t)});
+assert.equal(exempt.rows.length,1);
+assert.equal(exempt.rows[0].status,"ISENTO");
+assert.equal(exempt.counts.exempt,1);
+const decorated=cycles.decorate({player:"Totalmente",level:"4"},{
+ first_seen_at:"2026-10-08T12:00:00Z",assigned_at:"2026-10-08T12:00:00Z",assignment_source:"observed"
+},[],[],new Date("2026-10-10T12:00:00Z"));
+assert.equal(decorated.obligations.paymentRequired,10000000);
+assert.equal(decorated.obligations.ctaRequired,0);
+assert.equal(decorated.cycleMight.pve,null);
+assert.equal(decorated.payment.creditedCandidate,null);
 assert.equal(contributorLevel(["Contribuinte 3x"]),null);
 assert.throws(()=>validateSettings({...cfg,minima:{"1":{pve:-1,gathering:1},"2":{pve:1,gathering:1},"3":{pve:1,gathering:1}}}));
 assert.equal(scheduledForWeek(new Date("2026-10-10T15:00:00Z"),{weekday:0,timeUtc:"18:00"}).toISOString(),"2026-10-11T18:00:00.000Z");

@@ -25,7 +25,7 @@ const { normName } = require("./playerName");
 const MAX_CHARS = 600_000;
 const MAX_LINES = 3_000;
 // Cargos que nao entram na cobranca de ausencia do CTA, inclusive o nome legado.
-const DEFAULT_EXEMPT_ROLES = ["contribuinte", "contribuinte 1", "contribuinte 2", "contribuinte 3"];
+const DEFAULT_EXEMPT_ROLES = ["contribuinte", "contribuinte 1", "contribuinte 2", "contribuinte 3", "contribuinte 4"];
 
 // Mesma regra de nomes usada no resto do projeto: tira "!", espaços e tags
 // de guilda/nacionalidade do começo ([IM], [ESP]...), em minúsculas.
@@ -77,7 +77,7 @@ function detectDelimiter(text) {
 const HEADER_NAME = /^(character name|name|nome|personagem|jogador)$/i;
 
 function parseGuildRoster(text) {
-  const result = { ok: true, members: [], skipped: [], duplicates: 0, hadHeader: false, error: null };
+  const result = { ok: true, members: [], skipped: [], duplicates: 0, duplicateKeys: [], hadHeader: false, error: null };
   let src = String(text || "").replace(/^\uFEFF/, "");
   if (!src.trim()) return { ...result, ok: false, error: "empty" };
   if (src.length > MAX_CHARS) return { ...result, ok: false, error: "too_large" };
@@ -90,6 +90,7 @@ function parseGuildRoster(text) {
 
   let cols = { name: 0, seen: 1, roles: 2 };
   const byKey = new Map();
+  const duplicateKeys = new Set();
 
   lines.forEach((rawLine, idx) => {
     const line = rawLine.trim();
@@ -119,6 +120,7 @@ function parseGuildRoster(text) {
     const prev = byKey.get(member.key);
     if (prev) {
       result.duplicates++;
+      duplicateKeys.add(member.key);
       if (!prev.online && member.online) byKey.set(member.key, member); // prefere a linha "Online"
       return;
     }
@@ -126,6 +128,7 @@ function parseGuildRoster(text) {
   });
 
   result.members = [...byKey.values()];
+  result.duplicateKeys = [...duplicateKeys];
   if (!result.members.length) return { ...result, ok: false, error: "no_members" };
   return result;
 }

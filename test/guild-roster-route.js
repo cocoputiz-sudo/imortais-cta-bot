@@ -10,6 +10,7 @@ process.env.PORT = String(39000 + (process.pid % 1000));
 const db = require("../src/db");
 const telemetry = require("../src/telemetry");
 const contributorWeekly = require("../src/contributorWeekly");
+const contributorCycle = require("../src/contributorCycle");
 const web = require("../src/web");
 
 const G = process.env.GUILD_ID || "guild-test";
@@ -187,7 +188,52 @@ async function testRouteAccessAndResponses() {
     assert.equal(good.json.totals.pinged, 3);
     assert.equal(good.json.totals.inCall, 2);
 
-    ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos"); 
+    ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos");
+    // Integração do Contribuinte 4 (sem alterar os asserts dos tres cargos anteriores).
+    const fourText=roster+'\n"NovoQuatro"\t"Online"\t"CONTRIBUINTE 4"';
+    const added=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
+      body:JSON.stringify({text:fourText})
+    });
+    assert.equal(added.status,200);
+    const addedJson=await added.json();
+    assert.equal(addedJson.saved.contributors,4);
+    const afterFourth=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(afterFourth.status,200);
+    const fourth=afterFourth.json.rows.find(x=>x.player==="NovoQuatro");
+    assert(fourth&&fourth.level==="4");
+    assert.equal(fourth.obligations.paymentRequired,10000000);
+    assert.equal(fourth.obligations.ctaRequired,0);
+    assert.equal(fourth.assignmentSource,"observed");
+    // Apenas a administracao pode confirmar data anterior e importar extrato.
+    const assignmentUrl=base+"/api/contributors/assignment";
+    const assignmentBody={player:"NovoQuatro",assignedAt:new Date(Date.now()-2*86400000).toISOString()};
+    const confirm=(cookie)=>fetch(assignmentUrl,{method:"POST",headers:{
+      "Content-Type":"application/json",Cookie:cookie},body:JSON.stringify(assignmentBody)});
+    assert.equal((await confirm(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
+    assert.equal((await confirm(cookieFor({canEdit:true,isSiteAdmin:true}))).status,200);
+    const bankAt=new Date().toISOString().slice(0,19).replace("T"," ");
+    const bankTsv="Date\tPlayer\tReason\tAmount\n"+bankAt+"\tNovoQuatro\tDeposit\t10000000\n";
+    const bankUrl=base+"/api/contributors/bank-import";
+    const submitBank=(cookie)=>fetch(bankUrl,{method:"POST",headers:{
+      "Content-Type":"application/json",Cookie:cookie},body:JSON.stringify({text:bankTsv})});
+    assert.equal((await submitBank(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
+    const firstBank=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
+    assert.equal(firstBank.status,200);
+    assert.equal((await firstBank.json()).inserted,1);
+    const repeat=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
+    assert.equal((await repeat.json()).duplicates,1);
+    const afterBank=await contributorRead(cookieFor({canEdit:true,isSiteAdmin:true}));
+    assert.equal(afterBank.status,200);
+    const updatedTierFour=afterBank.json.rows.find(x=>x.player==="NovoQuatro");
+    assert.equal(updatedTierFour.assignmentSource,"confirmed");
+    assert.equal(updatedTierFour.payment.creditedCandidate,10000000);
+    assert.equal(updatedTierFour.payment.verification,"PENDENTE DE CONFERÊNCIA");
+    // O G incompleto nao deve excluir a guilda: transacao e contagem conservadora.
+    const dbRoster=await contributorWeekly.rosterLatest(db.pool);
+    assert.equal(dbRoster.member_count,9);
+    ok("Contribuinte 4: vigencia, autenticação admin, banco deduplicado e relatorio");
+ 
     // Regressao: staff move a jogadora da vaga Nature para um slot Support
     // e precisa trocar POSTULENTO por PÚTRIDO sem perder a vaga nem receber falso sucesso.
     await db.upsertSignup({
@@ -224,6 +270,66 @@ async function testRouteAccessAndResponses() {
     const rosterData = await rosterResponse.json();
     assert.equal(rosterData.parties[0].slots[7].weapon, "PÚTRIDO");
     ok("troca POSTULENTO -> PÚTRIDO: verifica permissao, valida, persiste e devolve roster atualizado");
+
+    // Um contribuinte ambiguo nao deve bloquear a importacao de toda a lista.
+    const ambiguousRoster=fourText+
+      '\n"BadTier"\t"Online"\t"CONTRIBUINTE 1;CONTRIBUINTE 2"'+
+      '\n"Repeated"\t"Online"\t"CONTRIBUINTE 3"'+
+      '\n"[IM] repeated"\t"Online"\t"CONTRIBUINTE 3"';
+    const ambiguousSave=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
+      body:JSON.stringify({text:ambiguousRoster})
+    });
+    assert.equal(ambiguousSave.status,200,"G com conflitos deve ser salvo sem HTTP 500");
+    const ambiguousJson=await ambiguousSave.json();
+    const ignored=new Map(ambiguousJson.saved.ignoredMembers.map(x=>[x.player,x.reason]));
+    assert.match(ignored.get("BadTier"),/conflitantes/);
+    assert.match(ignored.get("Repeated"),/duplicado/);
+    const conflictReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(conflictReport.status,200);
+    assert.equal(conflictReport.json.rows.some(x=>x.player==="BadTier"),false);
+    assert.equal(conflictReport.json.rows.some(x=>x.player==="Repeated"),false);
+    assert(conflictReport.json.warnings.some(x=>x.includes("BadTier")));
+    assert(conflictReport.json.warnings.some(x=>x.includes("Repeated")));
+    ok("Conflitos e nomes duplicados sao ignorados individualmente e avisados");
+
+    // O bootstrap deve suportar um roster previamente salvo que contem cargos conflitantes.
+    await db.pool.query("DELETE FROM contributor_active_assignments");
+    await assert.doesNotReject(()=>contributorWeekly.init(db.pool));
+    const afterBootstrap=await contributorCycle.assignments(db.pool);
+    assert(afterBootstrap.some(x=>x.player_name==="NovoQuatro"));
+    assert(!afterBootstrap.some(x=>x.player_name==="BadTier"||x.player_name==="Repeated"));
+    // Mesmo com uma falha inesperada no bootstrap, o servico nao deve cair.
+    const originalBootstrap=contributorCycle.bootstrap, originalConsoleError=console.error;
+    const bootstrapErrors=[];
+    contributorCycle.bootstrap=async()=>{throw Error("bootstrap simulated failure");};
+    console.error=(...args)=>bootstrapErrors.push(args.map(String).join(" "));
+    try{await assert.doesNotReject(()=>contributorWeekly.init(db.pool));}
+    finally{contributorCycle.bootstrap=originalBootstrap;console.error=originalConsoleError;}
+    assert(bootstrapErrors.some(x=>x.includes("bootstrap simulated failure")));
+    ok("Bootstrap tolera roster conflitante e registra falha inesperada sem interromper inicializacao");
+
+    // Uma fonte auxiliar com erro nao pode transformar /api/contributors/weekly em HTTP 500.
+    const healthyReport=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(healthyReport.status,200);
+    for(const [source,warning] of [
+      ["attendanceByPlayer","Attendance indisponível nesta consulta"],
+      ["assignments","Vínculos de contribuintes indisponíveis nesta consulta"],
+      ["deposits","Depósitos indisponíveis nesta consulta"]
+    ]){
+      const original=contributorCycle[source];
+      contributorCycle[source]=async()=>{throw Error("test: "+source+" unavailable");};
+      try{
+        const response=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+        assert.equal(response.status,200,source+" nao deve causar erro HTTP");
+        assert(response.json.warnings.includes(warning),source+" deve sinalizar indisponibilidade");
+        assert.deepEqual(response.json.rows.map(x=>[x.player,x.level,x.status,x.pveMight,x.gatheringMight]),
+          healthyReport.json.rows.map(x=>[x.player,x.level,x.status,x.pveMight,x.gatheringMight]),
+          "Classificacao Might permanece intacta sem "+source);
+      }finally{contributorCycle[source]=original;}
+    }
+    ok("Attendance, assignments e deposits com falha: GET permanece HTTP 200 e preserva Might");
+
 
   } finally {
     await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));

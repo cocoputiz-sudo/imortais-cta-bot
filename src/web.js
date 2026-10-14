@@ -241,8 +241,12 @@ function startWebServer(client, opts) {
         return res.status(400).json({ error });
       }
       if (error === "event_not_found") return res.status(404).json({ error });
+      if (error === "roster_partial") return res.status(409).json({ error });
       return res.status(500).json({ error });
     } catch (e) {
+      const error=String(e?.message||"server");
+      if(error==="roster_partial")return res.status(409).json({error});
+      if(error==="cargos_contribuinte_conflitantes")return res.status(400).json({error});
       console.error("/api/guild-roster/analyze:", e?.message || e);
       return res.status(500).json({ error: "server" });
     }
@@ -256,7 +260,7 @@ function startWebServer(client, opts) {
       return res.json({ok:true,saved});
     }catch(e){
       const error=String(e.message||"server");
-      return res.status(["empty","unknown_format","too_large","too_many_lines","no_members"].includes(error)?400:500).json({error});
+      return res.status(error==="roster_partial"?409:["empty","unknown_format","too_large","too_many_lines","no_members","cargos_contribuinte_conflitantes"].includes(error)?400:500).json({error});
     }
   });
   // Officers may view; thresholds and weekly reminder may only be changed by admins.
@@ -264,6 +268,25 @@ function startWebServer(client, opts) {
     if(!requireContributorViewer(req,res))return;
     try{res.json(await contributorWeekly.getReport(db.pool));}
     catch(e){console.error("[contributor report]",e);res.status(500).json({error:"report_failed"});}
+  });
+  // Admin-only: alterar a data precisa evidência manual; cargos vêm somente do G.
+  app.post("/api/contributors/assignment",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    try{res.json(await require("./contributorCycle").confirmAssignment(db.pool,{
+      player:req.body?.player,assignedAt:req.body?.assignedAt,actor:sess.id}));}
+    catch(e){
+      const error=String(e.message||"server");
+      res.status(error==="contribuinte_nao_encontrado"?404:error==="data_atribuicao_invalida"?400:500).json({error});
+    }
+  });
+  // O extrato do jogo fornece indicios, sem declaracao automatica de quitacao.
+  app.post("/api/contributors/bank-import",async(req,res)=>{
+    const sess=requireSiteAdmin(req,res);if(!sess)return;
+    try{res.json(await require("./contributorCycle").importBank(db.pool,req.body?.text,sess.id));}
+    catch(e){
+      const error=String(e.message||"server");
+      res.status(error.startsWith("extrato_")?400:500).json({error});
+    }
   });
   app.get("/api/contributors/settings",async(req,res)=>{
     if(!requireContributorViewer(req,res))return;
@@ -3407,7 +3430,7 @@ const PAGE = `<!doctype html>
   }
 
 
-  var contributorReport=null,contributorSettings=null;
+  var contributorReport=null,contributorSettings=null,contribFilter='todos';
   function contribNumber(x){return x==null?'SEM DADOS':fmtS(x);}
   function contribDelta(x){return x==null?'—':(Number(x)>0?'+':'')+fmtS(x);}
   function contribDisplayDate(x){return x?gmDate(x):'sem varredura integral';}
@@ -3429,13 +3452,17 @@ const PAGE = `<!doctype html>
   function exportContributors(format){
     var d=contributorReport;
     if(!d)return;
-    var header=['Jogador','Cargo','PvE ganho','Coleta ganho','Demais categorias ganho','Outras categorias comparadas','Status','PvE anterior UTC','PvE último UTC','Coleta anterior UTC','Coleta último UTC','Lista salva UTC','Desatualizado'];
+    var header=['Jogador','Cargo','Primeira observação UTC','Atribuição UTC','Origem da data','Ciclo início UTC','Ciclo fim UTC','CTAs válidas','Meta CTA','Sábado/Domingo','Depósitos identificados','Devido prata','Prata localizada','Conferência pagamento','Might PvE no ciclo','Might Coleta no ciclo','Situação obrigações','Might histórico status','PvE ganho histórico','Coleta ganho histórico','Lista salva UTC','Desatualizado'];
     var dates=d.categories||{},p=dates.PVE||{},g=dates.GATHERING||{};
     var records=(d.rows||[]).map(function(x){
-      return [x.player,'CONTRIBUINTE '+x.level,x.pveMight,x.gatheringMight,x.otherMight,
-        x.otherCategoriesCompared+'/'+x.otherCategoriesTotal,x.status,
-        p.previous&&p.previous.capturedAt,p.latest&&p.latest.capturedAt,
-        g.previous&&g.previous.capturedAt,g.latest&&g.latest.capturedAt,
+      return [x.player,'CONTRIBUINTE '+x.level,x.firstSeenAt,x.assignedAt,x.assignmentSource,
+        x.cycle&&x.cycle.start,x.cycle&&x.cycle.end,
+        x.attendance&&x.attendance.count,x.obligations&&x.obligations.ctaRequired,
+        x.attendance&&x.attendance.weekendDays.map(function(z){return z[0]+':'+z[1];}).join(' | '),
+        x.payment&&x.payment.found,x.obligations&&x.obligations.paymentRequired,
+        x.payment&&x.payment.creditedCandidate,x.payment&&x.payment.verification,
+        x.cycleMight&&x.cycleMight.pve,x.cycleMight&&x.cycleMight.gathering,
+        x.overallStatus,x.status,x.pveMight,x.gatheringMight,
         d.roster&&d.roster.importedAt,d.stale?'SIM':'NÃO'];
     });
     if(format==='csv'){
@@ -3446,11 +3473,11 @@ const PAGE = `<!doctype html>
     var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>IMORTAIS · Contribuintes semana</title><style>body{font:14px Arial;margin:24px;color:#20232a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.warning{background:#ffeded;padding:16px;color:#8c1414;font-weight:bold}</style></head><body>';
     html+='<h1>IMORTAIS · Contribuintes – semana</h1><p>Gerado: '+esc(contribDisplayDate(d.generatedAt))+'</p>';
     if(d.stale)html+='<div class="warning">DESATUALIZADO: a última varredura integral de PvE ou Coleta tem mais de 7 dias ou não existe. Não tratar estes valores como atuais.</div>';
-    html+='<p>Ativos: '+fmtS(d.counts.active)+' · Abaixo (inclui sem evolução): '+fmtS(d.counts.below)+' · Sem dados: '+fmtS(d.counts.noData)+'</p>';
+    html+='<p>Might histórico: Ativos: '+fmtS(d.counts.active)+' · Abaixo: '+fmtS(d.counts.below)+' · Isentos: '+fmtS(d.counts.exempt||0)+' · Sem dados: '+fmtS(d.counts.noData)+'</p>';
     html+='<p>PvE: '+contribSummaryDate(p)+'</p><p>Coleta: '+contribSummaryDate(g)+'</p>';
     html+='<table><thead><tr>'+header.map(function(x){return '<th>'+esc(x)+'</th>';}).join('')+'</tr></thead><tbody>';
     html+=records.map(function(r){return '<tr>'+r.map(function(x){return '<td>'+esc(x==null?'SEM DADOS':x)+'</td>';}).join('')+'</tr>';}).join('');
-    html+='</tbody></table><p>Critério: somente varreduras INTEGRAIS, do mesmo dispositivo por varredura, separadas por pelo menos 6 dias. Dados ausentes não valem zero; outras categorias são soma apenas das comparáveis.</p></body></html>';
+    html+='</tbody></table><p>Vigência estimada a partir da primeira observação do cargo, salvo confirmação manual. Depósitos não equivalem a pagamentos confirmados. CTAs exigem correspondência exata do nome normalizado; Might do ciclo usa apenas varreduras após o início. Might histórico: somente varreduras integrais separadas por pelo menos 6 dias.</p></body></html>';
     gmDownload('imortais-contribuintes-semana.html',html,'text/html;charset=utf-8');
   }
   function renderContributors(){
@@ -3476,14 +3503,18 @@ const PAGE = `<!doctype html>
       '<div class="stat b"><div class="k">SEM DADOS</div><div class="v">'+fmtS(count.noData||0)+'</div></div>'+
       '</div>';
     html+='<div class="panel"><b>Última lista salva em Guilda Online:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
-      '<div class="note">Somente cargos CONTRIBUINTE 1, 2 e 3 do último arquivo colado. Atualize a lista após mudanças de cargos.</div>'+
+      '<div class="note">Cargos CONTRIBUINTE 1 a 4. Vigência começa na primeira observação da tag, salvo confirmação administrativa de data. Saída da guilda elimina o vínculo ativo. Uma lista parcial é recusada.</div>'+
       '<p><b>PvE:</b> '+contribSummaryDate(p)+'</p><p><b>Coleta:</b> '+contribSummaryDate(g)+'</p>'+
-      '<div class="note">Diferença = Might na última varredura integral menos Might na varredura integral anterior (≥ 6 dias). Demais categorias: somente pares completos comparáveis. SEM DADOS não significa zero.</div></div>';
+      '<div class="note">Might histórico é referência anterior, não cumprimento do ciclo. Might do ciclo usa somente leituras posteriores à atribuição; sem baseline = SEM DADOS. Attendance usa correspondência pelo nome Discord/Albion, e pode exigir revisão de apelidos. Depósitos são indícios, não quitação.</div></div>';
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">'+
       '<button class="btn primary" id="cw-refresh">↻ Atualizar relatório</button>'+
       '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
       '<button class="btn ghost" id="cw-html">Exportar HTML</button></div>';
     if(authState.isSiteAdmin){
+      html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">💰 Importar depósitos do banco da guilda (somente admin)</summary>'+
+        '<div class="note">Cole o extrato exportado, com colunas Date, Player, Reason, Amount. Datas em UTC, valores inteiros em prata. Só Deposit positivo é armazenado, por até 45 dias; repetir o arquivo não duplica operações.</div>'+
+        '<textarea id="cw-bank-text" rows="5" style="width:100%" placeholder="Date TAB Player TAB Reason TAB Amount"></textarea>'+
+        '<button class="btn primary" id="cw-import-bank">Importar extrato</button> <span id="cw-bank-status" class="note"></span></details>';
       var minimum=(cfg.minima||{});
       html+='<details class="panel" style="margin:14px 0"><summary style="cursor:pointer;font-weight:bold">⚙️ Mínimos por cargo e lembrete semanal (somente admin)</summary>'+
         '<div class="note">Padrão: pelo menos +1 Might em PvE OU +1 em Coleta. Os mínimos podem ser ajustados individualmente; a comparação sempre exige os dois pares de varreduras.</div>'+
@@ -3498,18 +3529,53 @@ const PAGE = `<!doctype html>
         '<div class="note">Canal: staff configurada no bot (STAFF_LOG_CHANNEL_ID). O resumo só será enviado quando PvE e Coleta tiverem novas varreduras integrais válidas após o lembrete. Desativado até você salvar a programação.</div>'+
         '<button class="btn primary" id="cw-save" style="margin-top:10px">Salvar configurações</button> <span id="cw-settings-status" class="note"></span></details>';
     }
+    html+='<div class="panel" style="padding:10px;margin:10px 0"><label for="cw-filter"><b>Filtrar contribuinte</b></label> '+
+      '<select id="cw-filter">'+[['todos','Todas as categorias'],['1','1 · Combatente'],['2','2 · Mighter'],['3','3 · Meio obrigado'],['4','4 · Totalmente desobrigado']].map(function(a){return '<option value="'+a[0]+'"'+(contribFilter===a[0]?' selected':'')+'>'+a[1]+'</option>';}).join('')+'</select></div>';
+    var shown=(d.rows||[]).filter(function(x){return contribFilter==='todos'||String(x.level)===contribFilter;});
     html+='<div class="panel" style="overflow-x:auto"><table class="dtable"><thead><tr>'+
-      '<th>Jogador</th><th>Cargo</th><th>Ganho PvE</th><th>Ganho Coleta</th><th>Demais categorias</th><th>Comparadas</th><th>Situação</th></tr></thead><tbody>'+
-      ((d.rows||[]).length?d.rows.map(function(x){return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
-        '<td>'+contribDelta(x.pveMight)+'</td><td>'+contribDelta(x.gatheringMight)+'</td><td>'+contribDelta(x.otherMight)+'</td>'+
-        '<td>'+fmtS(x.otherCategoriesCompared)+'/'+fmtS(x.otherCategoriesTotal)+'</td><td>'+contribStatus(x.status)+'</td></tr>';}).join(''):
-        '<tr><td colspan="7">Sem lista de contribuintes salva. Cole uma lista atualizada em Guilda Online e clique em Salvar.</td></tr>')+
+      '<th>Jogador</th><th>Categoria</th><th>Atribuído desde</th><th>Vigência de 7 dias</th><th>CTAs válidas</th><th>Meta CTA</th><th>Prata devida</th><th>Depósitos localizados</th><th>Might PvE / Coleta no ciclo</th><th>Situação</th></tr></thead><tbody>'+
+      (shown.length?shown.map(function(x){
+        var cycle=x.cycle||{},ob=x.obligations||{},bank=x.payment||{},cta=x.attendance||{},might=x.cycleMight||{};
+        return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
+          '<td>'+esc(contribDisplayDate(x.assignedAt))+'<div class="note">'+(x.assignmentSource==='confirmed'?'Confirmado pela staff':'Primeiro registro, data estimada')+'</div>'+
+          (authState.isSiteAdmin?'<button class="btn ghost" data-cw-confirm="'+encodeURIComponent(x.player)+'" type="button">Definir data</button>':'')+'</td>'+
+          '<td>'+esc(contribDisplayDate(cycle.start))+' até '+esc(contribDisplayDate(cycle.end))+'</td>'+
+          '<td>'+esc(cta.count==null?'SEM DADOS':cta.count)+'</td>'+
+          '<td>'+esc(ob.ctaRequired==null?'A definir':ob.ctaRequired===0?'Isento':ob.ctaRequired)+'</td>'+
+          '<td>'+contribNumber(ob.paymentRequired)+'</td>'+
+          '<td>'+esc(bank.found||0)+' registro(s) · '+contribNumber(bank.creditedCandidate)+'<div class="note">Não conferido</div></td>'+
+          '<td>'+contribDelta(might.pve)+' / '+contribDelta(might.gathering)+'</td>'+
+          '<td>'+contribStatus(x.overallStatus)+'</td></tr>';
+      }).join(''):'<tr><td colspan="10">Nenhum contribuinte nesta categoria. Atualize o G completo em Guilda Online.</td></tr>')+
       '</tbody></table></div>';
     setView('view-contributors',html);
+    document.getElementById('cw-filter').onchange=function(){contribFilter=this.value;drawContributors();};
     document.getElementById('cw-refresh').onclick=renderContributors;
     document.getElementById('cw-csv').onclick=function(){exportContributors('csv');};
     document.getElementById('cw-html').onclick=function(){exportContributors('html');};
+
     if(authState.isSiteAdmin){
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cw-confirm]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cw-confirm'));
+          var assignedAt=prompt('Data UTC confirmada para '+player+' (ex.: 2026-10-14T00:00:00Z):');
+          if(!assignedAt)return;
+          fetch('/api/contributors/assignment',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({player:player,assignedAt:assignedAt})})
+          .then(function(r){return r.json().then(function(v){if(!r.ok)throw Error(v.error||'falha');return v;});})
+          .then(renderContributors).catch(function(e){alert('Data não salva: '+e.message);});
+        };
+      });
+      document.getElementById('cw-import-bank').onclick=function(){
+        var btn=this,box=document.getElementById('cw-bank-text'),info=document.getElementById('cw-bank-status');
+        btn.disabled=true;info.textContent='Importando...';
+        fetch('/api/contributors/bank-import',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({text:box.value})})
+        .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(x.error||'falha');return x;});})
+        .then(function(x){info.textContent='Importadas '+x.inserted+' operações; '+x.duplicates+' duplicadas. Revise a finalidade dos depósitos.';})
+        .catch(function(e){info.textContent='Erro: '+e.message;})
+        .finally(function(){btn.disabled=false;});
+      };
       document.getElementById('cw-save').onclick=function(){
         var minima={};
         ['1','2','3'].forEach(function(tier){minima[tier]={

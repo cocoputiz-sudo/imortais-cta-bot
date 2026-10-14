@@ -1,6 +1,7 @@
 "use strict";
 
 const guildroster=require("./guildroster");
+const cycleService=require("./contributorCycle");
 const guildRankingAuth=require("./guildRankingAuth");
 const guildSeason=require("./guildSeason");
 const {KNOWN_CATEGORY_LABELS}=require("./guildPhotonVerified");
@@ -13,22 +14,17 @@ const CODES=Object.keys(KNOWN_CATEGORY_LABELS);
 const DEFAULT_MINIMA=Object.freeze({
   "1":{pve:1,gathering:1},
   "2":{pve:1,gathering:1},
-  "3":{pve:1,gathering:1}
+  "3":{pve:1,gathering:1},
+  "4":{pve:0,gathering:0}
 });
 
-function contributorLevel(roles){
-  const list=(roles||[]).map(x=>String(x).normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase());
-  for(const tier of ["1","2","3"]){
-    if(list.some(role=>new RegExp("^contribuinte\\s*"+tier+"$","i").test(role)))return tier;
-  }
-  return null;
-}
+function contributorLevel(roles){return cycleService.tierOf(roles);}
 function normalizedPlayer(x){return guildroster.normName(x);}
 function thresholds(value){
   if(!value||typeof value!=="object")return JSON.parse(JSON.stringify(DEFAULT_MINIMA));
   const result={};
-  for(const tier of ["1","2","3"]){
-    const row=value[tier];
+  for(const tier of ["1","2","3","4"]){
+    const row=value[tier]||(tier==="4"?DEFAULT_MINIMA["4"]:null);
     if(!row||typeof row!=="object")throw Error("minima_invalidos");
     result[tier]={};
     for(const key of ["pve","gathering"]){
@@ -62,22 +58,39 @@ async function init(pool){
   ].join(" "));
   await pool.query("INSERT INTO contributor_weekly_settings(id,minima) VALUES(1,$1::jsonb) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(DEFAULT_MINIMA)]);
+  await pool.query("ALTER TABLE contributor_roster_latest ADD COLUMN IF NOT EXISTS ignored_members JSONB NOT NULL DEFAULT '[]'::jsonb");
+  await cycleService.init(pool);
+  const existing=await rosterLatest(pool);
+  if(existing){
+    try{await cycleService.bootstrap(pool,existing);}
+    catch(e){console.error("[contributor weekly bootstrap]",e);}
+  }
 }
 
 async function saveRoster(pool,text,actor){
   const result=guildroster.parseGuildRoster(text);
   if(!result.ok)throw Error(result.error||"lista_invalida");
   const members=result.members.map(m=>({name:m.name,key:m.key,roles:m.roles}));
-  const r=await pool.query(
-    "INSERT INTO contributor_roster_latest(id,members,member_count,imported_at,imported_by) VALUES(1,$1::jsonb,$2,now(),$3) "+
-    "ON CONFLICT(id) DO UPDATE SET members=EXCLUDED.members,member_count=EXCLUDED.member_count,imported_at=EXCLUDED.imported_at,imported_by=EXCLUDED.imported_by "+
-    "RETURNING imported_at,member_count,imported_by",
-    [JSON.stringify(members),members.length,String(actor||"unknown")]);
-  return {...r.rows[0],contributors:members.filter(m=>contributorLevel(m.roles)).length,
-    skipped:result.skipped.length,duplicates:result.duplicates};
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(77831443)");
+    const old=await client.query("SELECT member_count FROM contributor_roster_latest WHERE id=1");
+    const reconciliation=await cycleService.reconcile(client,members,new Date(),old.rows[0]?.member_count||0,
+      {duplicateKeys:result.duplicateKeys||[]});
+    const r=await client.query(
+      "INSERT INTO contributor_roster_latest(id,members,member_count,imported_at,imported_by,ignored_members) VALUES(1,$1::jsonb,$2,now(),$3,$4::jsonb) "+
+      "ON CONFLICT(id) DO UPDATE SET members=EXCLUDED.members,member_count=EXCLUDED.member_count,imported_at=EXCLUDED.imported_at,imported_by=EXCLUDED.imported_by,ignored_members=EXCLUDED.ignored_members "+
+      "RETURNING imported_at,member_count,imported_by",
+      [JSON.stringify(members),members.length,String(actor||"unknown"),JSON.stringify(reconciliation.ignoredMembers)]);
+    await client.query("COMMIT");
+    return {...r.rows[0],contributors:reconciliation.contributors,
+      ignoredMembers:reconciliation.ignoredMembers,skipped:result.skipped.length,duplicates:result.duplicates};
+  }catch(e){await client.query("ROLLBACK");throw e;}
+  finally{client.release();}
 }
 async function rosterLatest(pool){
-  const r=await pool.query("SELECT members,member_count,imported_at,imported_by FROM contributor_roster_latest WHERE id=1");
+  const r=await pool.query("SELECT members,member_count,imported_at,imported_by,ignored_members FROM contributor_roster_latest WHERE id=1");
   return r.rows[0]||null;
 }
 async function getSettings(pool){
@@ -169,15 +182,16 @@ function computeReport({roster,settings,sweeps,now=new Date(),season=null,source
   const staleCodes=required.filter(code=>!pairs[code].latest||
     nowMs-Date.parse(pairs[code].latest.capturedAt)>FRESH_MS);
   const incompleteCodes=required.filter(code=>!pairs[code].ready);
-  const everyone=latestRoster.filter(m=>contributorLevel(m.roles));
+  const ignoredKeys=new Set((roster?.ignored_members||[]).map(m=>normalizedPlayer(m.player)));
+  const everyone=latestRoster.filter(m=>contributorLevel(m.roles)&&!ignoredKeys.has(normalizedPlayer(m.name)));
   const rows=everyone.map(m=>{
-    const tier=contributorLevel(m.roles),key=normalizedPlayer(m.name),minimum=settings.minima[tier];
+    const tier=contributorLevel(m.roles),key=normalizedPlayer(m.name),minimum=settings.minima[tier]||DEFAULT_MINIMA[tier];
     const pve=memberDelta(pairs.PVE,key),gathering=memberDelta(pairs.GATHERING,key);
     const other=CODES.filter(c=>!required.includes(c)).map(code=>memberDelta(pairs[code],key));
     const observed=other.filter(x=>x!=null);
     const otherMight=observed.length?observed.reduce((a,b)=>a+b,0):null;
-    let status="SEM DADOS";
-    if(pve!==null&&gathering!==null){
+    let status=tier==="4"?"ISENTO":"SEM DADOS";
+    if(tier!=="4"&&pve!==null&&gathering!==null){
       if(pve===0&&gathering===0&&(otherMight===null||otherMight===0))status="SEM EVOLUÇÃO";
       else if((pve>0&&pve>=minimum.pve)||(gathering>0&&gathering>=minimum.gathering))status="ATIVO";
       else status="ABAIXO DO MÍNIMO";
@@ -189,18 +203,20 @@ function computeReport({roster,settings,sweeps,now=new Date(),season=null,source
   const counts={active:rows.filter(x=>x.status==="ATIVO").length,
     below:rows.filter(x=>x.status==="ABAIXO DO MÍNIMO"||x.status==="SEM EVOLUÇÃO").length,
     noData:rows.filter(x=>x.status==="SEM DADOS").length,
-    noEvolution:rows.filter(x=>x.status==="SEM EVOLUÇÃO").length,total:rows.length};
+    noEvolution:rows.filter(x=>x.status==="SEM EVOLUÇÃO").length,
+    exempt:rows.filter(x=>x.status==="ISENTO").length,total:rows.length};
   const meta=Object.fromEntries(CODES.map(c=>[c,({
     name:pairs[c].name,latest:pairs[c].latest,previous:pairs[c].previous,
     ready:pairs[c].ready,stale:!pairs[c].latest||nowMs-Date.parse(pairs[c].latest.capturedAt)>FRESH_MS
   })]));
   return {generatedAt:new Date(now).toISOString(),roster:roster?{
     memberCount:roster.member_count,importedAt:roster.imported_at,importedBy:roster.imported_by
-  }:null,season,limits:settings.minima,categories:meta,rows,counts,
+  }:null,ignoredMembers:roster?.ignored_members||[],season,limits:settings.minima,categories:meta,rows,counts,
     stale:staleCodes.length>0,staleCategories:staleCodes,
     incompleteCategories:incompleteCodes,
     warnings:[
       ...(roster?[]:["Não há lista de membros salva em Guilda Online."]),
+      ...((roster?.ignored_members||[]).map(m=>"Ignorado no G: "+m.player+" ("+m.reason+").")),
       ...sourceWarnings,
       ...(incompleteCodes.length?["Sem duas varreduras INTEGRAIS separadas por no mínimo 6 dias: "+incompleteCodes.join(", ")]:[]),
       ...(staleCodes.length?["DESATUALIZADO: última varredura integral de "+staleCodes.join(" e ")+" há mais de 7 dias ou ausente."]:[])
@@ -242,7 +258,31 @@ async function getReport(pool,{now=new Date()}={}){
     }));
     sweeps=completeSweeps(pages);
   }
-  return computeReport({roster,settings,sweeps,now,season:epoch,sourceWarnings:warnings});
+  const report=computeReport({roster,settings,sweeps,now,season:epoch,sourceWarnings:warnings});
+  // Fontes auxiliares são opcionais: uma falha não invalida os dados Photon.
+  const results=await Promise.allSettled([
+    cycleService.assignments(pool),cycleService.deposits(pool,now),
+    cycleService.attendanceByPlayer(now)
+  ]);
+  const messages=["Vínculos de contribuintes indisponíveis nesta consulta",
+    "Depósitos indisponíveis nesta consulta","Attendance indisponível nesta consulta"];
+  for(let i=0;i<results.length;i++){
+    if(results[i].status==="rejected"){
+      console.error("[contributor report] "+messages[i]+":",results[i].reason);
+      report.warnings.push(messages[i]);
+    }
+  }
+  const active=results[0].status==="fulfilled"?results[0].value:[];
+  const bank=results[1].status==="fulfilled"?results[1].value:[];
+  const cta=results[2].status==="fulfilled"?results[2].value:
+    {events:0,byPlayer:new Map(),ambiguous:[]};
+  const byKey=new Map(active.map(x=>[x.player_key,x]));
+  report.rows=report.rows.map(row=>cycleService.decorate(row,byKey.get(normalizedPlayer(row.player)),
+    bank,cta.byPlayer.get(normalizedPlayer(row.player))||[],now,sweeps));
+  report.attendanceSource={countedEvents:cta.events,matching:"exact_normalized_name",ambiguousNames:cta.ambiguous||[]};
+  if(cta.ambiguous?.length)report.warnings.push("Há "+cta.ambiguous.length+" nickname(s) ambíguos entre contas Discord; presença não atribuída automaticamente.");
+  report.bankSource={note:"Extrato importado indica depositos, nao confirma a finalidade do pagamento."};
+  return report;
 }
 function mondayUtc(now){
   const d=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()));
