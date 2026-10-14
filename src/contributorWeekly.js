@@ -60,6 +60,8 @@ async function init(pool){
   await pool.query("INSERT INTO contributor_weekly_settings(id,minima) VALUES(1,$1::jsonb) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(DEFAULT_MINIMA)]);
   await pool.query("ALTER TABLE contributor_roster_latest ADD COLUMN IF NOT EXISTS ignored_members JSONB NOT NULL DEFAULT '[]'::jsonb");
+  // O cadastro anterior vinha da Guilda Online; novas importacoes sao confirmadas aqui.
+  await pool.query("ALTER TABLE contributor_roster_latest ADD COLUMN IF NOT EXISTS import_source TEXT NOT NULL DEFAULT 'guild_online_legacy'");
   await cycleService.init(pool);
   const existing=await rosterLatest(pool);
   if(existing){
@@ -116,8 +118,8 @@ async function saveRoster(pool,text,actor,{checksum,expectedImportedAt}={}){
     const reconciliation=await cycleService.reconcile(client,members,new Date(),old.rows[0]?.member_count||0,
       {duplicateKeys:result.duplicateKeys||[]});
     const r=await client.query(
-      "INSERT INTO contributor_roster_latest(id,members,member_count,imported_at,imported_by,ignored_members) VALUES(1,$1::jsonb,$2,now(),$3,$4::jsonb) "+
-      "ON CONFLICT(id) DO UPDATE SET members=EXCLUDED.members,member_count=EXCLUDED.member_count,imported_at=EXCLUDED.imported_at,imported_by=EXCLUDED.imported_by,ignored_members=EXCLUDED.ignored_members "+
+      "INSERT INTO contributor_roster_latest(id,members,member_count,imported_at,imported_by,ignored_members,import_source) VALUES(1,$1::jsonb,$2,now(),$3,$4::jsonb,'contributors_confirmed') "+
+      "ON CONFLICT(id) DO UPDATE SET members=EXCLUDED.members,member_count=EXCLUDED.member_count,imported_at=EXCLUDED.imported_at,imported_by=EXCLUDED.imported_by,ignored_members=EXCLUDED.ignored_members,import_source=EXCLUDED.import_source "+
       "RETURNING imported_at,member_count,imported_by",
       [JSON.stringify(members),members.length,String(actor||"unknown"),JSON.stringify(reconciliation.ignoredMembers)]);
     await client.query("COMMIT");
@@ -127,7 +129,7 @@ async function saveRoster(pool,text,actor,{checksum,expectedImportedAt}={}){
   finally{client.release();}
 }
 async function rosterLatest(pool){
-  const r=await pool.query("SELECT members,member_count,imported_at,imported_by,ignored_members FROM contributor_roster_latest WHERE id=1");
+  const r=await pool.query("SELECT members,member_count,imported_at,imported_by,ignored_members,import_source FROM contributor_roster_latest WHERE id=1");
   return r.rows[0]||null;
 }
 async function getSettings(pool){
@@ -247,12 +249,13 @@ function computeReport({roster,settings,sweeps,now=new Date(),season=null,source
     ready:pairs[c].ready,stale:!pairs[c].latest||nowMs-Date.parse(pairs[c].latest.capturedAt)>FRESH_MS
   })]));
   return {generatedAt:new Date(now).toISOString(),roster:roster?{
-    memberCount:roster.member_count,importedAt:roster.imported_at,importedBy:roster.imported_by
+    memberCount:roster.member_count,importedAt:roster.imported_at,importedBy:roster.imported_by,
+    source:roster.import_source||"guild_online_legacy"
   }:null,ignoredMembers:roster?.ignored_members||[],season,limits:settings.minima,categories:meta,rows,counts,
     stale:staleCodes.length>0,staleCategories:staleCodes,
     incompleteCategories:incompleteCodes,
     warnings:[
-      ...(roster?[]:["Não há lista de membros salva em Guilda Online."]),
+      ...(roster?[]:["Nenhuma lista de membros cadastrada. Use a importação na aba Contribuintes da Semana."]),
       ...((roster?.ignored_members||[]).map(m=>"Ignorado no G: "+m.player+" ("+m.reason+").")),
       ...sourceWarnings,
       ...(incompleteCodes.length?["Sem duas varreduras INTEGRAIS separadas por no mínimo 6 dias: "+incompleteCodes.join(", ")]:[]),
