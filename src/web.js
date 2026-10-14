@@ -3571,7 +3571,7 @@ const PAGE = `<!doctype html>
       var records=[data.headers.map(contribCsvCell).join(';')].concat(all.map(function(r){
         return r.map(contribCsvCell).join(';');
       }));
-      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+records.join('\r\n'),
+      gmDownload('imortais-contribuintes-semana.csv',String.fromCharCode(65279)+records.join('\\r\\n'),
         'text/csv;charset=utf-8');
       return;
     }
