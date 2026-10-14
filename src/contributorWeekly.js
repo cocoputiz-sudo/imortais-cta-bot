@@ -58,9 +58,13 @@ async function init(pool){
   ].join(" "));
   await pool.query("INSERT INTO contributor_weekly_settings(id,minima) VALUES(1,$1::jsonb) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(DEFAULT_MINIMA)]);
+  await pool.query("ALTER TABLE contributor_roster_latest ADD COLUMN IF NOT EXISTS ignored_members JSONB NOT NULL DEFAULT '[]'::jsonb");
   await cycleService.init(pool);
   const existing=await rosterLatest(pool);
-  if(existing)await cycleService.bootstrap(pool,existing);
+  if(existing){
+    try{await cycleService.bootstrap(pool,existing);}
+    catch(e){console.error("[contributor weekly bootstrap]",e);}
+  }
 }
 
 async function saveRoster(pool,text,actor){
@@ -72,19 +76,21 @@ async function saveRoster(pool,text,actor){
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(77831443)");
     const old=await client.query("SELECT member_count FROM contributor_roster_latest WHERE id=1");
-    const contributors=await cycleService.reconcile(client,members,new Date(),old.rows[0]?.member_count||0);
+    const reconciliation=await cycleService.reconcile(client,members,new Date(),old.rows[0]?.member_count||0,
+      {duplicateKeys:result.duplicateKeys||[]});
     const r=await client.query(
-      "INSERT INTO contributor_roster_latest(id,members,member_count,imported_at,imported_by) VALUES(1,$1::jsonb,$2,now(),$3) "+
-      "ON CONFLICT(id) DO UPDATE SET members=EXCLUDED.members,member_count=EXCLUDED.member_count,imported_at=EXCLUDED.imported_at,imported_by=EXCLUDED.imported_by "+
+      "INSERT INTO contributor_roster_latest(id,members,member_count,imported_at,imported_by,ignored_members) VALUES(1,$1::jsonb,$2,now(),$3,$4::jsonb) "+
+      "ON CONFLICT(id) DO UPDATE SET members=EXCLUDED.members,member_count=EXCLUDED.member_count,imported_at=EXCLUDED.imported_at,imported_by=EXCLUDED.imported_by,ignored_members=EXCLUDED.ignored_members "+
       "RETURNING imported_at,member_count,imported_by",
-      [JSON.stringify(members),members.length,String(actor||"unknown")]);
+      [JSON.stringify(members),members.length,String(actor||"unknown"),JSON.stringify(reconciliation.ignoredMembers)]);
     await client.query("COMMIT");
-    return {...r.rows[0],contributors,skipped:result.skipped.length,duplicates:result.duplicates};
+    return {...r.rows[0],contributors:reconciliation.contributors,
+      ignoredMembers:reconciliation.ignoredMembers,skipped:result.skipped.length,duplicates:result.duplicates};
   }catch(e){await client.query("ROLLBACK");throw e;}
   finally{client.release();}
 }
 async function rosterLatest(pool){
-  const r=await pool.query("SELECT members,member_count,imported_at,imported_by FROM contributor_roster_latest WHERE id=1");
+  const r=await pool.query("SELECT members,member_count,imported_at,imported_by,ignored_members FROM contributor_roster_latest WHERE id=1");
   return r.rows[0]||null;
 }
 async function getSettings(pool){
@@ -204,11 +210,12 @@ function computeReport({roster,settings,sweeps,now=new Date(),season=null,source
   })]));
   return {generatedAt:new Date(now).toISOString(),roster:roster?{
     memberCount:roster.member_count,importedAt:roster.imported_at,importedBy:roster.imported_by
-  }:null,season,limits:settings.minima,categories:meta,rows,counts,
+  }:null,ignoredMembers:roster?.ignored_members||[],season,limits:settings.minima,categories:meta,rows,counts,
     stale:staleCodes.length>0,staleCategories:staleCodes,
     incompleteCategories:incompleteCodes,
     warnings:[
       ...(roster?[]:["Não há lista de membros salva em Guilda Online."]),
+      ...((roster?.ignored_members||[]).map(m=>"Ignorado no G: "+m.player+" ("+m.reason+").")),
       ...sourceWarnings,
       ...(incompleteCodes.length?["Sem duas varreduras INTEGRAIS separadas por no mínimo 6 dias: "+incompleteCodes.join(", ")]:[]),
       ...(staleCodes.length?["DESATUALIZADO: última varredura integral de "+staleCodes.join(" e ")+" há mais de 7 dias ou ausente."]:[])
@@ -251,11 +258,23 @@ async function getReport(pool,{now=new Date()}={}){
     sweeps=completeSweeps(pages);
   }
   const report=computeReport({roster,settings,sweeps,now,season:epoch,sourceWarnings:warnings});
-  // Fontes adicionais nao alteram a classificacao Photon legada.
-  const [active,bank,cta]=await Promise.all([
+  // Fontes auxiliares são opcionais: uma falha não invalida os dados Photon.
+  const results=await Promise.allSettled([
     cycleService.assignments(pool),cycleService.deposits(pool,now),
     cycleService.attendanceByPlayer(now)
   ]);
+  const messages=["Vínculos de contribuintes indisponíveis nesta consulta",
+    "Depósitos indisponíveis nesta consulta","Attendance indisponível nesta consulta"];
+  for(let i=0;i<results.length;i++){
+    if(results[i].status==="rejected"){
+      console.error("[contributor report] "+messages[i]+":",results[i].reason);
+      report.warnings.push(messages[i]);
+    }
+  }
+  const active=results[0].status==="fulfilled"?results[0].value:[];
+  const bank=results[1].status==="fulfilled"?results[1].value:[];
+  const cta=results[2].status==="fulfilled"?results[2].value:
+    {events:0,byPlayer:new Map(),ambiguous:[]};
   const byKey=new Map(active.map(x=>[x.player_key,x]));
   report.rows=report.rows.map(row=>cycleService.decorate(row,byKey.get(normalizedPlayer(row.player)),
     bank,cta.byPlayer.get(normalizedPlayer(row.player))||[],now,sweeps));
