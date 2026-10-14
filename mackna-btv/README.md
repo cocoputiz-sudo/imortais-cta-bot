@@ -32,7 +32,7 @@ docker info
 Se nao funcionar, capture os erros e nao continue.
 
 ## 3. Preparar e executar o piloto
-A imagem Docker ARM64 e construida no GitHub Actions APOS o PR ser validado/mergeado na main. Esse fluxo nao faz deploy de producao nem altera o Railway.
+A imagem Docker ARM64 tag `mackna-btv-pilot` e publicada pelo GitHub Actions diretamente da branch de testes, mesmo SEM merge do PR. A imagem `mackna-btv-arm64` e reservada para a main. Esse fluxo nao faz deploy de producao nem altera o Railway. A publicacao no GHCR nao significa que a BTV ja esteja rodando.
 
 Na BTV11:
 ```bash
