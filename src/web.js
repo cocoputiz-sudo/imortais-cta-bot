@@ -3811,12 +3811,27 @@ const PAGE = `<!doctype html>
         (br.length?br.map(function(x){
           var link=x.link||{},status=link.status==='confirmed'?'Confirmado · '+link.discord_user_id:
             link.status==='pending'?'Aguardando conferência · '+link.discord_user_id:
-            link.status==='revoked'?'Avisos cancelados':'Sem vínculo';
+            link.status==='revoked'?'Vínculo revogado'+(link.review_reason?' · Motivo: '+link.review_reason:''):'Sem vínculo';
           var other=(x.totalOtherDebt||0)>0?contribSilver(x.totalOtherDebt):'Nenhuma registrada';
           var manage='';
           if(authState.canEditContributors){
-            if(link.status==='pending')manage+='<button class="btn primary" type="button" data-cb-approve="'+encodeURIComponent(x.player)+'">Confirmar vínculo</button> ';
-            if(link.status==='confirmed')manage+='<button class="btn ghost" type="button" data-cb-send="'+encodeURIComponent(x.player)+'">Enviar lembrete</button> ';
+            if(link.status==='pending'){
+              manage+='<button class="btn primary" type="button" data-cb-approve="'+encodeURIComponent(x.player)+'">Confirmar vínculo</button> ';
+              manage+='<button class="btn ghost" type="button" data-cb-close="reject" data-cb-player="'+encodeURIComponent(x.player)+'">Recusar pedido</button> ';
+            }
+            if(link.status==='confirmed'){
+              manage+='<button class="btn ghost" type="button" data-cb-send="'+encodeURIComponent(x.player)+'">Enviar lembrete</button> ';
+              manage+='<button class="btn ghost" type="button" data-cb-close="revoke" data-cb-player="'+encodeURIComponent(x.player)+'">Revogar vínculo</button> ';
+            }
+            if(x.currentRemaining>0)
+              manage+='<button class="btn ghost" type="button" data-cb-writeoff="'+encodeURIComponent(x.player)+
+                '" data-cb-week="'+esc(x.currentWeekKey)+'" data-cb-remaining="'+x.currentRemaining+
+                '">Dar baixa '+esc(contribShortDate(x.week))+'</button> ';
+            (x.overdue||[]).forEach(function(o){
+              manage+='<button class="btn ghost" type="button" data-cb-writeoff="'+encodeURIComponent(x.player)+
+                '" data-cb-week="'+esc(o.weekKey)+'" data-cb-remaining="'+o.amount+
+                '">Dar baixa '+esc(o.week)+'</button> ';
+            });
             manage+='<details class="note" style="margin-top:6px"><summary>Marcar débito anterior</summary>'+
               '<label><input type="checkbox" data-cb-debt-check'+(x.manualDebt>0?' checked':'')+'> Existe outro débito anterior</label>'+
               '<div style="margin-top:6px"><input data-cb-debt-amount type="number" min="0" step="1" class="input" style="max-width:160px" placeholder="Valor em prata" value="'+(Number(x.manualDebt)||0)+'"></div>'+
@@ -3825,7 +3840,8 @@ const PAGE = `<!doctype html>
               '</details>';
           }
           return '<tr><td><b>'+esc(x.player)+'</b><div class="note">C'+esc(x.level)+' · '+contribSilver(x.due)+'/semana</div></td>'+
-            '<td>'+esc(status)+'</td><td>'+esc(x.paymentStatus)+'<div class="note">Depositado: '+contribSilver(x.paid)+'</div></td>'+
+            '<td>'+esc(status)+'</td><td>'+esc(x.paymentStatus)+'<div class="note">Depositado: '+contribSilver(x.paid)+
+            ' · Baixas: '+contribSilver(x.currentAdjusted||0)+' · Saldo: '+contribSilver(x.currentRemaining||0)+'</div></td>'+
             '<td>'+esc(other)+'<div class="note">'+x.overdueWeeks+' semana(s) em aberto no histórico'+
             (x.manualDebt?' · ajuste manual: '+contribSilver(x.manualDebt):'')+'</div>'+
             (x.overdue&&x.overdue.length?'<details class="note"><summary>Ver semanas anteriores</summary>'+
@@ -3882,6 +3898,34 @@ const PAGE = `<!doctype html>
           btn.disabled=true;cbPost('send',{player:player}).then(function(x){
             alert(x.sent?'Mensagem enviada.':'Não enviada: '+(x.skipped||x.error||'sem detalhes'));renderContributors();
           }).catch(function(e){alert('Não enviado: '+e.message);btn.disabled=false;});
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-close]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-player')),
+            action=btn.getAttribute('data-cb-close'),
+            reason=prompt((action==='reject'?'Motivo para RECUSAR o pedido de ':'Motivo para REVOGAR o vínculo de ')+player+':');
+          if(!reason||!reason.trim())return;
+          if(!confirm((action==='reject'?'Recusar pedido':'Revogar vínculo')+' de '+player+'?'))return;
+          btn.disabled=true;cbPost('link-close',{player:player,action:action,reason:reason.trim()})
+            .then(renderContributors).catch(function(e){alert('Não alterado: '+e.message);btn.disabled=false;});
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-cb-writeoff]'),function(btn){
+        btn.onclick=function(){
+          var player=decodeURIComponent(btn.getAttribute('data-cb-writeoff')),
+            weekKey=btn.getAttribute('data-cb-week'),remaining=Number(btn.getAttribute('data-cb-remaining'));
+          var amountText=prompt('Dar baixa na semana '+weekKey+' de '+player+
+            '. Saldo: '+contribSilver(remaining)+'. Digite o valor EM PRATA:',String(remaining));
+          if(amountText==null)return;
+          var amount=Number(amountText.trim()),reason=prompt('Justificativa obrigatória para a baixa da semana '+weekKey+':');
+          if(!Number.isSafeInteger(amount)||amount<=0||amount>remaining||!reason||!reason.trim()){
+            alert('Informe um valor positivo não superior ao saldo e uma justificativa.');return;
+          }
+          if(!confirm('Registrar baixa manual de '+contribSilver(amount)+' para '+player+
+            ' na competência '+weekKey+'? A operação ficará auditada.'))return;
+          btn.disabled=true;cbPost('writeoff',{player:player,weekKey:weekKey,amount:amount,reason:reason.trim()})
+            .then(renderContributors).catch(function(e){alert('Baixa recusada: '+e.message);btn.disabled=false;});
         };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-cb-save-debt]'),function(btn){
