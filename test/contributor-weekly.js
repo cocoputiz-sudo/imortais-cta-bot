@@ -155,6 +155,26 @@ assert.equal(unlinked.find(x=>x.player==="Patrulheiro").reason,"Está no G sem c
 assert.equal(weekly.unlinkedDeposits([makeDeposit("Aldora","2026-10-12T11:00:00Z",4000000)],
  unlinkedRoster,{rows:reportMembers},currentNow).length,0);
 
+// O total recebido e a contagem de pagantes incluem valores parciais e excedentes,
+// mas nao incluem depositos nao vinculados nem contam duas vezes o mesmo jogador.
+const payments=[
+ {player:"Aldora",payment:cycles.paymentForWeek(split,"aldora","1",currentWeek,currentNow)},
+ {player:"Brunao",payment:cycles.paymentForWeek([makeDeposit("Brunao","2026-10-13T12:00:00Z",2000000)],
+   "brunao","1",currentWeek,currentNow)},
+ {player:"C3Extra",payment:cycles.paymentForWeek([makeDeposit("C3Extra","2026-10-13T12:00:00Z",8000000)],
+   "c3extra","3",currentWeek,currentNow)},
+ {player:"SemPagamento",payment:cycles.paymentForWeek([],"sempagamento","1",currentWeek,currentNow)}
+];
+const totals=weekly.weeklyPaymentTotals(payments);
+assert.deepEqual(totals,{receivedSilver:14000000,payingContributors:3},
+  "4M quitados + 2M parciais + 8M com excedente; tres jogadores distintos");
+assert.deepEqual(weekly.weeklyPaymentTotals([...payments,{...payments[0],player:"ALDORA"}]),totals,
+  "jogador normalizado duplicado nao pode inflar o total nem os pagantes");
+assert.deepEqual(weekly.weeklyPaymentTotals([],true),{receivedSilver:0,payingContributors:0});
+assert.deepEqual(weekly.weeklyPaymentTotals(payments,false),{receivedSilver:null,payingContributors:null},
+  "fonte indisponivel nao pode aparecer como zero recebido");
+
+
 assert.equal(contributorLevel(["Contribuinte 3x"]),null);
 assert.throws(()=>validateSettings({...cfg,minima:{"1":{pve:-1,gathering:1},"2":{pve:1,gathering:1},"3":{pve:1,gathering:1}}}));
 assert.equal(scheduledForWeek(new Date("2026-10-10T15:00:00Z"),{weekday:0,timeUtc:"18:00"}).toISOString(),"2026-10-11T18:00:00.000Z");
