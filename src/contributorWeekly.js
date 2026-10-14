@@ -182,7 +182,8 @@ function computeReport({roster,settings,sweeps,now=new Date(),season=null,source
   const staleCodes=required.filter(code=>!pairs[code].latest||
     nowMs-Date.parse(pairs[code].latest.capturedAt)>FRESH_MS);
   const incompleteCodes=required.filter(code=>!pairs[code].ready);
-  const everyone=latestRoster.filter(m=>contributorLevel(m.roles));
+  const ignoredKeys=new Set((roster?.ignored_members||[]).map(m=>normalizedPlayer(m.player)));
+  const everyone=latestRoster.filter(m=>contributorLevel(m.roles)&&!ignoredKeys.has(normalizedPlayer(m.name)));
   const rows=everyone.map(m=>{
     const tier=contributorLevel(m.roles),key=normalizedPlayer(m.name),minimum=settings.minima[tier]||DEFAULT_MINIMA[tier];
     const pve=memberDelta(pairs.PVE,key),gathering=memberDelta(pairs.GATHERING,key);
