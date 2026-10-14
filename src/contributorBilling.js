@@ -184,21 +184,26 @@ async function sync(pool,now=new Date()){
 }
 async function dashboard(pool,now=new Date()){
   const {week}=await sync(pool,now),{found}=await activeRoster(pool);
-  const [links,manual,obligations,bank,config,log]=await Promise.all([
-    pool.query("SELECT player_key,discord_user_id,status,consented_at,reviewed_at FROM contributor_discord_links"),
+  const [links,manual,obligations,bank,config,log,adjustments]=await Promise.all([
+    pool.query("SELECT player_key,discord_user_id,status,consented_at,reviewed_by,reviewed_at,review_reason FROM contributor_discord_links"),
     pool.query("SELECT player_key,amount,note,updated_at FROM contributor_prior_debts"),
     pool.query("SELECT player_key,week_key,tier,due,paid_total,first_week FROM contributor_weekly_obligations ORDER BY week_key DESC"),
     cycle.deposits(pool,now),
     settings(pool),
     pool.query("SELECT player_key,week_key,stage,status,attempted_at,detail FROM contributor_dm_log "+
-      "WHERE week_key >= $1::date ORDER BY attempted_at DESC LIMIT 300",[cycle.weekAt(now,-4).start.slice(0,10)])
+      "WHERE week_key >= $1::date ORDER BY attempted_at DESC LIMIT 300",[cycle.weekAt(now,-4).start.slice(0,10)]),
+    pool.query("SELECT player_key,week_key,COALESCE(SUM(amount),0) AS total FROM contributor_weekly_adjustments "+
+      "GROUP BY player_key,week_key")
   ]);
   const linked=new Map(links.rows.map(x=>[x.player_key,x]));
   const oldDebt=new Map(manual.rows.map(x=>[x.player_key,x]));
+  const adjustmentMap=new Map(adjustments.rows.map(a=>
+    [a.player_key+"|"+new Date(a.week_key).toISOString().slice(0,10),Number(a.total)]));
   const ledger=new Map();
   for(const o of obligations.rows){
     if(!ledger.has(o.player_key))ledger.set(o.player_key,[]);
-    ledger.get(o.player_key).push(o);
+    const weekKey=new Date(o.week_key).toISOString().slice(0,10);
+    ledger.get(o.player_key).push({...o,weekKey,adjusted:adjustmentMap.get(o.player_key+"|"+weekKey)||0});
   }
   const rows=[];
   for(const m of found.values()){
@@ -206,11 +211,18 @@ async function dashboard(pool,now=new Date()){
       new Date(o.week_key).toISOString().slice(0,10)===week.start.slice(0,10));
     const payment=cycle.paymentForWeek(bank,m.key,m.level,week,now);
     const overdue=history.filter(o=>new Date(o.week_key).getTime()<Date.parse(week.start))
-      .map(o=>({week:shortDate(o.week_key),amount:Math.max(0,Number(o.due)-Number(o.paid_total))}))
+      .map(o=>({week:shortDate(o.week_key),weekKey:o.weekKey,
+        amount:Math.max(0,Number(o.due)-Number(o.paid_total)-o.adjusted),
+        due:Number(o.due),paid:Number(o.paid_total),adjusted:o.adjusted}))
       .filter(o=>o.amount>0);
+    const currentAdjustments=current?.adjusted||0;
+    const currentRemaining=Math.max(0,Number(current?.due||cycle.DUES[m.level])-
+      Math.max(Number(current?.paid_total||0),payment.amount)-currentAdjustments);
     const prior=oldDebt.get(m.key),manualAmount=Number(prior?.amount||0);
     rows.push({player:m.name,key:m.key,level:m.level,due:cycle.DUES[m.level],
-      paymentStatus:payment.status,paid:payment.amount,
+      paymentStatus:currentRemaining===0&&payment.amount<Number(current?.due||cycle.DUES[m.level])
+        ?"BAIXADO":payment.status,paid:payment.amount,currentRemaining,currentAdjusted:currentAdjustments,
+      currentWeekKey:week.start.slice(0,10),
       firstWeek:!!current?.first_week,week:week.start,link:linked.get(m.key)||null,
       overdueWeeks:overdue.length,overdueAmount:overdue.reduce((a,b)=>a+b.amount,0),
       overdue,manualDebt:manualAmount,manualNote:prior?.note||"",
@@ -243,15 +255,23 @@ async function sendOne(pool,client,{player,stage,now=new Date(),snapshot=null}){
   if(!row)fail("contribuinte_nao_encontrado");
   if(!row.link||row.link.status!=="confirmed")fail("discord_sem_vinculo_confirmado");
   // Antes de cada DM, revisar o extrato mais recente e a autorização.
-  const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_deposits");
+  const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_imports");
   if(!bankFresh.rows[0]?.latest||new Date(now).getTime()-new Date(bankFresh.rows[0].latest).getTime()>72*3600000)
     return {skipped:"extrato_desatualizado"};
   const latestBank=await pool.query("SELECT COALESCE(SUM(amount),0) AS total "+
     "FROM contributor_bank_deposits WHERE player_key=$1 AND paid_at>=$2 AND paid_at<$3 AND paid_at<= $4",
     [key,report.week.start,report.week.end,new Date(now)]);
   row.paid=Number(latestBank.rows[0].total);
-  row.paymentStatus=row.paid>=row.due?"PAGO":row.paid>0?"PARCIAL":"PENDENTE";
-  if(row.paymentStatus==="PAGO")return {skipped:"pago"};
+  const currentObligation=await pool.query("SELECT due,paid_total FROM contributor_weekly_obligations "+
+    "WHERE player_key=$1 AND week_key=$2::date",[key,report.week.start.slice(0,10)]);
+  const currentAdjustment=await pool.query("SELECT COALESCE(SUM(amount),0) AS total "+
+    "FROM contributor_weekly_adjustments WHERE player_key=$1 AND week_key=$2::date",
+    [key,report.week.start.slice(0,10)]);
+  const amountCredited=Math.max(row.paid,Number(currentObligation.rows[0]?.paid_total||0));
+  const outstanding=Math.max(0,Number(currentObligation.rows[0]?.due||row.due)-
+    amountCredited-Number(currentAdjustment.rows[0].total));
+  if(outstanding<=0)return {skipped:row.paid>=row.due?"pago":"baixa_manual"};
+  row.paymentStatus=row.paid>0?"PARCIAL":"PENDENTE";
   if(!report.settings.enabled)fail("mensagens_desativadas");
   const weekKey=report.week.start.slice(0,10);
   const already=await pool.query("SELECT count(*)::int AS n FROM contributor_dm_log WHERE player_key=$1 AND week_key=$2::date",[key,weekKey]);
@@ -286,18 +306,18 @@ async function tick(pool,client,{now=new Date()}={}){
     const already=await pool.query("SELECT player_key FROM contributor_dm_log WHERE week_key=$1::date AND stage=$2",
       [cycle.weekAt(now).start.slice(0,10),stage]);
     const processed=new Set(already.rows.map(x=>x.player_key));
-    const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_deposits");
+    const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_imports");
     if(!bankFresh.rows[0]?.latest||new Date(now).getTime()-new Date(bankFresh.rows[0].latest).getTime()>72*3600000)
       return {skipped:"extrato_desatualizado"};
     const d=await dashboard(pool,now);
     let sent=0,skipped=0;
     for(const r of d.rows){
       if(processed.has(r.key)||!r.link||r.link.status!=="confirmed"||
-        ["PAGO","PAGO COM ATRASO"].includes(r.paymentStatus)){skipped++;continue;}
+        ["PAGO","PAGO COM ATRASO","BAIXADO"].includes(r.paymentStatus)){skipped++;continue;}
       try{const result=await sendOne(pool,client,{player:r.player,stage,now,snapshot:d});if(result.sent)sent++;else skipped++;}
       catch(e){console.error("[contributor dm]",r.key,errorOf(e));skipped++;}
     }
     return {stage,sent,skipped};
   }finally{ticking=false;}
 }
-module.exports={init,requestLink,stopLink,review,priorDebt,settings,setSettings,sync,dashboard,stageAt,messageFor,sendOne,tick};
+module.exports={init,requestLink,stopLink,review,closeLink,adjustWeek,priorDebt,settings,setSettings,sync,dashboard,stageAt,messageFor,sendOne,tick};
