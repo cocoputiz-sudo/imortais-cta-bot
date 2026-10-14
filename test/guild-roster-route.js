@@ -133,24 +133,57 @@ async function testRouteAccessAndResponses() {
     assert.equal(missing.status, 404);
     assert.equal(missing.json.error, "event_not_found");
 
+    const beforeAnalysis=await contributorWeekly.rosterLatest(db.pool);
     const good = await post(base, cookieFor({ canEdit: true }), { text: roster, eventId: ev.id });
     assert.equal(good.status, 200);
     assert.equal(good.json.ok, true);
-    assert.equal(good.json.savedRoster.member_count,8,"valid Guilda Online paste persisted for weekly report");
-    assert.equal(good.json.savedRoster.contributors,3,"three contributor role tiers recognized");
+    assert.equal(good.json.savedRoster,undefined,"analisar nao pode alterar contribuintes");
+    assert.deepEqual(await contributorWeekly.rosterLatest(db.pool),beforeAnalysis,
+      "analise de Guilda Online jamais grava a lista");
+    const requestImport=async(path,cookie,body)=>{
+      const response=await fetch(base+"/api/contributors/roster/"+path,{
+        method:"POST",headers:{"Content-Type":"application/json",Cookie:cookie},
+        body:JSON.stringify(body||{})});
+      return {status:response.status,json:await response.json()};
+    };
+    const adminCookie=cookieFor({canEdit:true,isSiteAdmin:true});
+    const officerCookie=cookieFor({canEdit:false,canViewContributors:true});
+    const editorCookie=cookieFor({canEdit:true});
+    assert.equal((await requestImport("preview",editorCookie,{text:roster})).status,403,
+      "editor nao deve atualizar cadastro sem ser administrador");
+    assert.equal((await requestImport("confirm",officerCookie,{text:roster})).status,403,
+      "officer nao pode confirmar importacao");
+    const obsolete=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:editorCookie},
+      body:JSON.stringify({text:roster})});
+    assert.equal(obsolete.status,410,"endpoint antigo nao deve gravar a lista");
+    const preflight=await requestImport("preview",adminCookie,{text:roster});
+    assert.equal(preflight.status,200,"admin pode previsualizar roster");
+    assert.equal(preflight.json.memberCount,8);
+    assert.deepEqual(preflight.json.groups["1"],["Delta"]);
+    assert.deepEqual(preflight.json.groups["2"],["Golf"]);
+    assert.deepEqual(preflight.json.groups["3"],["Hotel"]);
+    assert.equal(await contributorWeekly.rosterLatest(db.pool),null,
+      "previsualizar nao deve gravar no banco");
+    assert.equal((await requestImport("confirm",adminCookie,{text:roster})).status,400,
+      "sem previa, importacao recusada");
+    assert.equal((await requestImport("confirm",adminCookie,{
+      text:roster+"\\nALTERADO",checksum:preflight.json.checksum,
+      expectedImportedAt:preflight.json.expectedImportedAt
+    })).status,400,"texto diferente da previa e recusado");
+    const initialConfirm=await requestImport("confirm",adminCookie,{
+      text:roster,checksum:preflight.json.checksum,
+      expectedImportedAt:preflight.json.expectedImportedAt});
+    assert.equal(initialConfirm.status,200);
+    assert.equal(initialConfirm.json.saved.contributors,3);
     const saved=await contributorWeekly.rosterLatest(db.pool);
-    assert.equal(saved.members.length,8,"roster persisted in PostgreSQL");
+    assert.equal(saved.members.length,8,"somente confirmacao grava no PostgreSQL");
     assert.equal(saved.members.find(x=>x.name==="Delta").roles[0],"CONTRIBUINTE 1");
-    const snapshotOnly=await fetch(base+"/api/guild-roster/save",{
-      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
-      body:JSON.stringify({text:roster})
-    });
-    assert.equal(snapshotOnly.status,200,"last pasted roster saved even without open CTA");
-    const refused=await fetch(base+"/api/guild-roster/save",{
-      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:false})},
-      body:JSON.stringify({text:roster})
-    });
-    assert.equal(refused.status,403,"regular guild member cannot overwrite roster");
+    // Mesmo apos uma importacao, a analise de Guilda Online nao pode sobrescreve-la.
+    const differentRoster=roster.replace("CONTRIBUINTE 1","CONTRIBUINTE 4");
+    assert.equal((await post(base,editorCookie,{text:differentRoster,eventId:ev.id})).status,200);
+    assert.deepEqual(await contributorWeekly.rosterLatest(db.pool),saved,
+      "analise posterior nao pode modificar roster salvo");
 
 
     const contributorRead=async (cookie,method="GET",body=null)=>{
@@ -191,13 +224,14 @@ async function testRouteAccessAndResponses() {
     ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos");
     // Integração do Contribuinte 4 (sem alterar os asserts dos tres cargos anteriores).
     const fourText=roster+'\n"NovoQuatro"\t"Online"\t"CONTRIBUINTE 4"';
-    const added=await fetch(base+"/api/guild-roster/save",{
-      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
-      body:JSON.stringify({text:fourText})
-    });
+    const fourPreview=await requestImport("preview",adminCookie,{text:fourText});
+    assert.equal(fourPreview.status,200);
+    assert.deepEqual(fourPreview.json.groups["4"],["NovoQuatro"]);
+    const added=await requestImport("confirm",adminCookie,{
+      text:fourText,checksum:fourPreview.json.checksum,
+      expectedImportedAt:fourPreview.json.expectedImportedAt});
     assert.equal(added.status,200);
-    const addedJson=await added.json();
-    assert.equal(addedJson.saved.contributors,4);
+    assert.equal(added.json.saved.contributors,4);
     const afterFourth=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
     assert.equal(afterFourth.status,200);
     const fourth=afterFourth.json.rows.find(x=>x.player==="NovoQuatro");
@@ -276,12 +310,16 @@ async function testRouteAccessAndResponses() {
       '\n"BadTier"\t"Online"\t"CONTRIBUINTE 1;CONTRIBUINTE 2"'+
       '\n"Repeated"\t"Online"\t"CONTRIBUINTE 3"'+
       '\n"[IM] repeated"\t"Online"\t"CONTRIBUINTE 3"';
-    const ambiguousSave=await fetch(base+"/api/guild-roster/save",{
-      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
-      body:JSON.stringify({text:ambiguousRoster})
-    });
+    const ambiguousPreview=await requestImport("preview",adminCookie,{text:ambiguousRoster});
+    assert.equal(ambiguousPreview.status,200);
+    const ignoredPreview=new Map(ambiguousPreview.json.ignoredMembers.map(x=>[x.player,x.reason]));
+    assert.match(ignoredPreview.get("BadTier"),/conflitantes/);
+    assert.match(ignoredPreview.get("Repeated"),/duplicado/);
+    const ambiguousSave=await requestImport("confirm",adminCookie,{
+      text:ambiguousRoster,checksum:ambiguousPreview.json.checksum,
+      expectedImportedAt:ambiguousPreview.json.expectedImportedAt});
     assert.equal(ambiguousSave.status,200,"G com conflitos deve ser salvo sem HTTP 500");
-    const ambiguousJson=await ambiguousSave.json();
+    const ambiguousJson=ambiguousSave.json;
     const ignored=new Map(ambiguousJson.saved.ignoredMembers.map(x=>[x.player,x.reason]));
     assert.match(ignored.get("BadTier"),/conflitantes/);
     assert.match(ignored.get("Repeated"),/duplicado/);
@@ -292,6 +330,19 @@ async function testRouteAccessAndResponses() {
     assert(conflictReport.json.warnings.some(x=>x.includes("BadTier")));
     assert(conflictReport.json.warnings.some(x=>x.includes("Repeated")));
     ok("Conflitos e nomes duplicados sao ignorados individualmente e avisados");
+    const previewOne=await requestImport("preview",adminCookie,{text:ambiguousRoster});
+    const previewTwo=await requestImport("preview",adminCookie,{text:ambiguousRoster});
+    assert.equal(previewOne.status,200);
+    assert.equal(previewTwo.status,200);
+    const sameAgain=await requestImport("confirm",adminCookie,{
+      text:ambiguousRoster,checksum:previewOne.json.checksum,
+      expectedImportedAt:previewOne.json.expectedImportedAt});
+    assert.equal(sameAgain.status,200);
+    const stalePreview=await requestImport("confirm",adminCookie,{
+      text:ambiguousRoster,checksum:previewTwo.json.checksum,
+      expectedImportedAt:previewTwo.json.expectedImportedAt});
+    assert.equal(stalePreview.status,409,"previa anterior nao pode sobrepor importacao mais recente");
+    assert.equal(stalePreview.json.error,"roster_changed");
 
     // O bootstrap deve suportar um roster previamente salvo que contem cargos conflitantes.
     await db.pool.query("DELETE FROM contributor_active_assignments");
