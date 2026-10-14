@@ -352,6 +352,28 @@ async function testRouteAccessAndResponses() {
     assert.equal(unmatchedEntry.amount,4000000);
     assert.equal(afterUnknown.json.rows.find(x=>x.player==="NovoQuatro").payment.amount,10000000,
       "valor nao associado nao pode aumentar o saldo de outro contribuinte");
+    assert.equal(afterUnknown.json.paymentSummary.receivedSilver,10000000,
+      "total da semana exclui deposito de nome inexistente");
+    assert.equal(afterUnknown.json.paymentSummary.payingContributors,1,
+      "um jogador pagante pode ter muitos depositos mas conta uma vez");
+    assert.equal(afterUnknown.json.paymentSummary.paid,1,
+      "numero de quitados e separado de pagantes");
+    const partialBankTsv="Date\tPlayer\tReason\tAmount\n"+
+      bankAt+"\tDelta\tDeposit\t2000000\n";
+    const importedPartial=await fetch(bankUrl,{method:"POST",headers:{
+      "Content-Type":"application/json",Cookie:policeCookie},body:JSON.stringify({text:partialBankTsv})});
+    assert.equal(importedPartial.status,200);
+    const withPartial=await contributorRead(policeCookie);
+    assert.equal(withPartial.status,200);
+    assert.equal(withPartial.json.rows.find(x=>x.player==="Delta").payment.status,"PARCIAL");
+    assert.equal(withPartial.json.paymentSummary.receivedSilver,12000000,
+      "10M integral + 2M parcial devem somar no recebimento da semana");
+    assert.equal(withPartial.json.paymentSummary.payingContributors,2,
+      "pessoa que pagou parcial conta como pagante");
+    assert.equal(withPartial.json.paymentSummary.paid,1,
+      "parcial nao conta como quitado");
+    assert.equal(withPartial.json.unlinkedDeposits.some(x=>x.player===wrongName),true,
+      "deposito de nome desconhecido continua separado dos totais");
 
     // O G incompleto nao deve excluir a guilda: transacao e contagem conservadora.
     const dbRoster=await contributorWeekly.rosterLatest(db.pool);
