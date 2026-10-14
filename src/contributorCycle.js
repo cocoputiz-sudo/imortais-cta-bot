@@ -106,7 +106,9 @@ async function bootstrap(pool,roster){
     await client.query("SELECT pg_advisory_xact_lock(77831443)");
     const n=await client.query("SELECT count(*)::int AS n FROM contributor_active_assignments");
     if(Number(n.rows[0]?.n)===0){
-      await reconcile(client,roster.members,roster.imported_at||new Date(),0);
+      const duplicateKeys=(roster.ignored_members||[])
+        .filter(m=>m.reason==="nome duplicado no G").map(m=>keyOf(m.player));
+      await reconcile(client,roster.members,roster.imported_at||new Date(),0,{duplicateKeys});
     }
     await client.query("COMMIT");
   }catch(e){await client.query("ROLLBACK");throw e;}
