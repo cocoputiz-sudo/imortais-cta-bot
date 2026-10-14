@@ -3610,10 +3610,15 @@ const PAGE = `<!doctype html>
       '<div class="note">Semana global de segunda a segunda. Vencimento: quarta-feira 23:59 UTC. De quinta a domingo: pago com atraso, válido até a próxima segunda. Não há transferência de excedente.</div>';
     if(d.stale)html+='<div class="panel" role="alert" style="padding:12px;margin:12px 0;border-color:#c38444">⚠️ As capturas de Might estão desatualizadas. Isto não invalida depósitos bancários importados.</div>';
     if(d.warnings&&d.warnings.length)html+='<div class="panel" style="padding:12px;margin:10px 0">'+d.warnings.map(function(w){return '<div class="note">⚠️ '+esc(w)+'</div>';}).join('')+'</div>';
-    html+='<div class="statgrid" style="margin:12px 0">'+
-      '<div class="stat g"><div class="k">PAGOS</div><div class="v">'+fmtS(summary.paid||0)+'</div></div>'+
+    html+='<div class="statgrid" style="margin:12px 0;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))">'+
+      '<div class="stat g"><div class="k">PRATA DEPOSITADA NA SEMANA</div>'+
+      '<div class="v">'+(summary.available===false||summary.receivedSilver==null?'SEM DADOS':esc(contribSilver(summary.receivedSilver)))+'</div></div>'+
+      '<div class="stat p"><div class="k">CONTRIBUINTES PAGANTES</div>'+
+      '<div class="v">'+(summary.available===false||summary.payingContributors==null?'SEM DADOS':fmtS(summary.payingContributors))+'</div></div>'+
+      '<div class="stat g"><div class="k">QUITARAM A SEMANA</div><div class="v">'+fmtS(summary.paid||0)+'</div></div>'+
       '<div class="stat a"><div class="k">PENDENTES / PARCIAIS</div><div class="v">'+fmtS(summary.pending||0)+'</div></div>'+
-      '<div class="stat b"><div class="k">DEPÓSITOS NÃO VINCULADOS</div><div class="v">'+fmtS(summary.unlinked||0)+'</div></div></div>';
+      '<div class="stat b"><div class="k">DEPÓSITOS NÃO VINCULADOS</div><div class="v">'+fmtS(summary.unlinked||0)+'</div></div></div>'+
+      '<div class="note" style="margin:-4px 0 14px">Prata depositada = soma dos depósitos da competência de contribuintes ativos no G, incluindo parcelas e excedentes. Pagantes = jogadores distintos com pelo menos um depósito. Valores não vinculados ficam fora do total; a finalidade dos depósitos ainda exige conferência.</div>';
     if(summary.available===false)html+='<div class="panel" role="alert">⚠️ Depósitos indisponíveis nesta consulta. Não classificar membros como inadimplentes.</div>';
     html+='<div class="panel" style="padding:13px"><b>Cadastro G:</b> '+
       (d.roster?esc(contribShortDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'SEM LISTA IMPORTADA')+
