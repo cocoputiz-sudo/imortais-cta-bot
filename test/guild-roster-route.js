@@ -245,7 +245,7 @@ async function testRouteAccessAndResponses() {
     assert.equal(officerReport.status,200,"officer can see contributor report");
     assert.equal(officerReport.json.roster.memberCount,8);
     assert.equal(officerReport.json.roster.source,"contributors_confirmed");
-    assert.equal(officerReport.json.roster.importedBy,"staff-test");
+    assert.equal(officerReport.json.roster.importedBy,"member-test","importacao confirmada pela Police registra autor");
     assert.equal(officerReport.json.rows.length,3,"read only contributor roles 1, 2 and 3");
     const adminCfg={minima:{"1":{pve:10,gathering:5},"2":{pve:1,gathering:1},"3":{pve:1,gathering:1}},weekday:0,timeUtc:"18:00",reminderEnabled:false};
     assert.equal((await contributorRead(cookieFor({canEdit:false,canViewContributors:true}),"POST",adminCfg)).status,403,
@@ -322,7 +322,6 @@ async function testRouteAccessAndResponses() {
     assert.equal((await submitBank(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
     const firstBank=await submitBank(policeCookie);
     assert.equal(firstBank.status,200,"Police pode importar extrato do banco");
-    assert.equal(firstBank.status,200);
     assert.equal((await firstBank.json()).inserted,1);
     const repeat=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
     assert.equal((await repeat.json()).duplicates,1);
