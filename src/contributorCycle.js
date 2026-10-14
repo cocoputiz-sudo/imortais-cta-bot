@@ -253,7 +253,10 @@ function decorate(row,assignment,bankRows,attendanceRows,now=new Date(),sweeps=[
   const level=String(row.level),cycle=weekAt(now),priorCycle=weekAt(now,-1);
   const paymentRequired=DUES[level]||null,ctaRequired=CTA_MINIMA[level]??null,key=keyOf(row.player);
   const payment=paymentForWeek(bankRows,key,level,cycle,now);
-  const previousPayment=paymentForWeek(bankRows,key,level,priorCycle,now);
+  const previousPayment=assignment?.first_seen_at&&
+    Date.parse(assignment.first_seen_at)>=Date.parse(cycle.start)
+    ?{status:"NÃO APLICÁVEL",due:paymentRequired,amount:0,found:0,excess:0,start:priorCycle.start,end:priorCycle.end}
+    :paymentForWeek(bankRows,key,level,priorCycle,now);
   const cta=(attendanceRows||[]).filter(r=>Date.parse(r.at)>=Date.parse(cycle.start)&&
     Date.parse(r.at)<Date.parse(cycle.end));
   const perDay={};
