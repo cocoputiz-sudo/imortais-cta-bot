@@ -59,6 +59,7 @@ function testParseVariants() {
   assert.equal(dup.members.length, 1);
   assert.equal(dup.members[0].online, true, "duplicado: prefere a linha Online");
   assert.equal(dup.duplicates, 1);
+  assert.deepEqual(dup.duplicateKeys,["alfa"],"nome duplicado preservado para ser ignorado na conciliacao");
   const bad = gr.parseGuildRoster('"Alfa"\t"Online"\t""\n"Bravo"\t"ontem"\t""\n"Charlie"\n\t"Online"\t""');
   assert.equal(bad.members.length, 1);
   assert.equal(bad.skipped.length, 3, "linhas inválidas são listadas, não derrubam");
