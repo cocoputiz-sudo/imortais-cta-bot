@@ -194,7 +194,7 @@ async function sendOne(pool,client,{player,stage,now=new Date(),snapshot=null}){
   if(!row.link||row.link.status!=="confirmed")fail("discord_sem_vinculo_confirmado");
   // Antes de cada DM, revisar o extrato mais recente e a autorização.
   const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_deposits");
-  if(!bankFresh.rows[0]?.latest||Date.now()-new Date(bankFresh.rows[0].latest).getTime()>72*3600000)
+  if(!bankFresh.rows[0]?.latest||new Date(now).getTime()-new Date(bankFresh.rows[0].latest).getTime()>72*3600000)
     return {skipped:"extrato_desatualizado"};
   const latestBank=await pool.query("SELECT COALESCE(SUM(amount),0) AS total "+
     "FROM contributor_bank_deposits WHERE player_key=$1 AND paid_at>=$2 AND paid_at<$3 AND paid_at<= $4",
@@ -233,10 +233,17 @@ async function tick(pool,client,{now=new Date()}={}){
   ticking=true;
   try{
     if(!(await settings(pool)).enabled)return {skipped:"desativado"};
+    const already=await pool.query("SELECT player_key FROM contributor_dm_log WHERE week_key=$1::date AND stage=$2",
+      [cycle.weekAt(now).start.slice(0,10),stage]);
+    const processed=new Set(already.rows.map(x=>x.player_key));
+    const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_deposits");
+    if(!bankFresh.rows[0]?.latest||new Date(now).getTime()-new Date(bankFresh.rows[0].latest).getTime()>72*3600000)
+      return {skipped:"extrato_desatualizado"};
     const d=await dashboard(pool,now);
     let sent=0,skipped=0;
     for(const r of d.rows){
-      if(!r.link||r.link.status!=="confirmed"||["PAGO","PAGO COM ATRASO"].includes(r.paymentStatus)){skipped++;continue;}
+      if(processed.has(r.key)||!r.link||r.link.status!=="confirmed"||
+        ["PAGO","PAGO COM ATRASO"].includes(r.paymentStatus)){skipped++;continue;}
       try{const result=await sendOne(pool,client,{player:r.player,stage,now,snapshot:d});if(result.sent)sent++;else skipped++;}
       catch(e){console.error("[contributor dm]",r.key,errorOf(e));skipped++;}
     }
