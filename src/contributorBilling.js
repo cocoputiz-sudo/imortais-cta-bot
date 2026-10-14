@@ -102,7 +102,7 @@ async function closeLink(pool,{player,editor,reason,action}){
 }
 async function adjustWeek(pool,{player,weekKey,amount,reason,editor}){
   const key=keyOf(player),text=String(reason||"").trim(),n=Number(amount),date=String(weekKey||"");
-  if(!key||!/^d{4}-d{2}-d{2}$/.test(date)||!Number.isFinite(Date.parse(date+"T00:00:00Z"))||
+  if(!key||!/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.test(date)||!Number.isFinite(Date.parse(date+"T00:00:00Z"))||
     new Date(date+"T00:00:00Z").toISOString().slice(0,10)!==date||
     new Date(date+"T00:00:00Z").getUTCDay()!==1||
     !Number.isSafeInteger(n)||n<=0||n>100000000000||!text||text.length>240)
