@@ -244,6 +244,9 @@ function startWebServer(client, opts) {
       if (error === "roster_partial") return res.status(409).json({ error });
       return res.status(500).json({ error });
     } catch (e) {
+      const error=String(e?.message||"server");
+      if(error==="roster_partial")return res.status(409).json({error});
+      if(error==="cargos_contribuinte_conflitantes")return res.status(400).json({error});
       console.error("/api/guild-roster/analyze:", e?.message || e);
       return res.status(500).json({ error: "server" });
     }
