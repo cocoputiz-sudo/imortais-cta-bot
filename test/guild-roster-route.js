@@ -187,7 +187,52 @@ async function testRouteAccessAndResponses() {
     assert.equal(good.json.totals.pinged, 3);
     assert.equal(good.json.totals.inCall, 2);
 
-    ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos"); 
+    ok("rota: membro=403, vazio=400, CTA ausente=404 e staff=200 com grupos corretos");
+    // Integração do Contribuinte 4 (sem alterar os asserts dos tres cargos anteriores).
+    const fourText=roster+'\n"NovoQuatro"\t"Online"\t"CONTRIBUINTE 4"';
+    const added=await fetch(base+"/api/guild-roster/save",{
+      method:"POST",headers:{"Content-Type":"application/json",Cookie:cookieFor({canEdit:true})},
+      body:JSON.stringify({text:fourText})
+    });
+    assert.equal(added.status,200);
+    const addedJson=await added.json();
+    assert.equal(addedJson.saved.contributors,4);
+    const afterFourth=await contributorRead(cookieFor({canEdit:false,canViewContributors:true}));
+    assert.equal(afterFourth.status,200);
+    const fourth=afterFourth.json.rows.find(x=>x.player==="NovoQuatro");
+    assert(fourth&&fourth.level==="4");
+    assert.equal(fourth.obligations.paymentRequired,10000000);
+    assert.equal(fourth.obligations.ctaRequired,0);
+    assert.equal(fourth.assignmentSource,"observed");
+    // Apenas a administracao pode confirmar data anterior e importar extrato.
+    const assignmentUrl=base+"/api/contributors/assignment";
+    const assignmentBody={player:"NovoQuatro",assignedAt:new Date(Date.now()-2*86400000).toISOString()};
+    const confirm=(cookie)=>fetch(assignmentUrl,{method:"POST",headers:{
+      "Content-Type":"application/json",Cookie:cookie},body:JSON.stringify(assignmentBody)});
+    assert.equal((await confirm(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
+    assert.equal((await confirm(cookieFor({canEdit:true,isSiteAdmin:true}))).status,200);
+    const bankAt=new Date().toISOString().slice(0,19).replace("T"," ");
+    const bankTsv="Date\tPlayer\tReason\tAmount\n"+bankAt+"\tNovoQuatro\tDeposit\t10000000\n";
+    const bankUrl=base+"/api/contributors/bank-import";
+    const submitBank=(cookie)=>fetch(bankUrl,{method:"POST",headers:{
+      "Content-Type":"application/json",Cookie:cookie},body:JSON.stringify({text:bankTsv})});
+    assert.equal((await submitBank(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
+    const firstBank=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
+    assert.equal(firstBank.status,200);
+    assert.equal((await firstBank.json()).inserted,1);
+    const repeat=await submitBank(cookieFor({canEdit:true,isSiteAdmin:true}));
+    assert.equal((await repeat.json()).duplicates,1);
+    const afterBank=await contributorRead(cookieFor({canEdit:true,isSiteAdmin:true}));
+    assert.equal(afterBank.status,200);
+    const updated=afterBank.json.rows.find(x=>x.player==="NovoQuatro");
+    assert.equal(updated.assignmentSource,"confirmed");
+    assert.equal(updated.payment.creditedCandidate,10000000);
+    assert.equal(updated.payment.verification,"PENDENTE DE CONFERÊNCIA");
+    // O G incompleto nao deve excluir a guilda: transacao e contagem conservadora.
+    const dbRoster=await contributorWeekly.rosterLatest(db.pool);
+    assert.equal(dbRoster.member_count,9);
+    ok("Contribuinte 4: vigencia, autenticação admin, banco deduplicado e relatorio");
+ 
     // Regressao: staff move a jogadora da vaga Nature para um slot Support
     // e precisa trocar POSTULENTO por PÚTRIDO sem perder a vaga nem receber falso sucesso.
     await db.upsertSignup({
