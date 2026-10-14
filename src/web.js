@@ -3535,7 +3535,7 @@ const PAGE = `<!doctype html>
         var cycle=x.cycle||{},ob=x.obligations||{},bank=x.payment||{},cta=x.attendance||{},might=x.cycleMight||{};
         return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
           '<td>'+esc(contribDisplayDate(x.assignedAt))+'<div class="note">'+(x.assignmentSource==='confirmed'?'Confirmado pela staff':'Primeiro registro, data estimada')+'</div>'+
-          (authState.isSiteAdmin?'<button class="btn ghost" data-cw-confirm="'+esc(x.player)+'" type="button">Definir data</button>':'')+'</td>'+
+          (authState.isSiteAdmin?'<button class="btn ghost" data-cw-confirm="'+encodeURIComponent(x.player)+'" type="button">Definir data</button>':'')+'</td>'+
           '<td>'+esc(contribDisplayDate(cycle.start))+' até '+esc(contribDisplayDate(cycle.end))+'</td>'+
           '<td>'+esc(cta.count==null?'SEM DADOS':cta.count)+'</td>'+
           '<td>'+esc(ob.ctaRequired==null?'A definir':ob.ctaRequired===0?'Isento':ob.ctaRequired)+'</td>'+
@@ -3554,7 +3554,7 @@ const PAGE = `<!doctype html>
     if(authState.isSiteAdmin){
       Array.prototype.forEach.call(document.querySelectorAll('[data-cw-confirm]'),function(btn){
         btn.onclick=function(){
-          var player=btn.getAttribute('data-cw-confirm');
+          var player=decodeURIComponent(btn.getAttribute('data-cw-confirm'));
           var assignedAt=prompt('Data UTC confirmada para '+player+' (ex.: 2026-10-14T00:00:00Z):');
           if(!assignedAt)return;
           fetch('/api/contributors/assignment',{method:'POST',headers:{'Content-Type':'application/json'},
