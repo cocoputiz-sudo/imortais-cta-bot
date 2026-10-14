@@ -130,18 +130,18 @@ function testExemptRolesAreConfigurable() {
     '"Charlie"\t"Online"\t"CONTRIBUINTE 1"',
     '"Delta"\t"Online"\t"Contribuinte 2"',
     '"Echo"\t"Online"\t"contribuinte 3"',
-    '"Foxtrot"\t"Online"\t"CONTRIBUINTE 4"',        // nao autorizado
+    '"Foxtrot"\t"Online"\t"CONTRIBUINTE 4"',        // categoria totalmente isenta
   ].join("\n")).members;
   const names = (g, result) => result.groups[g].map((x) => x.name);
   const base = gr.classifyRoster({ members });
-  assert.deepEqual(names("contribuinte", base), ["Alfa", "Charlie", "Delta", "Echo"], "tres novos cargos e legado, sem diferenciar caixa");
-  assert.deepEqual(names("equipando", base), ["Bravo", "Foxtrot"], "nome parecido nao autoriza isencao");
+  assert.deepEqual(names("contribuinte", base), ["Alfa", "Charlie", "Delta", "Echo", "Foxtrot"], "quatro categorias e legado, sem diferenciar caixa");
+  assert.deepEqual(names("equipando", base), ["Bravo"], "apenas cargo sem contribuinte exige CTA");
   const custom = gr.classifyRoster({ members, exemptRoles: ["contribuinte 2", "bomb"] });
   assert.deepEqual(names("contribuinte", custom), ["Bravo", "Delta"], "configuracao explicita de cargos isentos");
   assert.equal(custom.groups.equipando.length, 4);
   const none = gr.classifyRoster({ members, exemptRoles: [] });
   assert.equal(none.groups.equipando.length, 6, "sem cargos isentos, todos contam");
-  ok("cargos isentos: CONTRIBUINTE 1/2/3 e legado, sem aceitar categorias nao previstas");
+  ok("cargos isentos: CONTRIBUINTE 1/2/3/4 e legado");
 }
 
 function testContributorWhoParticipatesIsNotExemptGroup() {
