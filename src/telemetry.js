@@ -4127,7 +4127,7 @@ async function getGuildMightDashboard({ days = 90 } = {}) {
 }
 
 
-function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager, requireAdmin }) {
+function installRoutes(app, { db, requireMember, requireEditor, requireDeviceManager, requireAdmin, requireGuildMightEditor }) {
   if (!pool) throw new Error("telemetry.initSchema(pool) deve rodar antes de installRoutes");
 
   app.post("/api/telemetry/pairing/create", async (req, res) => {
@@ -4692,11 +4692,12 @@ function installRoutes(app, { db, requireMember, requireEditor, requireDeviceMan
     catch(e){console.error("guild-progress",e);res.status(500).json({error:"server"});}
   });
   app.post("/api/telemetry/guild-progress", async (req,res)=>{
-    const admin=requireAdmin?.(req,res);
-    if(!admin){if(!res.headersSent)res.status(403).json({error:"site_admin_only"});return;}
+    // Permissao especifica do Guild Might: nao habilita diagnósticos, dispositivos ou outras rotas admin.
+    const editor=requireGuildMightEditor?.(req,res);
+    if(!editor){if(!res.headersSent)res.status(403).json({error:"guild_might_editor_only"});return;}
     try{
       if(!CHALLENGE_UI_ENABLED && String(req.body?.categoryCode||"").trim().toUpperCase()==="GUILD_CHALLENGE") return res.status(403).json({error:"feature_not_enabled"});
-      const result=await guildManualProgress.save(pool,req.body||{},admin.id||admin.userId||"site-admin");res.json(result);
+      const result=await guildManualProgress.save(pool,req.body||{},editor.id||editor.userId||"site-admin");res.json(result);
     }
     catch(e){const bad=/^invalid_/.test(e.message);res.status(bad?400:500).json({error:bad?e.message:"server"});}
   });
