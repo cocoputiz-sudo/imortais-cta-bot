@@ -310,6 +310,20 @@ function computeReport({roster,settings,sweeps,now=new Date(),season=null,source
       ...(staleCodes.length?["DESATUALIZADO: última varredura integral de "+staleCodes.join(" e ")+" há mais de 7 dias ou ausente."]:[])
     ]};
 }
+// Somar somente os depositos ja associados a contribuintes ativos do G.
+// Cada jogador normalizado participa uma unica vez, ainda que tenha varios depositos.
+function weeklyPaymentTotals(rows,available=true){
+  if(!available)return {receivedSilver:null,payingContributors:null};
+  const byPlayer=new Map();
+  for(const row of rows||[]){
+    const key=normalizedPlayer(row.player);
+    if(!key)continue;
+    const amount=Number(row.payment?.amount)||0;
+    if(amount>0)byPlayer.set(key,Math.max(byPlayer.get(key)||0,amount));
+  }
+  return {receivedSilver:[...byPlayer.values()].reduce((sum,amount)=>sum+amount,0),
+    payingContributors:byPlayer.size};
+}
 async function getReport(pool,{now=new Date()}={}){
   const [roster,settings,epoch,allowed]=await Promise.all([
     rosterLatest(pool),getSettings(pool),guildSeason.getSeasonEpoch(pool),guildRankingAuth.approvedDeviceIds(pool)
@@ -375,7 +389,8 @@ async function getReport(pool,{now=new Date()}={}){
   report.paymentWeek=cycleService.weekAt(now);
   report.paymentSummary={paid:report.rows.filter(r=>["PAGO","PAGO COM ATRASO"].includes(r.payment.status)).length,
     pending:report.rows.filter(r=>["PENDENTE","PARCIAL"].includes(r.payment.status)).length,
-    unlinked:report.unlinkedDeposits.length,available:bankAvailable};
+    unlinked:report.unlinkedDeposits.length,available:bankAvailable,
+    ...weeklyPaymentTotals(report.rows,bankAvailable)};
   report.attendanceSource={countedEvents:cta.events,matching:"exact_normalized_name",ambiguousNames:cta.ambiguous||[]};
   if(cta.ambiguous?.length)report.warnings.push("Há "+cta.ambiguous.length+" nickname(s) ambíguos entre contas Discord; presença não atribuída automaticamente.");
   report.bankSource={note:"Depósitos classificados por competência UTC e jogador do G. A finalidade ainda pode exigir conferência humana; pagamentos sem correspondência nunca são vinculados automaticamente."};
@@ -441,4 +456,4 @@ async function tick(pool,client,{channelId,now=new Date()}={}){
   }finally{ticking=false;}
 }
 module.exports={init,previewRoster,saveRoster,rosterLatest,getSettings,saveSettings,validateSettings,
-  contributorLevel,completeSweeps,selectPair,memberDelta,unlinkedDeposits,closestGuildName,computeReport,getReport,scheduledForWeek,tick};
+  contributorLevel,completeSweeps,selectPair,memberDelta,unlinkedDeposits,closestGuildName,weeklyPaymentTotals,computeReport,getReport,scheduledForWeek,tick};
