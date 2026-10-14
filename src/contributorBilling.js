@@ -104,6 +104,8 @@ async function setSettings(pool,{enabled,editor}){
 async function sync(pool,now=new Date()){
   const week=cycle.weekAt(now),day=week.start.slice(0,10);
   const {found}=await activeRoster(pool);
+  const active=await cycle.assignments(pool);
+  const firstSeen=new Map(active.map(a=>[a.player_key,Date.parse(a.first_seen_at)]));
   const client=await pool.connect();
   try{
     await client.query("BEGIN");
@@ -111,8 +113,11 @@ async function sync(pool,now=new Date()){
     for(const member of found.values()){
       const first=await client.query("SELECT 1 FROM contributor_weekly_obligations WHERE player_key=$1 LIMIT 1",[member.key]);
       await client.query("INSERT INTO contributor_weekly_obligations(player_key,week_key,tier,due,first_week) "+
-        "VALUES($1,$2::date,$3,$4,$5) ON CONFLICT(player_key,week_key) DO NOTHING",
-        [member.key,day,member.level,cycle.DUES[member.level],!first.rowCount]);
+        "VALUES($1,$2::date,$3,$4,$5) ON CONFLICT(player_key,week_key) DO UPDATE SET "+
+        "tier=EXCLUDED.tier,due=EXCLUDED.due",
+        [member.key,day,member.level,cycle.DUES[member.level],
+          !first.rowCount&&firstSeen.has(member.key)&&firstSeen.get(member.key)>=Date.parse(week.start)&&
+          firstSeen.get(member.key)<Date.parse(week.end)]);
     }
     // Congela o total apurado por competência para não reaparecer inadimplência
     // quando o CSV antigo é expurgado após 45 dias.
@@ -183,11 +188,20 @@ function messageFor(row,week,stage){
     "\nConfira seu extrato no jogo. Caso já tenha pago e a importação ainda não apareça, avise a staff."+
     "\nVocê pode parar estes avisos com /contribuinte_parar.";
 }
-async function sendOne(pool,client,{player,stage,now=new Date()}){
-  const key=keyOf(player),report=await dashboard(pool,now),row=report.rows.find(x=>x.key===key);
+async function sendOne(pool,client,{player,stage,now=new Date(),snapshot=null}){
+  const key=keyOf(player),report=snapshot||await dashboard(pool,now),row=report.rows.find(x=>x.key===key);
   if(!row)fail("contribuinte_nao_encontrado");
   if(!row.link||row.link.status!=="confirmed")fail("discord_sem_vinculo_confirmado");
-  if(["PAGO","PAGO COM ATRASO"].includes(row.paymentStatus))return {skipped:"pago"};
+  // Antes de cada DM, revisar o extrato mais recente e a autorização.
+  const bankFresh=await pool.query("SELECT MAX(imported_at) AS latest FROM contributor_bank_deposits");
+  if(!bankFresh.rows[0]?.latest||Date.now()-new Date(bankFresh.rows[0].latest).getTime()>72*3600000)
+    return {skipped:"extrato_desatualizado"};
+  const latestBank=await pool.query("SELECT COALESCE(SUM(amount),0) AS total "+
+    "FROM contributor_bank_deposits WHERE player_key=$1 AND paid_at>=$2 AND paid_at<$3 AND paid_at<= $4",
+    [key,report.week.start,report.week.end,new Date(now)]);
+  row.paid=Number(latestBank.rows[0].total);
+  row.paymentStatus=row.paid>=row.due?"PAGO":row.paid>0?"PARCIAL":"PENDENTE";
+  if(row.paymentStatus==="PAGO")return {skipped:"pago"};
   if(!report.settings.enabled)fail("mensagens_desativadas");
   const weekKey=report.week.start.slice(0,10);
   const already=await pool.query("SELECT count(*)::int AS n FROM contributor_dm_log WHERE player_key=$1 AND week_key=$2::date",[key,weekKey]);
@@ -223,7 +237,7 @@ async function tick(pool,client,{now=new Date()}={}){
     let sent=0,skipped=0;
     for(const r of d.rows){
       if(!r.link||r.link.status!=="confirmed"||["PAGO","PAGO COM ATRASO"].includes(r.paymentStatus)){skipped++;continue;}
-      try{const result=await sendOne(pool,client,{player:r.player,stage,now});if(result.sent)sent++;else skipped++;}
+      try{const result=await sendOne(pool,client,{player:r.player,stage,now,snapshot:d});if(result.sent)sent++;else skipped++;}
       catch(e){console.error("[contributor dm]",r.key,errorOf(e));skipped++;}
     }
     return {stage,sent,skipped};
