@@ -3605,20 +3605,24 @@ const PAGE = `<!doctype html>
   }
   function drawContributors(){
     var d=contributorReport||{},cfg=contributorSettings||{},count=d.counts||{},cats=d.categories||{},p=cats.PVE||{},g=cats.GATHERING||{};
-    var html='<div class="modhead">📅 Contribuintes – semana</div>'+
-      '<div class="note">Consulta para administração, oficiais e Police da Guild. Edição autorizada para administração e Police da Guild. Might usa varreduras Photon verificadas.</div>';
-    if(d.stale)html+='<div class="panel" role="alert" style="background:#3b181c;border:2px solid #e95757;color:#ffb6b6;padding:20px;font-weight:bold;font-size:16px">⚠️ DESATUALIZADO. Última varredura integral de PvE/Coleta há mais de 7 dias ou ausente. Os números abaixo são históricos, NÃO são resultados atuais.</div>';
+    var summary=d.paymentSummary||{},period=contribWeekLabel(d.paymentWeek);
+    var html='<div class="modhead">📅 Contribuintes · '+esc(period)+'</div>'+
+      '<div class="note">Semana global de segunda a segunda. Vencimento: quarta-feira 23:59 UTC. De quinta a domingo: pago com atraso, válido até a próxima segunda. Não há transferência de excedente.</div>';
+    if(d.stale)html+='<div class="panel" role="alert" style="padding:12px;margin:12px 0;border-color:#c38444">⚠️ As capturas de Might estão desatualizadas. Isto não invalida depósitos bancários importados.</div>';
     if(d.warnings&&d.warnings.length)html+='<div class="panel" style="padding:12px;margin:10px 0">'+d.warnings.map(function(w){return '<div class="note">⚠️ '+esc(w)+'</div>';}).join('')+'</div>';
     html+='<div class="statgrid" style="margin:12px 0">'+
-      '<div class="stat g"><div class="k">ATIVOS</div><div class="v">'+fmtS(count.active||0)+'</div></div>'+
-      '<div class="stat a"><div class="k">ABAIXO (inclui sem evolução)</div><div class="v">'+fmtS(count.below||0)+'</div></div>'+
-      '<div class="stat b"><div class="k">SEM DADOS</div><div class="v">'+fmtS(count.noData||0)+'</div></div>'+
-      '</div>';
-    html+='<div class="panel"><b>Última lista de membros cadastrada:</b> '+(d.roster?esc(contribDisplayDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'NENHUMA LISTA SALVA')+
-      '<div class="note">Origem: '+(d.roster?(d.roster.source==='contributors_confirmed'?'importação confirmada nesta aba':'cadastro anterior da aba Guilda Online'):'sem importação')+
-      ' · Registrado por: '+esc(d.roster&&d.roster.importedBy||'não identificado')+'. Cargos CONTRIBUINTE 1 a 4. Vigência começa na primeira observação, salvo confirmação administrativa. Saída da guilda elimina o vínculo após importar G atualizado. Uma lista parcial é recusada.</div>'+
-      '<p><b>PvE:</b> '+contribSummaryDate(p)+'</p><p><b>Coleta:</b> '+contribSummaryDate(g)+'</p>'+
-      '<div class="note">Might histórico é referência anterior, não cumprimento do ciclo. Might do ciclo usa somente leituras posteriores à atribuição; sem baseline = SEM DADOS. Attendance usa correspondência pelo nome Discord/Albion, e pode exigir revisão de apelidos. Depósitos são indícios, não quitação.</div></div>';
+      '<div class="stat g"><div class="k">PAGOS</div><div class="v">'+fmtS(summary.paid||0)+'</div></div>'+
+      '<div class="stat a"><div class="k">PENDENTES / PARCIAIS</div><div class="v">'+fmtS(summary.pending||0)+'</div></div>'+
+      '<div class="stat b"><div class="k">DEPÓSITOS NÃO VINCULADOS</div><div class="v">'+fmtS(summary.unlinked||0)+'</div></div></div>';
+    if(summary.available===false)html+='<div class="panel" role="alert">⚠️ Depósitos indisponíveis nesta consulta. Não classificar membros como inadimplentes.</div>';
+    html+='<div class="panel" style="padding:13px"><b>Cadastro G:</b> '+
+      (d.roster?esc(contribShortDate(d.roster.importedAt))+' · '+fmtS(d.roster.memberCount)+' jogadores':'SEM LISTA IMPORTADA')+
+      '<div class="note">Importador: '+esc(d.roster&&d.roster.importedBy||'não identificado')+
+      ' · Fonte: '+(d.roster&&d.roster.source==='contributors_confirmed'?'Contribuintes':'Guilda Online (legado)')+
+      '. O primeiro dia no cargo não altera o início da semana. Sem comprovação de saída por ausência no G.</div>'+
+      '<details><summary class="note">Detalhes da apuração de Might</summary>'+
+      '<p class="note">PvE: '+contribSummaryDate(p)+'</p><p class="note">Coleta: '+contribSummaryDate(g)+
+      '</p><p class="note">Para C2, a meta usa somente capturas integrais da competência; sem duas capturas o resultado fica sem dados.</p></details></div>';
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">'+
       '<button class="btn primary" id="cw-refresh">↻ Atualizar relatório</button>'+
       '<button class="btn ghost" id="cw-csv">Exportar CSV</button>'+
@@ -3652,25 +3656,52 @@ const PAGE = `<!doctype html>
         '<div class="note">Canal: staff configurada no bot (STAFF_LOG_CHANNEL_ID). O resumo só será enviado quando PvE e Coleta tiverem novas varreduras integrais válidas após o lembrete. Desativado até você salvar a programação.</div>'+
         '<button class="btn primary" id="cw-save" style="margin-top:10px">Salvar configurações</button> <span id="cw-settings-status" class="note"></span></details>';
     }
-    html+='<div class="panel" style="padding:10px;margin:10px 0"><label for="cw-filter"><b>Filtrar contribuinte</b></label> '+
-      '<select id="cw-filter">'+[['todos','Todas as categorias'],['1','1 · Combatente'],['2','2 · Mighter'],['3','3 · Meio obrigado'],['4','4 · Totalmente desobrigado']].map(function(a){return '<option value="'+a[0]+'"'+(contribFilter===a[0]?' selected':'')+'>'+a[1]+'</option>';}).join('')+'</select></div>';
-    var shown=(d.rows||[]).filter(function(x){return contribFilter==='todos'||String(x.level)===contribFilter;});
-    html+='<div class="panel" style="overflow-x:auto"><table class="dtable"><thead><tr>'+
-      '<th>Jogador</th><th>Categoria</th><th>Atribuído desde</th><th>Vigência de 7 dias</th><th>CTAs válidas</th><th>Meta CTA</th><th>Prata devida</th><th>Depósitos localizados</th><th>Might PvE / Coleta no ciclo</th><th>Situação</th></tr></thead><tbody>'+
-      (shown.length?shown.map(function(x){
-        var cycle=x.cycle||{},ob=x.obligations||{},bank=x.payment||{},cta=x.attendance||{},might=x.cycleMight||{};
-        return '<tr><td><b>'+esc(x.player)+'</b></td><td>Contribuinte '+esc(x.level)+'</td>'+
-          '<td>'+esc(contribDisplayDate(x.assignedAt))+'<div class="note">'+(x.assignmentSource==='confirmed'?'Confirmado pela staff':'Primeiro registro, data estimada')+'</div>'+
-          (authState.canEditContributors?'<button class="btn ghost" data-cw-confirm="'+encodeURIComponent(x.player)+'" type="button">Definir data</button>':'')+'</td>'+
-          '<td>'+esc(contribDisplayDate(cycle.start))+' até '+esc(contribDisplayDate(cycle.end))+'</td>'+
-          '<td>'+esc(cta.count==null?'SEM DADOS':cta.count)+'</td>'+
-          '<td>'+esc(ob.ctaRequired==null?'A definir':ob.ctaRequired===0?'Isento':ob.ctaRequired)+'</td>'+
-          '<td>'+contribNumber(ob.paymentRequired)+'</td>'+
-          '<td>'+esc(bank.found||0)+' registro(s) · '+contribNumber(bank.creditedCandidate)+'<div class="note">Não conferido</div></td>'+
-          '<td>'+contribDelta(might.pve)+' / '+contribDelta(might.gathering)+'</td>'+
-          '<td>'+contribStatus(x.overallStatus)+'</td></tr>';
-      }).join(''):'<tr><td colspan="10">Nenhum contribuinte nesta categoria. Utilize o importador acima em Contribuintes da Semana.</td></tr>')+
-      '</tbody></table></div>';
+    html+='<div class="panel" style="padding:12px;margin:10px 0"><label for="cw-filter"><b>Mostrar</b></label> '+
+      '<select id="cw-filter">'+[['todos','Todos'],['pagos','Pagos'],['pendentes','Pendentes / Parciais'],['nao-vinculados','Não vinculados']].map(function(a){
+        return '<option value="'+a[0]+'"'+(contribFilter===a[0]?' selected':'')+'>'+a[1]+'</option>';
+      }).join('')+'</select></div>';
+    var shown=(d.rows||[]).filter(function(x){
+      if(contribFilter==='pagos')return ['PAGO','PAGO COM ATRASO'].includes(x.payment&&x.payment.status);
+      if(contribFilter==='pendentes')return ['PENDENTE','PARCIAL','NÃO PAGO'].includes(x.payment&&x.payment.status);
+      return contribFilter==='todos';
+    });
+    if(contribFilter!=='nao-vinculados'){
+      html+='<div class="panel" style="overflow-x:auto"><table class="dtable"><thead><tr>'+
+        ['Jogador','Categoria','Semana','Pagamento','Situação','Obrigação'].map(function(col){return '<th>'+col+'</th>';}).join('')+
+        '</tr></thead><tbody>'+
+        (shown.length?shown.map(function(x){
+          var bank=x.payment||{},pr=x.previousPayment||{},period=contribWeekLabel(x.cycle);
+          var tone=['PAGO','PAGO COM ATRASO'].includes(bank.status)?'ok':
+            ['PARCIAL','PENDENTE','NÃO PAGO'].includes(bank.status)?'miss':'';
+          var details='<details class="note"><summary>Vínculo e informações</summary>'+
+            'Primeiro registro: '+esc(contribShortDate(x.firstSeenAt))+' · Vínculo desde: '+
+            esc(contribShortDate(x.assignedAt))+
+            ' · '+esc(x.assignmentSource==='confirmed'?'data confirmada':'data estimada');
+          if(authState.canEditContributors)details+='<div><button class="btn ghost" data-cw-confirm="'+
+            encodeURIComponent(x.player)+'" type="button">Definir data do vínculo</button></div>';
+          details+='</details>';
+          return '<tr><td><b>'+esc(x.player)+'</b>'+details+'</td>'+
+            '<td>Contribuinte '+esc(x.level)+'</td><td>'+esc(period)+'</td>'+
+            '<td>'+esc(contribPaymentLabel(bank))+(bank.found?'<div class="note">'+bank.found+' depósito(s) nesta semana</div>':'')+'</td>'+
+            '<td><span class="pill '+tone+'">'+esc(contribSituation(bank))+'</span>'+
+            '<div class="note">Anterior ('+esc(contribWeekLabel(pr))+'): '+esc(contribPriorLabel(pr))+'</div></td>'+
+            '<td>'+esc(contribObligation(x))+'</td></tr>';
+        }).join(''):'<tr><td colspan="6">Nenhum contribuinte corresponde a este filtro.</td></tr>')+
+        '</tbody></table></div>';
+    }
+    if(contribFilter==='todos'||contribFilter==='nao-vinculados'){
+      var unlinked=d.unlinkedDeposits||[];
+      html+='<div class="panel" style="margin-top:12px;padding:12px">'+
+        '<h3>Depósitos não vinculados · '+unlinked.length+'</h3>'+
+        '<div class="note">Não creditados automaticamente. Compare os nomes sugeridos com o jogo. A ausência no G atual pode indicar saída, mas não a comprova sem histórico.</div>'+
+        '<div style="overflow-x:auto"><table class="dtable"><thead><tr><th>Jogador no extrato</th><th>Depósitos</th><th>Total</th><th>Motivo</th><th>Sugestão do G</th></tr></thead><tbody>'+
+        (unlinked.length?unlinked.map(function(x){
+          return '<tr><td><b>'+esc(x.player)+'</b></td><td>'+esc(x.count)+' · '+esc(contribShortDate(x.lastDepositAt))+
+            '</td><td>'+esc(contribSilver(x.amount))+'</td><td>'+esc(x.reason)+'</td>'+
+            '<td>'+esc(x.suggestion||'Sem correspondência próxima')+'</td></tr>';
+        }).join(''):'<tr><td colspan="5">Nenhum depósito não vinculado nesta competência.</td></tr>')+
+        '</tbody></table></div></div>';
+    }
     setView('view-contributors',html);
     document.getElementById('cw-filter').onchange=function(){contribFilter=this.value;drawContributors();};
     document.getElementById('cw-refresh').onclick=renderContributors;
