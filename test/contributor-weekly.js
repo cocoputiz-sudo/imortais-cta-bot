@@ -97,7 +97,10 @@ assert(scriptSnippet.includes("Exportar CSV"));
 assert(scriptSnippet.includes("Exportar HTML"));
 assert(webSource.includes('app.get("/api/contributors/weekly"'));
 assert(webSource.includes('app.post("/api/contributors/settings"'));
-assert(webSource.includes("const sess=requireSiteAdmin(req,res)"));
+assert(webSource.includes("const sess=requireContributorEditor(req,res)"),
+  "Contributors editors must use section-scoped authorization, not global site admin");
+assert(webSource.includes("function requireContributorEditor(req,res)"),
+  "server must authorize contributors via distinct scoped role");
 assert(indexSource.includes("contributorWeekly.tick"));
 assert(indexSource.includes("await contributorWeekly.init(db.pool)"));
 console.log("✅ Contributor weekly full-sweep, delta, roster, status, stale, auth and scheduler regression");
