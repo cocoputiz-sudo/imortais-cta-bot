@@ -48,7 +48,18 @@ assert.equal(report.stale,false);
 assert.equal(computeReport({roster,settings:cfg,sweeps,now:new Date(t+9*day)}).stale,true);
 assert.equal(contributorLevel(["Contribuinte 3"]),"3");
 assert.equal(contributorLevel(["CONTRIBUINTE 4"]),"4");
-assert.throws(()=>contributorLevel(["CONTRIBUINTE 2","CONTRIBUINTE 4"]),/cargos_contribuinte_conflitantes/);
+assert.equal(contributorLevel(["CONTRIBUINTE 2","CONTRIBUINTE 4"]),null,
+  "cargo conflitante nao interrompe a renderizacao do relatorio");
+const ignoredRoster={members:[
+  {name:"Invalido",roles:["CONTRIBUINTE 2","CONTRIBUINTE 4"]},
+  {name:"Duplicado",roles:["CONTRIBUINTE 1"]}
+],member_count:2,imported_at:iso(t),
+  ignored_members:[{player:"Invalido",reason:"cargos de contribuinte conflitantes"},
+    {player:"Duplicado",reason:"nome duplicado no G"}]};
+const ignoredReport=computeReport({roster:ignoredRoster,settings:cfg,sweeps,now:new Date(t)});
+assert.equal(ignoredReport.rows.length,0,"conflitos/duplicatas nao devem aparecer na apuracao");
+assert(ignoredReport.warnings.some(x=>x.includes("Invalido")));
+assert(ignoredReport.warnings.some(x=>x.includes("Duplicado")));
 const observed=cycles.cycleAt("2026-10-01T12:00:00Z",new Date("2026-10-10T12:00:00Z"));
 assert.equal(observed.start,"2026-10-08T12:00:00.000Z");
 assert.equal(observed.end,"2026-10-15T12:00:00.000Z");
