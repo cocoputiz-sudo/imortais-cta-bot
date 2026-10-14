@@ -3454,7 +3454,7 @@ const PAGE = `<!doctype html>
   }
 
 
-  var contributorReport=null,contributorSettings=null,contribFilter='todos';
+  var contributorReport=null,contributorSettings=null,contribFilter='todos',contribRosterDraft='';
   function contribNumber(x){return x==null?'SEM DADOS':fmtS(x);}
   function contribDelta(x){return x==null?'—':(Number(x)>0?'+':'')+fmtS(x);}
   function contribDisplayDate(x){return x?gmDate(x):'sem varredura integral';}
@@ -3594,6 +3594,7 @@ const PAGE = `<!doctype html>
         var box=document.getElementById('cw-roster-text'),previewBtn=document.getElementById('cw-roster-preview-btn'),
           confirmBtn=document.getElementById('cw-roster-confirm-btn'),status=document.getElementById('cw-roster-status'),
           target=document.getElementById('cw-roster-preview'),validated=null,validatedText='';
+        box.value=contribRosterDraft;
         function errorMessage(code){
           var messages={empty:'Cole a lista completa do G.',unknown_format:'Formato não reconhecido: copie diretamente do jogo.',
             no_members:'A lista não contém jogadores válidos.',roster_partial:'Lista parcial recusada: copie a guilda completa.',
@@ -3633,6 +3634,7 @@ const PAGE = `<!doctype html>
           return html+'<div class="note" style="margin-top:8px">Ao confirmar, esta lista substituirá a anterior; jogadores que saíram ou perderam a tag serão retirados do cadastro ativo.</div></div>';
         }
         box.oninput=function(){
+          contribRosterDraft=box.value;
           validated=null;validatedText='';confirmBtn.disabled=true;
           status.textContent='Texto alterado: gere uma nova prévia.';
           target.textContent='Aguardando validação.';
@@ -3659,7 +3661,7 @@ const PAGE = `<!doctype html>
           postRoster('confirm',{text:validatedText,checksum:validated.checksum,
             expectedImportedAt:validated.expectedImportedAt,previewedAt:validated.previewedAt,
             previewToken:validated.previewToken}).then(function(result){
-            validated=null;validatedText='';
+            validated=null;validatedText='';contribRosterDraft='';
             alert('Importação confirmada: '+result.saved.contributors+' contribuintes atualizados.');
             renderContributors();
           }).catch(function(e){
