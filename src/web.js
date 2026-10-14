@@ -15,6 +15,7 @@ const telemetry = require("./telemetry");
 const scout = require("./scout");
 const guildroster = require("./guildroster");
 const contributorWeekly = require("./contributorWeekly");
+const contributorBilling = require("./contributorBilling");
 const path = require("path");
 // Challenge appears only when explicitly enabled by the dedicated feature flag.
 const CHALLENGE_UI_ENABLED = process.env.IMORTAIS_CHALLENGE_UI === "1";
@@ -354,6 +355,62 @@ function startWebServer(client, opts) {
       const err=String(e.message||"");
       res.status(["minima_invalidos","horario_invalido","lembrete_invalido"].includes(err)?400:500).json({error:err||"settings_failed"});
     }
+  });
+
+  // Cobranças e vínculo Discord são isolados das outras permissões do bot.
+  // Apenas a staff autorizada em Contribuintes pode confirmar, editar ou enviar.
+  function billingError(res,e){
+    const code=String(e.message||"server");
+    if(code==="contribuinte_nao_encontrado"||code==="jogador_nao_e_contribuinte_no_G"||
+      code==="vinculo_pendente_nao_encontrado")return res.status(404).json({error:code});
+    if(["debito_anterior_invalido","marcacao_invalida","configuracao_invalida",
+      "discord_sem_vinculo_confirmado","discord_nao_e_membro","mensagens_desativadas",
+      "jogador_ja_vinculado_outro_discord"].includes(code))
+      return res.status(400).json({error:code});
+    console.error("[contributor billing]",e);
+    res.status(500).json({error:"billing_failed"});
+  }
+  app.get("/api/contributors/billing",async(req,res)=>{
+    if(!requireContributorViewer(req,res))return;
+    try{res.json(await contributorBilling.dashboard(db.pool));}
+    catch(e){console.error("[contributor billing dashboard]",e);res.status(500).json({error:"billing_failed"});}
+  });
+  app.get("/api/contributors/billing/search",async(req,res)=>{
+    if(!requireContributorEditor(req,res))return;
+    const q=String(req.query.q||"").trim();
+    if(q.length<3||q.length>60)return res.status(400).json({error:"busca_invalida"});
+    try{
+      const guild=_client?.guilds?.cache?.get(GUILD_ID);
+      if(!guild)return res.status(503).json({error:"discord_offline"});
+      const found=await guild.members.fetch({query:q,limit:10});
+      res.json({members:[...found.values()].map(m=>({discordId:m.id,
+        name:m.user.globalName||m.user.username,serverName:m.displayName}))});
+    }catch(e){console.error("[billing Discord lookup]",e);res.status(503).json({error:"busca_indisponivel"});}
+  });
+  app.post("/api/contributors/billing/approve",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.review(db.pool,{
+      player:req.body?.player,editor:sess.id,client:_client}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/prior",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.priorDebt(db.pool,{
+      player:req.body?.player,enabled:req.body?.enabled,amount:req.body?.amount,
+      note:req.body?.note,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/settings",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.setSettings(db.pool,{
+      enabled:req.body?.enabled,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/send",async(req,res)=>{
+    if(!requireContributorEditor(req,res))return;
+    try{res.json(await contributorBilling.sendOne(db.pool,_client,{
+      player:req.body?.player,stage:"manual"}));}
+    catch(e){billingError(res,e);}
   });
 
   app.get("/api/roster", async (req, res) => {
