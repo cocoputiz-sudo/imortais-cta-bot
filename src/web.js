@@ -3806,7 +3806,11 @@ const PAGE = `<!doctype html>
         fetch('/api/contributors/bank-import',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({text:box.value})})
         .then(function(r){return r.json().then(function(x){if(!r.ok)throw Error(x.error||'falha');return x;});})
-        .then(function(x){info.textContent='Importadas '+x.inserted+' operações; '+x.duplicates+' duplicadas. Revise a finalidade dos depósitos.';})
+        .then(function(x){
+          alert('Extrato processado: '+x.inserted+' novo(s) depósito(s), '+x.duplicates+
+            ' já importado(s). O relatório será atualizado agora.');
+          renderContributors();
+        })
         .catch(function(e){info.textContent='Erro: '+e.message;})
         .finally(function(){btn.disabled=false;});
       };
