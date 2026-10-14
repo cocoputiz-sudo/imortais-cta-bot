@@ -362,10 +362,11 @@ function startWebServer(client, opts) {
   function billingError(res,e){
     const code=String(e.message||"server");
     if(code==="contribuinte_nao_encontrado"||code==="jogador_nao_e_contribuinte_no_G"||
-      code==="vinculo_pendente_nao_encontrado")return res.status(404).json({error:code});
+      code==="vinculo_pendente_nao_encontrado"||code==="competencia_nao_encontrada")return res.status(404).json({error:code});
     if(["debito_anterior_invalido","marcacao_invalida","configuracao_invalida",
       "discord_sem_vinculo_confirmado","discord_nao_e_membro","mensagens_desativadas",
-      "jogador_ja_vinculado_outro_discord"].includes(code))
+      "jogador_ja_vinculado_outro_discord","motivo_vinculo_obrigatorio","acao_vinculo_invalida",
+      "status_vinculo_invalido","baixa_invalida","baixa_superior_ao_saldo"].includes(code))
       return res.status(400).json({error:code});
     console.error("[contributor billing]",e);
     res.status(500).json({error:"billing_failed"});
@@ -391,6 +392,19 @@ function startWebServer(client, opts) {
     const sess=requireContributorEditor(req,res);if(!sess)return;
     try{res.json(await contributorBilling.review(db.pool,{
       player:req.body?.player,editor:sess.id,client:_client}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/link-close",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.closeLink(db.pool,{
+      player:req.body?.player,action:req.body?.action,reason:req.body?.reason,editor:sess.id}));}
+    catch(e){billingError(res,e);}
+  });
+  app.post("/api/contributors/billing/writeoff",async(req,res)=>{
+    const sess=requireContributorEditor(req,res);if(!sess)return;
+    try{res.json(await contributorBilling.adjustWeek(db.pool,{
+      player:req.body?.player,weekKey:req.body?.weekKey,amount:req.body?.amount,
+      reason:req.body?.reason,editor:sess.id}));}
     catch(e){billingError(res,e);}
   });
   app.post("/api/contributors/billing/prior",async(req,res)=>{
