@@ -1,0 +1,57 @@
+# ISOLATED BTV11 STAGING. Never supply production Discord credentials/database.
+name: mackna-btv
+services:
+  db:
+    image: postgres:16-alpine
+    platform: linux/arm64
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mackna
+      POSTGRES_PASSWORD: ${MACKNA_DB_PASSWORD:?Defina MACKNA_DB_PASSWORD no arquivo .env.btv}
+      POSTGRES_DB: imortais_btv
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=15", "-c", "work_mem=1MB", "-c", "maintenance_work_mem=32MB", "-c", "max_wal_size=128MB", "-c", "autovacuum_max_workers=1"]
+    volumes:
+      - btv_postgres:/var/lib/postgresql/data
+    shm_size: 64mb
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mackna -d imortais_btv"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+  app:
+    image: ghcr.io/cocoputiz-sudo/imortais-cta-bot:mackna-btv-arm64
+    platform: linux/arm64
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      PGSSL: disable
+      DATABASE_URL: postgres://mackna:${MACKNA_DB_PASSWORD:?Defina MACKNA_DB_PASSWORD}@db:5432/imortais_btv
+      MACKNA_BTV_PREVIEW: "1"
+      IMORTAIS_CHALLENGE_UI: "0"
+    ports:
+      - "8088:3000"
+    mem_limit: 512m
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+volumes:
+  btv_postgres:
