@@ -90,6 +90,10 @@ async function smoke() {
   });
 }
 async function suites(env) {
+  const {Client}=require("pg");
+  const qaAdmin=new Client({connectionString:process.env.DATABASE_URL,ssl:false});
+  await qaAdmin.connect();
+  try {
   const extra=["test/contributor-billing.js","test/guild-ranking-season.js",
     "test/guild-ranking-auth.js","test/guild-might-sweep.js","test/guild-legacy-repair.js",
     "test/guild-might-worker.js","test/guild-photon-capture.js"];
@@ -97,6 +101,10 @@ async function suites(env) {
     ...extra.map(path=>["node",[path]])];
   for(const [command,args] of commands) {
     const label=command+" "+args.join(" ");
+    // Each top-level suite gets a fresh schema, as in an ephemeral CI database.
+    // safety() restricts this connection to the dedicated postgres-qa service.
+    await qaAdmin.query("DROP SCHEMA public CASCADE");
+    await qaAdmin.query("CREATE SCHEMA public");
     console.log("QA_SUITE_START "+label);
     const start=performance.now();
     const r=await new Promise(resolve=>{
@@ -119,6 +127,7 @@ async function suites(env) {
     if(r.stderr)console.error(r.stderr.slice(-8000));
     console.log((result.ok?"QA_SUITE_PASS ":"QA_SUITE_FAIL ")+label);
   }
+  } finally { await qaAdmin.end(); }
 }
 async function main() {
   safety();
