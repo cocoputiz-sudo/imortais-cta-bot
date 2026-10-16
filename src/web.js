@@ -1462,10 +1462,10 @@ const PAGE = `<!doctype html>
       .then(function(x){
         if(x.ok && x.j && x.j.ok){
           setLive(streamLive?'● conectado · CTA ao vivo':'● conectado','var(--green)');
-        } else if(x.j && !x.j.discord){
-          setLive('● Discord desconectado','var(--red)');
-        } else if(x.j && !x.j.database){
+        } else if(x.j && x.j.database===false){
           setLive('● banco indisponível','var(--red)');
+        } else if(x.j && x.j.discord===false){
+          setLive('● Discord desconectado','var(--red)');
         } else {
           setLive('● erro de conexão','var(--red)');
         }
