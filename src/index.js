@@ -9,6 +9,7 @@ const {
 } = require("discord.js");
 
 const db = require("./db");
+const {isPreview, validatePreview} = require("./mackna-preview");
 const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
@@ -3987,6 +3988,7 @@ const webActions = {
 
 (async () => {
   try {
+    validatePreview();
     await db.init();
     await perfil.initSchema(db.pool);
     await telemetry.initSchema(db.pool);
@@ -3994,15 +3996,19 @@ const webActions = {
     await contributorBilling.init(db.pool);
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
-    try{await client.login(CFG.token);}
-    catch(e){
-      if(/disallowed.?intents|4014/i.test(String(e?.message||e))||e?.code===4014)
-        console.error("[DISCORD BOOT] Login bloqueado por disallowed intents (4014): "+
-          "habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
-          "antes do deploy. O código solicita GatewayIntentBits.GuildMembers.");
-      throw e;
+    if (isPreview()) {
+      console.log("[MackNa Cloud] Preview isolado: banco de testes ativo, Discord desativado.");
+    } else {
+      try{await client.login(CFG.token);}
+      catch(e){
+        if(/disallowed.?intents|4014/i.test(String(e?.message||e))||e?.code===4014)
+          console.error("[DISCORD BOOT] Login bloqueado por disallowed intents (4014): "+
+            "habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
+            "antes do deploy. O código solicita GatewayIntentBits.GuildMembers.");
+        throw e;
+      }
+      runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
     }
-    runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);
     process.exit(1);
