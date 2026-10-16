@@ -29,7 +29,7 @@ const locale = require("./locale");
 const { ctaPingTime, timeForCtaLabelUTC: timeToTodayUTC, sortCtaTimes } = require("./ctatime");
 const { parseConsolidationSteps, isCtaFrozen, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
-const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
+const MASTER_OF_WAR_ROLE_ID = process.env.MASTER_OF_WAR_ROLE_ID || "1268568850971230331";
 const { CALLER_WEAPONS, CallerTransferError } = require("./caller-transfer");
 const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
