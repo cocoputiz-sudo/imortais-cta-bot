@@ -63,9 +63,37 @@ Após validar, os serviços `qa-runner` e `postgres-qa` são parados, preservand
 
 ## Pendências delimitadas
 
-1. Inspeção visual e fluxos autenticados no navegador.
+1. Integração autenticada real via OAuth. A inspeção visual com sessões e APIs simuladas foi concluída conforme a continuação abaixo.
 2. Integração com uma aplicação e uma guilda Discord de testes separadas: OAuth, intents, cargos, slash commands, canais, eventos e CTAs.
 3. HTTPS público: Apache ocupa a porta 80. Não foi parado nem reconfigurado.
 4. Aprovação específica antes de qualquer migração ou publicação de produção.
 
 Railway, credenciais e guilda Discord de produção permaneceram intactos. Sem merge do PR.
+
+## Continuação: navegador e preparação Discord, 16/10/2026
+
+Código executável: `5db0a16e6979c6272eef14555fbf04e49f3c6f1e`.
+Preview atualizado exclusivamente no MackNa; sem publicação de produção.
+
+- 42 telas em 12 contextos: larguras 1440, 390 e 320 px; visitante, conta externa, membro e administrador fictícios.
+- Navegação entre 11 módulos de administração, busca por nome no Guild Might e geração simulada de pareamento.
+- Sem exceções JavaScript ou overflow horizontal da página nos cenários cobertos.
+- Menu móvel oculto antes do login/para não membros.
+- Ambas as cópias do menu Dispositivos respeitam permissão.
+- Campos de pareamento empilhados em celular e tabela de dispositivos com rolagem própria.
+- Falha do PostgreSQL mostra banco indisponível antes de diagnosticar Discord desconectado.
+- Novo workflow de navegador preserva capturas e relatório JSON por 14 dias.
+- Preview, Scout regression e navegador: SUCCESS no commit acima.
+- A inicialização de um workflow anterior falhou por cota de download do espelho ECR antes dos testes. A branch passou a usar a mesma imagem PostgreSQL 16 do workflow de preview; as regressões passaram novamente.
+
+[Capturas e execução de navegador](https://github.com/cocoputiz-sudo/imortais-cta-bot/actions/runs/38911874135).
+
+As APIs e sessões nesses testes são simuladas. Não houve login Discord, envio de mensagem nem pareamento real. As capturas não substituem teste com aplicação/guilda Discord de homologação.
+
+### Projeto Discord separado preparado
+
+`imortais-discord-homologacao` contém definições de PostgreSQL 16 e bot, ambos parados e sem implantação executada.
+Auto-deploy desligado, sem domínio e sem segredos Discord. A checagem de configuração bloqueia inicialização incompleta e IDs conhecidos de produção.
+É uma checagem de configuração, não prova de propriedade do token ou dos canais.
+
+[Roteiro e variáveis pendentes](mackna-discord-staging-setup.md).
