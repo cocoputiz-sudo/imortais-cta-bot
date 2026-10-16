@@ -63,10 +63,7 @@ Após validar, os serviços `qa-runner` e `postgres-qa` são parados, preservand
 
 ## Pendências delimitadas
 
-1. Integração autenticada real via OAuth. A inspeção visual com sessões e APIs simuladas foi concluída conforme a continuação abaixo.
-2. Integração com uma aplicação e uma guilda Discord de testes separadas: OAuth, intents, cargos, slash commands, canais, eventos e CTAs.
-3. HTTPS público: Apache ocupa a porta 80. Não foi parado nem reconfigurado.
-4. Aprovação específica antes de qualquer migração ou publicação de produção.
+Este bloco descrevia as pendências da etapa interna. O estado atualizado de 21:16 UTC está na seção final deste relatório e no [registro do Discord de testes](mackna-discord-staging-setup.md).
 
 Railway, credenciais e guilda Discord de produção permaneceram intactos. Sem merge do PR.
 
@@ -97,3 +94,16 @@ Auto-deploy desligado, sem domínio e sem segredos Discord. A checagem de config
 É uma checagem de configuração, não prova de propriedade do token ou dos canais.
 
 [Roteiro e variáveis pendentes](mackna-discord-staging-setup.md).
+
+## Continuação: Discord real, domínio e OAuth, 21:16 UTC
+
+- Projeto separado `imortais-discord-homologacao`, bot de testes `1560656423107432548`, guilda exclusiva `1560656943486345298`, PostgreSQL exclusivo com 43 tabelas.
+- Executável `128a92f7b477b76f27cafad67376aebc7ab3c7de`, implantação ativa `d926b376bbc`; três workflows do executável concluídos com sucesso.
+- https://homolog.macknacloud.com.br com certificado Let's Encrypt validado. Apache padrão desativado pelo responsável, Caddy ativo, encaminhamento TCP 80/443 e reserva DHCP do Debian confirmados nas imagens do modem.
+- OAuth habilitado somente com credenciais do aplicativo de testes e callback próprio `/auth/callback`. Preflight, health e redirecionamento de login passaram; o responsável confirmou acesso ao site após o login.
+- As credenciais continuam somente nas variáveis do serviço. Nenhum segredo foi incluído no repositório.
+- Consulta somente leitura: 6 CTAs, 1 inscrição, nenhuma guilda diferente da de testes e 0 substituições administrativas auditadas.
+
+**Pendência funcional confirmada:** executar `/cta_substituir_caller` no Discord de testes e conferir formação, liderança, remoção do anterior e auditoria. As transações e permissões passaram na CI; o comando interativo ainda não consta da auditoria real. Demais fluxos reais não exercitados estão delimitados no registro do Discord de testes.
+
+O inspetor foi parado após as consultas. Sem merge nem alteração no Railway ou Discord de produção. Qualquer publicação ou migração de produção continua fora desta autorização.

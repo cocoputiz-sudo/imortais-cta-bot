@@ -231,9 +231,9 @@
     "publicDomain": false
   },
   "pending": [
-    "Real Discord integration in a separate test guild",
-    "Visual and authenticated browser validation",
-    "Public HTTPS proxy: Apache occupies port 80; unchanged"
+    "Interactive /cta_substituir_caller in the real test guild, with roster and audit verification",
+    "Real-user scenarios not fully exercised: voice presence, roaming, profiles and contributor workflows",
+    "Production merge, publication and migration are outside the current authorization"
   ],
   "continuation": {
     "testedCommit": "5db0a16e6979c6272eef14555fbf04e49f3c6f1e",
@@ -473,6 +473,99 @@
       "stopped": true,
       "productionCredentials": false,
       "configurationGuardTest": "passed"
+    }
+  },
+  "initialEvidenceScope": "Internal preview snapshot; later sections preserve subsequent stages. See finalReview for current staging state.",
+  "finalReview": {
+    "checkedAt": "2026-10-16T21:16:39.154037Z",
+    "project": "imortais-discord-homologacao",
+    "testedCommit": "128a92f7b477b76f27cafad67376aebc7ab3c7de",
+    "documentationHeadBeforeUpdate": "705489e1807026833b546f6bb06d01fa3a53ba7c",
+    "runtimeUnchangedSinceTestedCommit": true,
+    "activeDeployment": "d926b376bbc",
+    "appId": "1560656423107432548",
+    "guildId": "1560656943486345298",
+    "domain": "https://homolog.macknacloud.com.br",
+    "tls": {
+      "authorized": true,
+      "issuer": "Let's Encrypt",
+      "validTo": "2027-01-14T19:43:20Z"
+    },
+    "health": {
+      "status": 200,
+      "ok": true,
+      "database": true,
+      "discord": true
+    },
+    "oauth": {
+      "enabled": true,
+      "loginStatus": 302,
+      "authorizationHost": "discord.com",
+      "clientId": "1560656423107432548",
+      "callback": "https://homolog.macknacloud.com.br/auth/callback",
+      "scopes": [
+        "identify",
+        "guilds.members.read"
+      ],
+      "statePresent": true,
+      "anonymousMe": {
+        "status": 200,
+        "logged": false
+      },
+      "invalidCallbackStatus": 400,
+      "userReportedBrowserSuccess": true,
+      "authenticatedUserSessionInspected": false
+    },
+    "network": {
+      "caddyRunning": true,
+      "defaultApacheDisabledByOperator": true,
+      "forwardedTcpPorts": [
+        80,
+        443
+      ],
+      "localServerAddress": "192.168.15.16",
+      "dhcpReservationConfirmedByScreenshot": true,
+      "publicIPv4": "179.174.166.157",
+      "externalMobileNetworkConfirmed": false
+    },
+    "databaseReadOnly": {
+      "tables": 43,
+      "events": 6,
+      "otherGuildEvents": 0,
+      "signups": 1,
+      "callerRecoveries": 0
+    },
+    "callerRecovery": {
+      "ci": "passed",
+      "realInteractiveTest": "pending",
+      "auditRows": 0,
+      "approvalOfWebsiteDoesNotCertifyRecovery": true
+    },
+    "ci": {
+      "amd64": {
+        "run": 38923151821,
+        "result": "success"
+      },
+      "scout": {
+        "run": 38923151662,
+        "result": "success"
+      },
+      "browser": {
+        "run": 38923151615,
+        "result": "success"
+      }
+    },
+    "openReviewThreads": 0,
+    "newCodeBlockersIdentified": false,
+    "inspectorStoppedAfterReadOnlyChecks": true,
+    "boundaries": {
+      "railwayModified": false,
+      "productionDiscordModified": false,
+      "merged": false,
+      "productionPublished": false,
+      "productionMigration": false,
+      "testHostApacheAndRouterModified": true,
+      "secretsCommitted": false
     }
   }
 }
