@@ -8,6 +8,7 @@
 // ============================================================================
 const express = require("express");
 const db = require("./db");
+const {health, isPreview} = require("./mackna-preview");
 const { PARTIES, WEAPONS } = require("./comps");
 const { isSecondCaller } = require("./roster");
 const crypto = require("crypto");
@@ -247,8 +248,8 @@ function startWebServer(client, opts) {
       database = true;
     } catch (_) {}
     const discord = !!(_client && typeof _client.isReady === "function" && _client.isReady());
-    const ok = database && discord;
-    res.status(ok ? 200 : 503).json({ ok, database, discord, at: new Date().toISOString() });
+    const result = health({database, discord, preview: isPreview()});
+    res.status(result.ok ? 200 : 503).json(result);
   });
 
   app.get("/api/events", async (req, res) => {
@@ -451,6 +452,9 @@ function startWebServer(client, opts) {
   });
 
   app.get("/auth/login", (_req, res) => {
+    if (isPreview()) {
+      return res.status(503).type("text/plain").send("MackNa Cloud: homologação sem login Discord.");
+    }
     if (!CLIENT_SECRET) return res.status(503).send("Login ainda não configurado (falta DISCORD_CLIENT_SECRET no Railway).");
     const state = crypto.randomBytes(16).toString("hex");
     states.set(state, Date.now());
