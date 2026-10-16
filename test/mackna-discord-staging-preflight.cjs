@@ -17,6 +17,19 @@ for(const override of [
  {MACKNA_PREVIEW:"1"},{DISCORD_TOKEN:""},{DISCORD_CLIENT_SECRET:""},{PREP_VOICE_ID:""},
  {OAUTH_REDIRECT:"https://cta-imortais.up.railway.app/auth/callback"},{SESSION_SECRET:"short"}
 ])assert.equal(validateConfig({...base,...override}).ok,false,JSON.stringify(Object.keys(override)));
+const botOnly={...base,MACKNA_STAGING_OAUTH:"disabled",DISCORD_CLIENT_SECRET:"",
+ OAUTH_REDIRECT:"https://discord-staging.invalid/auth/callback"};
+assert.equal(validateConfig(botOnly).ok,true);
+assert.equal(validateConfig(botOnly).oauthEnabled,false);
+for(const override of [
+ {DISCORD_CLIENT_SECRET:"unexpected-secret"},
+ {OAUTH_REDIRECT:base.OAUTH_REDIRECT},
+ {OAUTH_REDIRECT:"https://cta-imortais.up.railway.app/auth/callback"},
+ {MACKNA_STAGING_OAUTH:"typo"},
+ {GUILD_ID:PRODUCTION_GUILD},{DISCORD_CLIENT_ID:PRODUCTION_CLIENT},
+ {DATABASE_URL:"postgresql://qa:qa@database.railway.internal:5432/app"}
+])assert.equal(validateConfig({...botOnly,...override}).ok,false);
+assert.equal(validateConfig({...botOnly,MACKNA_STAGING_OAUTH:"enabled"}).ok,false);
 const result=JSON.stringify(validateConfig(base));
 assert(!result.includes(base.DISCORD_TOKEN));assert(!result.includes(base.DISCORD_CLIENT_SECRET));
 assert(!result.includes(base.SESSION_SECRET));assert(!result.includes(base.DATABASE_URL));
