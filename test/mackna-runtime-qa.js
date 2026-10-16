@@ -4,7 +4,8 @@
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const vm = require("node:vm");
-const {spawnSync} = require("node:child_process");
+const {spawn} = require("node:child_process");
+const net = require("node:net");
 const {performance} = require("node:perf_hooks");
 
 const TARGET = "http://bot-preview.imortais-homologacao.internal:3000";
@@ -88,7 +89,7 @@ async function smoke() {
       p95ms:Math.round(times[47]),maxMs:Math.round(times[49])};
   });
 }
-function suites() {
+async function suites(env) {
   const extra=["test/contributor-billing.js","test/guild-ranking-season.js",
     "test/guild-ranking-auth.js","test/guild-might-sweep.js","test/guild-legacy-repair.js",
     "test/guild-might-worker.js","test/guild-photon-capture.js"];
@@ -97,9 +98,18 @@ function suites() {
   for(const [command,args] of commands) {
     const label=command+" "+args.join(" ");
     console.log("QA_SUITE_START "+label);
-    const start=performance.now(),r=spawnSync(command,args,{
-      cwd:require("node:path").resolve(__dirname,".."),
-      env:process.env,encoding:"utf8",timeout:180000,maxBuffer:16*1024*1024
+    const start=performance.now();
+    const r=await new Promise(resolve=>{
+      let stdout="",stderr="",error=null;
+      const child=spawn(command,args,{
+        cwd:require("node:path").resolve(__dirname,".."),env,
+        stdio:["ignore","pipe","pipe"]
+      });
+      const timer=setTimeout(()=>{error=new Error("suite timeout");child.kill("SIGKILL");},180000);
+      child.stdout.on("data",chunk=>{stdout=(stdout+chunk).slice(-100000);});
+      child.stderr.on("data",chunk=>{stderr=(stderr+chunk).slice(-100000);});
+      child.on("error",e=>{error=e;});
+      child.on("close",status=>{clearTimeout(timer);resolve({status,error,stdout,stderr});});
     });
     const result={name:label,ok:r.status===0&&!r.error,durationMs:Math.round(performance.now()-start)};
     if(!result.ok) result.error=r.error?.message||("exit "+r.status);
@@ -114,7 +124,21 @@ async function main() {
   safety();
   console.log("QA_ISOLATION_OK disposable database; no Discord credentials");
   await smoke();
-  suites();
+  // Existing destructive suites require loopback. Proxy ONLY to the exact disposable DB
+  // validated above; never relax their own safety guards.
+  const remote=new URL(process.env.DATABASE_URL),sockets=new Set();
+  const proxy=net.createServer(socket=>{
+    sockets.add(socket);socket.on("close",()=>sockets.delete(socket));
+    const upstream=net.connect({host:remote.hostname,port:Number(remote.port||5432)});
+    sockets.add(upstream);upstream.on("close",()=>sockets.delete(upstream));
+    socket.on("error",()=>upstream.destroy());
+    upstream.on("error",()=>socket.destroy());
+    socket.pipe(upstream);upstream.pipe(socket);
+  });
+  await new Promise((resolve,reject)=>{proxy.once("error",reject);proxy.listen(0,"127.0.0.1",resolve);});
+  const local=new URL(remote);local.hostname="127.0.0.1";local.port=String(proxy.address().port);
+  try { await suites({...process.env,DATABASE_URL:local.href}); }
+  finally { for(const socket of sockets)socket.destroy();await new Promise(resolve=>proxy.close(resolve)); }
   report.state=report.checks.every(x=>x.ok)&&report.suites.every(x=>x.ok)?"passed":"failed";
   report.finished=new Date().toISOString();
   console.log("QA_SUMMARY "+JSON.stringify(report));
