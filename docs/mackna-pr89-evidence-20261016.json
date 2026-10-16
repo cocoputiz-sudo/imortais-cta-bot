@@ -234,5 +234,245 @@
     "Real Discord integration in a separate test guild",
     "Visual and authenticated browser validation",
     "Public HTTPS proxy: Apache occupies port 80; unchanged"
-  ]
+  ],
+  "continuation": {
+    "testedCommit": "5db0a16e6979c6272eef14555fbf04e49f3c6f1e",
+    "previewDeployment": "de2cc0a1a41",
+    "qaDeployment": "d6a320fc7d3",
+    "qa": {
+      "runtime": "v18.20.8",
+      "arch": "x64",
+      "started": "2026-10-16T13:59:08.152Z",
+      "state": "passed",
+      "checks": [
+        {
+          "name": "live health: database ready, Discord off",
+          "ok": true
+        },
+        {
+          "name": "War Room HTML and browser script syntax",
+          "ok": true
+        },
+        {
+          "name": "OAuth login blocked",
+          "ok": true
+        },
+        {
+          "name": "invalid OAuth callback rejected",
+          "ok": true
+        },
+        {
+          "name": "anonymous identity",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/events",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/roster?event=0",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/contributors/weekly",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/contributors/settings",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/contributors/billing",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/contributors/billing/search",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/me/stats",
+          "ok": true
+        },
+        {
+          "name": "anonymous GET denied /api/scout",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/guild-roster/analyze",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/roster/preview",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/roster/confirm",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/assignment",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/bank-import",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/settings",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/billing/approve",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/billing/link-close",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/billing/writeoff",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/billing/prior",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/billing/settings",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/contributors/billing/send",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/cta/open",
+          "ok": true
+        },
+        {
+          "name": "anonymous POST denied /api/move",
+          "ok": true
+        },
+        {
+          "name": "forged session denied",
+          "ok": true
+        },
+        {
+          "name": "50 health requests with concurrency 5",
+          "ok": true
+        },
+        {
+          "name": "restored backup preserves synthetic checkpoint",
+          "ok": true
+        }
+      ],
+      "suites": [
+        {
+          "name": "node test/mackna-preview.js",
+          "ok": true,
+          "durationMs": 49
+        },
+        {
+          "name": "npm test",
+          "ok": true,
+          "durationMs": 51364
+        },
+        {
+          "name": "node test/contributor-billing.js",
+          "ok": true,
+          "durationMs": 902
+        },
+        {
+          "name": "node test/guild-ranking-season.js",
+          "ok": true,
+          "durationMs": 121
+        },
+        {
+          "name": "node test/guild-ranking-auth.js",
+          "ok": true,
+          "durationMs": 56
+        },
+        {
+          "name": "node test/guild-might-sweep.js",
+          "ok": true,
+          "durationMs": 139
+        },
+        {
+          "name": "node test/guild-legacy-repair.js",
+          "ok": true,
+          "durationMs": 72
+        },
+        {
+          "name": "node test/guild-might-worker.js",
+          "ok": true,
+          "durationMs": 1702
+        },
+        {
+          "name": "node test/guild-photon-capture.js",
+          "ok": true,
+          "durationMs": 57
+        }
+      ],
+      "privateAddress": "172.18.0.4",
+      "healthSample": {
+        "requests": 50,
+        "concurrency": 5,
+        "p50ms": 4,
+        "p95ms": 27,
+        "maxMs": 29
+      },
+      "restore": {
+        "database": "app_restore_20261016044841",
+        "tables": 43,
+        "checkpoint": true,
+        "readOnly": true
+      },
+      "finished": "2026-10-16T14:00:03.532Z"
+    },
+    "browser": {
+      "contexts": 12,
+      "screens": 42,
+      "viewportWidths": [
+        1440,
+        390,
+        320
+      ],
+      "personas": [
+        "anonymous",
+        "outsider",
+        "member",
+        "admin"
+      ],
+      "responses": "synthetic",
+      "realDiscord": false,
+      "run": 38911874135,
+      "artifact": 12051110599,
+      "result": "success"
+    },
+    "ci": {
+      "preview": {
+        "run": 38911874255,
+        "result": "success"
+      },
+      "regression": {
+        "run": 38911874234,
+        "result": "success"
+      },
+      "browser": {
+        "run": 38911874135,
+        "result": "success"
+      }
+    },
+    "discordStaging": {
+      "project": "imortais-discord-homologacao",
+      "services": [
+        "postgres",
+        "bot-discord-staging"
+      ],
+      "deployed": false,
+      "stopped": true,
+      "productionCredentials": false,
+      "configurationGuardTest": "passed"
+    }
+  }
 }
