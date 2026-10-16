@@ -1254,6 +1254,11 @@ const PAGE = `<!doctype html>
   @media(max-width:900px){.nav2-layout{grid-template-columns:1fr}.nav2-current{grid-template-columns:1fr}.nav2-row{grid-template-columns:1fr}}
 
   .mobile-nav{display:none}
+  body:not(.wr-member) .mobile-nav{display:none}
+  body:not(.wr-member) #side{visibility:hidden}
+  .pair-form{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}
+  .device-table-scroll{overflow-x:auto}
+  @media(max-width:600px){.pair-form{grid-template-columns:1fr}.pair-form .btn{justify-self:start}}
   @media(max-width:1050px){
     body{background-attachment:scroll}
     .mobile-nav{
@@ -4282,13 +4287,13 @@ const PAGE = `<!doctype html>
       }
       var html='<div class="modhead">🖥️ Dispositivos · Combat Client</div>'
         +'<div class="panel"><h3>Vincular novo PC</h3>'
-        +'<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">'
+        +'<div class="pair-form">'
         +'<label>Nome do dispositivo<input id="pair-label" class="input" placeholder="Ex: BadMack-PC"></label>'
         +'<label>Personagem (opcional)<input id="pair-player" class="input" placeholder="Ex: BadMack"></label>'
         +'<button class="btn primary" id="pair-generate">Gerar código</button>'
         +'</div><div id="pair-result" style="margin-top:14px"></div></div>'
         +'<div class="panel"><h3>Dispositivos vinculados</h3>'
-        +'<table class="dtable"><thead><tr><th>Dispositivo</th><th>Personagem</th><th>Último contato</th><th>Status</th><th></th></tr></thead><tbody>'
+        +'<div class="device-table-scroll"><table class="dtable"><thead><tr><th>Dispositivo</th><th>Personagem</th><th>Último contato</th><th>Status</th><th></th></tr></thead><tbody>'
         +agents.map(function(a){
           var revoked=!!a.revokedAt;
           var last=a.lastSeen?new Date(a.lastSeen).toLocaleString('pt-BR'):'—';
@@ -4297,7 +4302,7 @@ const PAGE = `<!doctype html>
             +'<td><span class="pill '+(revoked?'miss':'ok')+'">'+(revoked?'Revogado':'Ativo')+'</span></td>'
             +'<td>'+(revoked?'':'<button class="btn danger agent-revoke" data-id="'+esc(a.id)+'">Revogar</button>')+'</td></tr>';
         }).join('')
-        +'</tbody></table></div>';
+        +'</tbody></table></div></div>';
       el.innerHTML=html;
 
       var gen=document.getElementById('pair-generate');
@@ -4337,8 +4342,10 @@ const PAGE = `<!doctype html>
         name:a.name||''
       };
       renderAuthHeader();
-      var devicesNav=document.querySelector('.nav[data-view="devices"]');
-      if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
+      document.body.classList.toggle('wr-member',authState.logged&&authState.member);
+      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="devices"]'),function(nav){
+        nav.style.display=authState.canManageDevices?'':'none';
+      });
       Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=(authState.canViewContributors||authState.canEditContributors)?'':'none';});
       var navBomb=document.getElementById('nav-bomb');
       var navCastelo=document.getElementById('nav-castelo');
