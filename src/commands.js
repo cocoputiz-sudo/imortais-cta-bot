@@ -32,6 +32,12 @@ function commandDefs() {
         { name: "press comp", value: "press" },
         { name: "pt6teste", value: "pt6teste" }
       )),
+    new SlashCommandBuilder().setName("cta_substituir_caller")
+      .setDescription("(staff) Substitui caller ausente e transfere liderança e PT1 vaga 1")
+      .addStringOption(ctaOpt).addUserOption(userOpt)
+      .addStringOption(o=>armaOpt(o).setRequired(true))
+      .addStringOption(o=>o.setName("motivo").setDescription("Motivo da substituição")
+        .setRequired(true).setMinLength(5).setMaxLength(300)),
     new SlashCommandBuilder().setName("cta_move").setDescription("Move um jogador já inscrito pra outra vaga")
       .addUserOption(userOpt).addStringOption(ctaOpt).addIntegerOption(ptOpt)
       .addIntegerOption(vagaOpt).addStringOption(armaOpt),

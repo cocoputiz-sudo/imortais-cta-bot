@@ -29,7 +29,9 @@ on:
       - "src/season.js"
       - "src/db.js"
       - "src/caller-transfer.js"
+      - "src/caller-recovery.js"
       - "test/caller-transfer.js"
+      - "test/caller-recovery.js"
       - "test/primary-caller-weapon.js"
       - "src/commands.js"
       - "src/contributorBilling.js"
@@ -107,6 +109,8 @@ jobs:
         run: node test/primary-caller-weapon.js
       - name: CTA primary caller transfer (duas contas, rollback, PT1, 2 Caller)
         run: node test/caller-transfer.js
+      - name: Recuperação administrativa de caller ausente e auditoria atômica
+        run: node test/caller-recovery.js
       - name: CTA party audit e colisões
         run: node test/cta-party-audit.js
       - name: Scout regression em PostgreSQL temporário
