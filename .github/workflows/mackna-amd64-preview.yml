@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'scripts/mackna-discord-staging-preflight.cjs'
       - 'package.json'
       - 'package-lock.json'
       - 'docs/mackna-cloud-amd64-preview.md'
@@ -46,7 +47,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Preview safety and health unit tests
-        run: node test/mackna-preview.js
+        run: |
+          node test/mackna-preview.js
+          node test/mackna-discord-staging-preflight.cjs
       - name: Build production-like isolated preview and verify health
         run: |
           set -euo pipefail
