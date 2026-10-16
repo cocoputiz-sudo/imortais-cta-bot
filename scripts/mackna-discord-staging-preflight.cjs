@@ -15,7 +15,10 @@ function validateConfig(env=process.env) {
   if(env.GUILD_ID===PRODUCTION_GUILD)errors.push("guilda de produção bloqueada");
   if(env.DISCORD_CLIENT_ID===PRODUCTION_CLIENT)errors.push("aplicativo de produção bloqueado");
   if(!env.DISCORD_TOKEN)errors.push("DISCORD_TOKEN de um NOVO bot de testes obrigatório");
-  if(!env.DISCORD_CLIENT_SECRET)errors.push("DISCORD_CLIENT_SECRET de testes obrigatório para OAuth");
+  const oauthDisabled=env.MACKNA_STAGING_OAUTH==="disabled";
+  if(env.MACKNA_STAGING_OAUTH && !["enabled","disabled"].includes(env.MACKNA_STAGING_OAUTH))errors.push("MACKNA_STAGING_OAUTH inválido");
+  if(!oauthDisabled&&!env.DISCORD_CLIENT_SECRET)errors.push("DISCORD_CLIENT_SECRET de testes obrigatório para OAuth");
+  if(oauthDisabled&&env.DISCORD_CLIENT_SECRET)errors.push("OAuth desabilitado exige DISCORD_CLIENT_SECRET ausente");
   const voiceIds=String(env.PREP_VOICE_ID||"").split(",").map(x=>x.trim()).filter(Boolean);
   if(!voiceIds.length||voiceIds.some(id=>!/^\d{15,22}$/.test(id)))errors.push("PREP_VOICE_ID de testes obrigatório");
   let database;
@@ -29,9 +32,11 @@ function validateConfig(env=process.env) {
   if(!redirect||redirect.protocol!=="https:"||redirect.pathname!=="/auth/callback"||
     redirect.username||redirect.password||redirect.hostname.endsWith(".railway.app"))
     errors.push("OAUTH_REDIRECT exige HTTPS próprio de homologação com /auth/callback, fora do Railway");
+  if(oauthDisabled&&env.OAUTH_REDIRECT!=="https://discord-staging.invalid/auth/callback")
+    errors.push("OAuth desabilitado exige redirect reservado discord-staging.invalid");
   if(!env.SESSION_SECRET||env.SESSION_SECRET.length<32)errors.push("SESSION_SECRET exclusivo de testes obrigatório (32+ caracteres)");
   return {ok:errors.length===0,errors,project:PROJECT,
-    guildId:env.GUILD_ID||null,clientId:env.DISCORD_CLIENT_ID||null};
+    guildId:env.GUILD_ID||null,clientId:env.DISCORD_CLIENT_ID||null,oauthEnabled:!oauthDisabled};
 }
 if(require.main===module){
   const result=validateConfig();
