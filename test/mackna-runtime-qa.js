@@ -132,7 +132,29 @@ async function suites(env) {
 async function main() {
   safety();
   console.log("QA_ISOLATION_OK disposable database; no Discord credentials");
+  report.privateAddress=(await require("node:dns").promises.lookup(new URL(TARGET).hostname)).address;
   await smoke();
+  await check("restored backup preserves synthetic checkpoint",async()=>{
+    const url=new URL(process.env.MACKNA_PREVIEW_READONLY_URL);
+    assert.equal(url.hostname,"postgres.imortais-homologacao.internal");
+    assert.equal(process.env.MACKNA_RESTORE_DATABASE,"app_restore_20261016044841");
+    url.pathname="/"+process.env.MACKNA_RESTORE_DATABASE;
+    const {Client}=require("pg");
+    const reader=new Client({connectionString:url.href,ssl:false,
+      options:"-c default_transaction_read_only=on",connectionTimeoutMillis:10000,query_timeout:10000});
+    await reader.connect();
+    try {
+      await reader.query("BEGIN READ ONLY");
+      const row=await reader.query("SELECT id,evidence,created_at FROM mackna_preview_qa_checkpoint WHERE id=$1",
+        ["pr89-persistence-20261016"]);
+      assert.equal(row.rowCount,1);
+      assert.equal(row.rows[0].evidence,"isolated synthetic persistence checkpoint");
+      const tables=await reader.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public'");
+      assert.equal(tables.rows[0].n,43);
+      report.restore={database:process.env.MACKNA_RESTORE_DATABASE,tables:43,checkpoint:true,readOnly:true};
+      await reader.query("ROLLBACK");
+    } finally { await reader.end(); }
+  });
   // Existing destructive suites require loopback. Proxy ONLY to the exact disposable DB
   // validated above; never relax their own safety guards.
   const remote=new URL(process.env.DATABASE_URL),sockets=new Set();
