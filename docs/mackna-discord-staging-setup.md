@@ -1,58 +1,61 @@
-# Discord IMORTAIS: próxima etapa isolada do PR #89
+# Discord IMORTAIS: homologação isolada do PR #89
 
-## Recursos preparados, sem execução
+Estado verificado em 2026-10-16, 14:52 UTC.
 
-Projeto MackNa: `imortais-discord-homologacao`.
+## Implantação ativa
 
-- `postgres`: modelo PostgreSQL 16, sem implantação executada.
-- `bot-discord-staging`: branch do PR #89, sem implantação executada.
-- Ambos parados, sem domínio público e sem deploy automático.
-- Nenhum token, segredo OAuth, ID de aplicativo ou de guilda foi copiado da produção.
-- O preview anterior permanece em outro projeto: `imortais-homologacao`.
+- Projeto MackNa: `imortais-discord-homologacao`, privado, sem deploy automático.
+- Código executável: `81dfcd46647334b7a9cb254e2d104169e4992b5b`.
+- Bot: implantação `dfd8b5a0ce0`, online como **CTA IMORTAIS BOT TESTE#7078**.
+- PostgreSQL 16: implantação `d00e558feeb`, instância `postgres-imortais-discord-ho`, 42 tabelas da aplicação.
+- Banco exclusivo e vazio na primeira inicialização. Preview anterior permanece em outro projeto.
+- Token validado por GET /users/@me: aplicativo `1560656423107432548`.
+- GET /users/@me/guilds confirmou uma única guilda: **imortais server teste**, `1560656943486345298`.
+- 51 comandos consultados na API após registro na guilda de testes.
+- GET /api/health interno: HTTP 200, `ok=true, database=true, discord=true`.
+- Intents exigidas pelo cliente aceitas; conexão Gateway concluída.
+- CI do commit executável: AMD64 preview, Scout regression e navegador concluídos com sucesso.
+- Serviço temporário `discord-inspect` parado após consultas de leitura. Nenhuma mensagem de teste enviada nesta etapa.
 
-O comando configurado é:
+## Canais e cargos configurados
+
+IDs obtidos diretamente da guilda de testes.
+
+| Configuração | Destino | ID |
+| --- | --- | --- |
+| CTA_CHANNEL_ID | cta-mandatório | 1560665420447481966 |
+| STAFF_LOG_CHANNEL_ID / RANKING_CHANNEL_ID | general, compartilhado nesta etapa de testes | 1560656944786575433 |
+| CONTENT_PING_CHANNEL_ID | ping-de-conteúdos | 1560657754991886346 |
+| PREP_VOICE_ID | PREPARAÇÃO | 1560657392449097728 |
+| BOMB_VOICE_ID | BOMB SQUAD | 1560657458639413359 |
+| ROAMING_CATEGORY_ID | CONTEÚDOS E EVENTOS | 1560657702823133346 |
+| IMORTAL_ROLE_ID | Imortal | 1560658000748871802 |
+| STAFF_ROLE_ID / MASTER_OF_WAR_ROLE_ID / CALLER_TAG_ID | Mestre de Guerra | 1560658086857810023 |
+| OFFICER_ROLE_IDS | Officer | 1560658125089148928 |
+
+**Permissões pendentes:** GET do membro do bot retornou somente o cargo automático `1560665150879699038`. As categorias privadas negam View Channel a @everyone e não concedem acesso a esse cargo. O cargo manual **BOT**, `1560658377531457576`, existe e tem Administrador, mas ainda não está atribuído ao bot. O responsável pelo servidor de testes precisa ajustar seu acesso antes dos testes nesses canais. Gerenciar cargos e canais também está ausente no cargo automático; não foi tentada elevação pelo próprio bot.
+
+## Inicialização e OAuth
+
+Comando do serviço:
 
 ```sh
 node scripts/mackna-discord-staging-preflight.cjs && npm start
 ```
 
-A checagem é somente de configuração: não consulta nem envia mensagens ao Discord.
-Ela rejeita o projeto errado, a guilda e o aplicativo conhecidos de produção, banco diferente do PostgreSQL exclusivo, segredo de sessão curto, IDs ausentes e OAuth apontando para Railway.
-Ela **não comprova** que o token pertence ao aplicativo informado nem que canais e cargos pertencem à guilda de testes. Essas identidades devem ser verificadas por consultas de leitura antes da primeira implantação.
+A checagem valida projeto, banco exclusivo, IDs necessários e bloqueia guilda/aplicativo conhecidos de produção. A consulta prévia da API comprova a identidade real; a checagem local não substitui essa consulta.
 
-## Informações ainda necessárias
+O modo atual é `MACKNA_STAGING_OAUTH=disabled`, com DISCORD_CLIENT_SECRET ausente e `OAUTH_REDIRECT=https://discord-staging.invalid/auth/callback`. O domínio reservado evita o fallback de produção. SESSION_SECRET exclusivo foi gerado e cadastrado. GET /auth/login retorna 503 e /auth/me retorna logged=false, conforme esperado. O login web ainda não foi homologado.
 
-Use um aplicativo/bot NOVO e um servidor Discord separado. Se já existirem, forneça apenas seus IDs para identificação. Cadastre segredos diretamente nas variáveis do serviço no MackNa, sem prints ou envio no chat.
+Para habilitar OAuth posteriormente: configurar HTTPS da homologação, registrar seu callback no aplicativo de testes, cadastrar seu segredo e definir MACKNA_STAGING_OAUTH=enabled. O preflight exige HTTPS fora do Railway com caminho /auth/callback. Em disabled, rejeita segredo OAuth presente e qualquer outro redirect.
 
-| Variável | Origem |
-| --- | --- |
-| `DISCORD_CLIENT_ID` | Aplicativo de testes |
-| `DISCORD_TOKEN` | Token do bot de testes; cadastrar no MackNa |
-| `DISCORD_CLIENT_SECRET` | Segredo OAuth do aplicativo de testes; cadastrar no MackNa |
-| `GUILD_ID` | Servidor Discord de testes |
-| `CTA_CHANNEL_ID` | Canal textual de CTAs de testes |
-| `IMORTAL_ROLE_ID` | Cargo de membros de testes |
-| `STAFF_LOG_CHANNEL_ID` | Canal de staff de testes |
-| `PREP_VOICE_ID` | Canal de voz de preparação de testes |
-| `CONTENT_PING_CHANNEL_ID` | Canal de conteúdo de testes |
-| `RANKING_CHANNEL_ID` | Canal de ranking de testes |
-| `ROAMING_CATEGORY_ID` | Categoria de canais de testes |
-| `SESSION_SECRET` | Novo valor aleatório exclusivo, pelo menos 32 caracteres |
-| `OAUTH_REDIRECT` | URL HTTPS da homologação, terminando em `/auth/callback` |
+## Próximos testes
 
-As variáveis de isolamento e a referência ao novo PostgreSQL já estão configuradas. O proxy HTTPS continua pendente; Apache não foi modificado.
-Cargos adicionais de caller, oficiais, bomb e Mestre de Guerra devem ser mapeados para cargos de testes antes de exercitar essas funções. Revise também quaisquer IDs fixos relevantes à função testada.
+1. Ajustar acesso do bot aos canais e a hierarquia de cargos no servidor de testes.
+2. Exercitar CTA, perfis, caller, transferência, presença em voz e roaming com contas de testes.
+3. Homologar login web após configurar HTTPS e OAuth.
+4. Exercitar vínculos, recusa/revogação, baixa manual e persistência. Mensagens privadas somente para contas que autorizaram esse teste.
 
-## Roteiro após disponibilizar o aplicativo e a guilda de testes
+Os testes visuais existentes usam sessões e respostas simuladas; as evidências desta etapa comprovam conexão real, registro de comandos, PostgreSQL e saúde HTTP, não a execução de todos os comandos.
 
-1. Verificar por leitura a identidade do bot/aplicativo, sua participação somente no servidor de testes e a propriedade dos canais/cargos informados.
-2. Confirmar intents privilegiadas exigidas pelo código, inclusive Server Members Intent, e permissões mínimas no servidor de testes.
-3. Resolver acesso HTTPS e cadastrar exatamente a URL OAuth da homologação no aplicativo de testes.
-4. Implantar o PostgreSQL novo e vazio; validar acesso e schemas.
-5. Executar a checagem e implantar somente `bot-discord-staging`.
-6. Exercitar login, comandos de CTA, caller com arma livre, transferência de caller, pings, voz e atualização de formação.
-7. Testar solicitações de vínculo, recusa/revogação, baixa manual com justificativa e persistência.
-8. Mensagens privadas somente para contas de testes que tenham autorizado expressamente o envio. A automação deve iniciar desligada.
-9. Confirmar ausência de alterações no Railway, no banco e no Discord de produção; manter o PR sem merge até revisão.
-
-Os testes de navegador existentes usam respostas simuladas. Eles validam a interface e não substituem esta integração real.
+Railway, Discord de produção e Apache não foram modificados. Nenhuma porta pública foi aberta. PR permanece sem merge.
