@@ -47,8 +47,6 @@ jobs:
         run: npm ci
       - name: Preview safety and health unit tests
         run: node test/mackna-preview.js
-      - name: Existing IMORTAIS regression tests
-        run: npm test
       - name: Build production-like isolated preview and verify health
         run: |
           set -euo pipefail
@@ -68,3 +66,6 @@ jobs:
           done
           echo 'Staging preview health timed out' >&2
           exit 1
+
+      - name: Existing IMORTAIS regression tests
+        run: npm test
