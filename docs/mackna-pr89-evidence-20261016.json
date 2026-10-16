@@ -1,0 +1,238 @@
+{
+  "date": "2026-10-16",
+  "repository": "cocoputiz-sudo/imortais-cta-bot",
+  "pr": 89,
+  "branch": "test/mackna-cloud-amd64-preview-20261016",
+  "testedCommit": "29b7665d2d043c006036e7ad913592b7f339b443",
+  "project": "imortais-homologacao",
+  "qa": {
+    "runtime": "v18.20.8",
+    "arch": "x64",
+    "started": "2026-10-16T04:51:10.615Z",
+    "state": "passed",
+    "checks": [
+      {
+        "name": "live health: database ready, Discord off",
+        "ok": true
+      },
+      {
+        "name": "War Room HTML and browser script syntax",
+        "ok": true
+      },
+      {
+        "name": "OAuth login blocked",
+        "ok": true
+      },
+      {
+        "name": "invalid OAuth callback rejected",
+        "ok": true
+      },
+      {
+        "name": "anonymous identity",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/events",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/roster?event=0",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/contributors/weekly",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/contributors/settings",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/contributors/billing",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/contributors/billing/search",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/me/stats",
+        "ok": true
+      },
+      {
+        "name": "anonymous GET denied /api/scout",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/guild-roster/analyze",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/roster/preview",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/roster/confirm",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/assignment",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/bank-import",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/settings",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/billing/approve",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/billing/link-close",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/billing/writeoff",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/billing/prior",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/billing/settings",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/contributors/billing/send",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/cta/open",
+        "ok": true
+      },
+      {
+        "name": "anonymous POST denied /api/move",
+        "ok": true
+      },
+      {
+        "name": "forged session denied",
+        "ok": true
+      },
+      {
+        "name": "50 health requests with concurrency 5",
+        "ok": true
+      },
+      {
+        "name": "restored backup preserves synthetic checkpoint",
+        "ok": true
+      }
+    ],
+    "suites": [
+      {
+        "name": "node test/mackna-preview.js",
+        "ok": true,
+        "durationMs": 54
+      },
+      {
+        "name": "npm test",
+        "ok": true,
+        "durationMs": 52590
+      },
+      {
+        "name": "node test/contributor-billing.js",
+        "ok": true,
+        "durationMs": 945
+      },
+      {
+        "name": "node test/guild-ranking-season.js",
+        "ok": true,
+        "durationMs": 120
+      },
+      {
+        "name": "node test/guild-ranking-auth.js",
+        "ok": true,
+        "durationMs": 47
+      },
+      {
+        "name": "node test/guild-might-sweep.js",
+        "ok": true,
+        "durationMs": 138
+      },
+      {
+        "name": "node test/guild-legacy-repair.js",
+        "ok": true,
+        "durationMs": 71
+      },
+      {
+        "name": "node test/guild-might-worker.js",
+        "ok": true,
+        "durationMs": 1633
+      },
+      {
+        "name": "node test/guild-photon-capture.js",
+        "ok": true,
+        "durationMs": 57
+      }
+    ],
+    "privateAddress": "172.18.0.3",
+    "healthSample": {
+      "requests": 50,
+      "concurrency": 5,
+      "p50ms": 4,
+      "p95ms": 9,
+      "maxMs": 25
+    },
+    "restore": {
+      "database": "app_restore_20261016044841",
+      "tables": 43,
+      "checkpoint": true,
+      "readOnly": true
+    },
+    "finished": "2026-10-16T04:52:07.282Z"
+  },
+  "ci": {
+    "preview": {
+      "run": 38852655111,
+      "result": "success"
+    },
+    "regressions": {
+      "run": 38852654959,
+      "result": "success"
+    }
+  },
+  "persistence": {
+    "checkpoint": "pr89-persistence-20261016",
+    "createdAt": "2026-10-16T04:47:30.341325Z",
+    "survivedPostgresRestart": true,
+    "survivedApplicationRollback": true
+  },
+  "backup": {
+    "file": "postgres-imortais-homologaca_app_20261016T044824Z.dump",
+    "bytes": 102186,
+    "sha256": "4951f930deef6d1d690e78fc87d1cb1eefbd64a9622a69f2c4607a434d5060d5",
+    "restoredTables": 43,
+    "restoreErrors": 0
+  },
+  "deployments": {
+    "preview": "dd7b83686c3",
+    "rollbackToPrior": "deeafb4cba2",
+    "returnedToCandidate": "d9a157052cd",
+    "qa": "d56cc5cacde"
+  },
+  "boundaries": {
+    "railwayModified": false,
+    "productionDiscordConnected": false,
+    "merged": false,
+    "publicDomain": false
+  },
+  "pending": [
+    "Real Discord integration in a separate test guild",
+    "Visual and authenticated browser validation",
+    "Public HTTPS proxy: Apache occupies port 80; unchanged"
+  ]
+}
