@@ -174,3 +174,18 @@ node src/index.js
 ---
 
 *Feito para a guild IMORTAIS · Albion Online*
+## Substituição de caller ausente
+
+Se o caller principal desconectar ou deixar o servidor sem transferir a liderança,
+a staff pode usar `/cta_substituir_caller cta:15:20 usuario:@novo arma:MARTELO DE BATALHA motivo:Caller ausente`.
+O comando aceita o dono do servidor, Administrador, Gerenciar Servidor ou os cargos
+configurados em `STAFF_ROLE_ID` / `MASTER_OF_WAR_ROLE_ID`. A ausência desses IDs não
+libera o comando para membros comuns. Ser caller, isoladamente, não concede essa permissão.
+
+O substituto precisa pertencer ao servidor, mas pode ainda não estar inscrito.
+Qualquer arma válida do catálogo é aceita. O comando transfere a liderança real,
+fixa o substituto na vaga 1 da PT1 e envia o caller anterior para a reserva.
+Depois disso, `/cta_remove` pode retirar o anterior. Contas com nomes semelhantes
+não são alteradas. A operação exige motivo e grava ator, anterior, sucessor e data
+na tabela `cta_caller_recoveries`, na mesma transação da alteração da formação.
+Uma troca concorrente ou falha na auditoria cancela toda a operação.

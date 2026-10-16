@@ -155,4 +155,79 @@ async function assignPrimaryCallerWeapon(pool, args) {
   }
 }
 
-module.exports = { CALLER_WEAPONS, CallerTransferError, validateCallerTransfer, transferPrimaryCaller, assignPrimaryCallerWeapon };
+// Recuperação administrativa: não depende da presença nem do consentimento do
+// caller anterior. O handler deve autorizar a staff antes de chamar esta função.
+function validateCallerRecovery(ev, args) {
+  if (!ev || String(ev.guild_id) !== String(args.guildId))
+    throw new CallerTransferError("not_found", "CTA não encontrado neste servidor.");
+  if (ev.status !== "open")
+    throw new CallerTransferError("closed", "Esse CTA já está encerrado ou cancelado.");
+  if (!args.fromUserId || String(ev.caller_id) !== String(args.fromUserId))
+    throw new CallerTransferError("concurrent", "O caller mudou. Confira o CTA antes de tentar novamente.");
+  if (!args.actorId)
+    throw new CallerTransferError("missing_actor", "Informe quem está substituindo o caller.");
+  if (!args.toUserId || String(args.toUserId) === String(ev.caller_id))
+    throw new CallerTransferError("same_user", "Selecione outra conta para substituir o caller atual.");
+  const reason = String(args.reason || "").trim();
+  if (reason.length < 5 || reason.length > 300)
+    throw new CallerTransferError("missing_reason", "Informe um motivo entre 5 e 300 caracteres.");
+  const weapon = String(args.weapon || "").trim().toUpperCase();
+  if (!WEAPONS[weapon])
+    throw new CallerTransferError("invalid_weapon", "Escolha uma arma válida do catálogo do CTA.");
+  const firstParty = String(ev.party_list || "0").split(",").filter(v => v.trim())
+    .map(Number)[0];
+  if (!Number.isInteger(firstParty) || firstParty < 0)
+    throw new CallerTransferError("missing_party", "PT1 indisponível neste CTA.");
+  return { reason, weapon, firstParty };
+}
+
+async function recoverPrimaryCaller(pool, args) {
+  const client = await pool.connect();
+  let tx = false;
+  try {
+    await client.query("BEGIN");
+    tx = true;
+    const { rows: events } = await client.query(
+      "SELECT * FROM cta_events WHERE id=$1 FOR UPDATE", [args.eventId]);
+    const { reason, weapon, firstParty } = validateCallerRecovery(events[0], args);
+    await client.query("SELECT * FROM cta_signups WHERE event_id=$1 FOR UPDATE", [args.eventId]);
+    // Reserva o anterior mesmo se sua vaga já tiver sido alterada. Outras contas
+    // e inscrições são preservadas, sempre identificadas pelo ID do Discord.
+    const { rows: displaced } = await client.query(
+      `UPDATE cta_signups SET party_index=NULL, slot_index=NULL, manual=false, second_caller=false
+       WHERE event_id=$1 AND user_id<>$3
+         AND ((party_index=$2 AND slot_index=0) OR user_id=$4)
+       RETURNING user_id, username, weapon`,
+      [args.eventId, firstParty, args.toUserId, args.fromUserId]);
+    const { rows: placed } = await client.query(
+      `INSERT INTO cta_signups
+         (event_id,user_id,username,weapon,presence,party_index,slot_index,manual,second_caller)
+       VALUES ($1,$2,$3,$4,$5,$6,0,true,false)
+       ON CONFLICT (event_id,user_id) DO UPDATE SET
+         username=EXCLUDED.username, weapon=EXCLUDED.weapon,
+         party_index=EXCLUDED.party_index, slot_index=0, manual=true, second_caller=false
+       RETURNING *`,
+      [args.eventId,args.toUserId,args.username,weapon,args.presence || "later",firstParty]);
+    const { rows: updated } = await client.query(
+      `UPDATE cta_events SET caller_id=$2
+       WHERE id=$1 AND caller_id=$3 AND status='open'
+       RETURNING id,caller_id,time_label,thread_id`,
+      [args.eventId,args.toUserId,args.fromUserId]);
+    if (!updated[0]) throw new CallerTransferError("concurrent", "O caller mudou durante a substituição.");
+    const { rows: audit } = await client.query(
+      `INSERT INTO cta_caller_recoveries
+         (event_id,guild_id,actor_id,previous_caller_id,new_caller_id,weapon,reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id,created_at`,
+      [args.eventId,args.guildId,args.actorId,args.fromUserId,args.toUserId,weapon,reason]);
+    await client.query("COMMIT");
+    tx = false;
+    return { event:updated[0],successor:placed[0],previousCallerId:args.fromUserId,
+      displaced,audit:audit[0],reason };
+  } catch (err) {
+    if (tx) await client.query("ROLLBACK");
+    throw err;
+  } finally { client.release(); }
+}
+
+module.exports = { CALLER_WEAPONS, CallerTransferError, validateCallerTransfer, transferPrimaryCaller,
+  assignPrimaryCallerWeapon, validateCallerRecovery, recoverPrimaryCaller };
