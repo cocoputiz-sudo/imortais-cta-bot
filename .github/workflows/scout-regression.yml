@@ -73,8 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        # Docker Hub anonymous pulls can be rate-limited on hosted runners.
-        image: public.ecr.aws/docker/library/postgres:16
+        # Use the same PostgreSQL 16 source validated by the preview workflow.
+        image: postgres:16
         env:
           POSTGRES_USER: scout
           POSTGRES_PASSWORD: scout

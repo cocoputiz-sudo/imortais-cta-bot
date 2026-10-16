@@ -8,6 +8,7 @@
 // ============================================================================
 const express = require("express");
 const db = require("./db");
+const {health, isPreview} = require("./mackna-preview");
 const { PARTIES, WEAPONS } = require("./comps");
 const { isSecondCaller } = require("./roster");
 const crypto = require("crypto");
@@ -247,8 +248,8 @@ function startWebServer(client, opts) {
       database = true;
     } catch (_) {}
     const discord = !!(_client && typeof _client.isReady === "function" && _client.isReady());
-    const ok = database && discord;
-    res.status(ok ? 200 : 503).json({ ok, database, discord, at: new Date().toISOString() });
+    const result = health({database, discord, preview: isPreview()});
+    res.status(result.ok ? 200 : 503).json(result);
   });
 
   app.get("/api/events", async (req, res) => {
@@ -451,6 +452,9 @@ function startWebServer(client, opts) {
   });
 
   app.get("/auth/login", (_req, res) => {
+    if (isPreview()) {
+      return res.status(503).type("text/plain").send("MackNa Cloud: homologação sem login Discord.");
+    }
     if (!CLIENT_SECRET) return res.status(503).send("Login ainda não configurado (falta DISCORD_CLIENT_SECRET no Railway).");
     const state = crypto.randomBytes(16).toString("hex");
     states.set(state, Date.now());
@@ -1250,6 +1254,11 @@ const PAGE = `<!doctype html>
   @media(max-width:900px){.nav2-layout{grid-template-columns:1fr}.nav2-current{grid-template-columns:1fr}.nav2-row{grid-template-columns:1fr}}
 
   .mobile-nav{display:none}
+  body:not(.wr-member) .mobile-nav{display:none}
+  body:not(.wr-member) #side{visibility:hidden}
+  .pair-form{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}
+  .device-table-scroll{overflow-x:auto}
+  @media(max-width:600px){.pair-form{grid-template-columns:1fr}.pair-form .btn{justify-self:start}}
   @media(max-width:1050px){
     body{background-attachment:scroll}
     .mobile-nav{
@@ -1453,10 +1462,10 @@ const PAGE = `<!doctype html>
       .then(function(x){
         if(x.ok && x.j && x.j.ok){
           setLive(streamLive?'● conectado · CTA ao vivo':'● conectado','var(--green)');
-        } else if(x.j && !x.j.discord){
-          setLive('● Discord desconectado','var(--red)');
-        } else if(x.j && !x.j.database){
+        } else if(x.j && x.j.database===false){
           setLive('● banco indisponível','var(--red)');
+        } else if(x.j && x.j.discord===false){
+          setLive('● Discord desconectado','var(--red)');
         } else {
           setLive('● erro de conexão','var(--red)');
         }
@@ -4278,13 +4287,13 @@ const PAGE = `<!doctype html>
       }
       var html='<div class="modhead">🖥️ Dispositivos · Combat Client</div>'
         +'<div class="panel"><h3>Vincular novo PC</h3>'
-        +'<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">'
+        +'<div class="pair-form">'
         +'<label>Nome do dispositivo<input id="pair-label" class="input" placeholder="Ex: BadMack-PC"></label>'
         +'<label>Personagem (opcional)<input id="pair-player" class="input" placeholder="Ex: BadMack"></label>'
         +'<button class="btn primary" id="pair-generate">Gerar código</button>'
         +'</div><div id="pair-result" style="margin-top:14px"></div></div>'
         +'<div class="panel"><h3>Dispositivos vinculados</h3>'
-        +'<table class="dtable"><thead><tr><th>Dispositivo</th><th>Personagem</th><th>Último contato</th><th>Status</th><th></th></tr></thead><tbody>'
+        +'<div class="device-table-scroll"><table class="dtable"><thead><tr><th>Dispositivo</th><th>Personagem</th><th>Último contato</th><th>Status</th><th></th></tr></thead><tbody>'
         +agents.map(function(a){
           var revoked=!!a.revokedAt;
           var last=a.lastSeen?new Date(a.lastSeen).toLocaleString('pt-BR'):'—';
@@ -4293,7 +4302,7 @@ const PAGE = `<!doctype html>
             +'<td><span class="pill '+(revoked?'miss':'ok')+'">'+(revoked?'Revogado':'Ativo')+'</span></td>'
             +'<td>'+(revoked?'':'<button class="btn danger agent-revoke" data-id="'+esc(a.id)+'">Revogar</button>')+'</td></tr>';
         }).join('')
-        +'</tbody></table></div>';
+        +'</tbody></table></div></div>';
       el.innerHTML=html;
 
       var gen=document.getElementById('pair-generate');
@@ -4333,8 +4342,10 @@ const PAGE = `<!doctype html>
         name:a.name||''
       };
       renderAuthHeader();
-      var devicesNav=document.querySelector('.nav[data-view="devices"]');
-      if(devicesNav) devicesNav.style.display=authState.canManageDevices?'':'none';
+      document.body.classList.toggle('wr-member',authState.logged&&authState.member);
+      Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="devices"]'),function(nav){
+        nav.style.display=authState.canManageDevices?'':'none';
+      });
       Array.prototype.forEach.call(document.querySelectorAll('.nav[data-view="contributors"]'),function(nav){nav.style.display=(authState.canViewContributors||authState.canEditContributors)?'':'none';});
       var navBomb=document.getElementById('nav-bomb');
       var navCastelo=document.getElementById('nav-castelo');

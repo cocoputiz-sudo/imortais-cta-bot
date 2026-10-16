@@ -1,0 +1,189 @@
+"use strict";
+
+// Run only in a disposable MackNa QA service. Never point this runner at the preview DB.
+const assert = require("node:assert/strict");
+const http = require("node:http");
+const vm = require("node:vm");
+const {spawn} = require("node:child_process");
+const net = require("node:net");
+const {performance} = require("node:perf_hooks");
+
+const TARGET = "http://bot-preview.imortais-homologacao.internal:3000";
+const report = {runtime: process.version, arch: process.arch, started: new Date().toISOString(),
+  state: "running", checks: [], suites: []};
+
+function safety() {
+  assert.equal(process.env.MACKNA_QA_DISPOSABLE, "1", "explicit disposable QA flag required");
+  assert.equal(process.env.MACKNA_PREVIEW, "1");
+  assert.equal(process.env.GUILD_ID, "guild-test");
+  assert(!process.env.DISCORD_TOKEN && !process.env.DISCORD_CLIENT_SECRET, "Discord secrets forbidden");
+  assert.equal(new URL(process.env.DATABASE_URL).hostname,
+    "postgres-qa.imortais-homologacao.internal", "QA must use its own disposable PostgreSQL");
+}
+async function check(name, fn) {
+  try { await fn(); report.checks.push({name, ok:true}); console.log("QA_CHECK_PASS " + name); }
+  catch (e) { report.checks.push({name, ok:false, error:e.message}); console.error("QA_CHECK_FAIL " + name + ": " + e.message); }
+}
+async function request(path, options = {}) {
+  const response = await fetch(TARGET + path, {...options, redirect:"manual",
+    signal:AbortSignal.timeout(10000)});
+  return {status:response.status, headers:response.headers, text:await response.text()};
+}
+async function smoke() {
+  await check("live health: database ready, Discord off", async () => {
+    const r=await request("/api/health"); assert.equal(r.status,200);
+    const h=JSON.parse(r.text);
+    assert.equal(h.ok,true); assert.equal(h.database,true); assert.equal(h.discord,false);
+    assert.equal(h.mode,"preview"); assert.equal(h.discordRequired,false);
+  });
+  await check("War Room HTML and browser script syntax", async () => {
+    const r=await request("/"); assert.equal(r.status,200);
+    assert.match(r.headers.get("content-type"),/text\/html/);
+    assert.match(r.text,/CTA War Room/);
+    const script=/<script>([\s\S]*?)<\/script>/.exec(r.text);
+    assert(script,"browser script required"); new vm.Script(script[1]);
+    assert.match(r.text,/id="mobile-nav"/);
+  });
+  await check("OAuth login blocked", async () => {
+    const r=await request("/auth/login"); assert.equal(r.status,503);
+    assert.match(r.text,/homologa.*sem login Discord/i); assert(!r.headers.get("location"));
+  });
+  await check("invalid OAuth callback rejected", async () => {
+    const r=await request("/auth/callback?code=qa-invalid&state=qa-invalid");
+    assert.equal(r.status,400); assert(!r.headers.get("set-cookie"));
+  });
+  await check("anonymous identity", async () => {
+    const r=await request("/auth/me"); assert.equal(r.status,200);
+    assert.deepEqual(JSON.parse(r.text),{logged:false});
+  });
+  const gets=["/api/events","/api/roster?event=0","/api/contributors/weekly",
+    "/api/contributors/settings","/api/contributors/billing","/api/contributors/billing/search",
+    "/api/me/stats","/api/scout"];
+  const posts=["/api/guild-roster/analyze","/api/contributors/roster/preview",
+    "/api/contributors/roster/confirm","/api/contributors/assignment",
+    "/api/contributors/bank-import","/api/contributors/settings",
+    "/api/contributors/billing/approve","/api/contributors/billing/link-close",
+    "/api/contributors/billing/writeoff","/api/contributors/billing/prior",
+    "/api/contributors/billing/settings","/api/contributors/billing/send",
+    "/api/cta/open","/api/move"];
+  for(const path of gets) await check("anonymous GET denied " + path,async()=>{
+    assert.equal((await request(path)).status,401);
+  });
+  for(const path of posts) await check("anonymous POST denied " + path,async()=>{
+    const r=await request(path,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    assert.equal(r.status,401);
+  });
+  await check("forged session denied",async()=>{
+    const r=await request("/api/contributors/billing",{headers:{Cookie:"sid=qa-forged.invalid"}});
+    assert.equal(r.status,401);
+  });
+  await check("50 health requests with concurrency 5",async()=>{
+    const times=[];
+    for(let i=0;i<10;i++) await Promise.all(Array.from({length:5},async()=>{
+      const start=performance.now(),r=await request("/api/health");
+      assert.equal(r.status,200); assert.equal(JSON.parse(r.text).discord,false);
+      times.push(performance.now()-start);
+    }));
+    times.sort((a,b)=>a-b);
+    report.healthSample={requests:times.length,concurrency:5,p50ms:Math.round(times[24]),
+      p95ms:Math.round(times[47]),maxMs:Math.round(times[49])};
+  });
+}
+async function suites(env) {
+  const {Client}=require("pg");
+  const qaAdmin=new Client({connectionString:process.env.DATABASE_URL,ssl:false});
+  await qaAdmin.connect();
+  try {
+  const extra=["test/contributor-billing.js","test/guild-ranking-season.js",
+    "test/guild-ranking-auth.js","test/guild-might-sweep.js","test/guild-legacy-repair.js",
+    "test/guild-might-worker.js","test/guild-photon-capture.js"];
+  const commands=[["node",["test/mackna-preview.js"]],["npm",["test"]],
+    ...extra.map(path=>["node",[path]])];
+  for(const [command,args] of commands) {
+    const label=command+" "+args.join(" ");
+    // Each top-level suite gets a fresh schema, as in an ephemeral CI database.
+    // safety() restricts this connection to the dedicated postgres-qa service.
+    await qaAdmin.query("DROP SCHEMA public CASCADE");
+    await qaAdmin.query("CREATE SCHEMA public");
+    console.log("QA_SUITE_START "+label);
+    const start=performance.now();
+    const r=await new Promise(resolve=>{
+      let stdout="",stderr="",error=null;
+      const child=spawn(command,args,{
+        cwd:require("node:path").resolve(__dirname,".."),env,
+        stdio:["ignore","pipe","pipe"]
+      });
+      const timer=setTimeout(()=>{error=new Error("suite timeout");child.kill("SIGKILL");},180000);
+      child.stdout.on("data",chunk=>{stdout=(stdout+chunk).slice(-100000);});
+      child.stderr.on("data",chunk=>{stderr=(stderr+chunk).slice(-100000);});
+      child.on("error",e=>{error=e;});
+      child.on("close",status=>{clearTimeout(timer);resolve({status,error,stdout,stderr});});
+    });
+    const result={name:label,ok:r.status===0&&!r.error,durationMs:Math.round(performance.now()-start)};
+    if(!result.ok) result.error=r.error?.message||("exit "+r.status);
+    report.suites.push(result);
+    // Retain useful details while keeping MackNa logs bounded.
+    console.log((r.stdout||"").slice(-16000));
+    if(r.stderr)console.error(r.stderr.slice(-8000));
+    console.log((result.ok?"QA_SUITE_PASS ":"QA_SUITE_FAIL ")+label);
+  }
+  } finally { await qaAdmin.end(); }
+}
+async function main() {
+  safety();
+  console.log("QA_ISOLATION_OK disposable database; no Discord credentials");
+  report.privateAddress=(await require("node:dns").promises.lookup(new URL(TARGET).hostname)).address;
+  await smoke();
+  await check("restored backup preserves synthetic checkpoint",async()=>{
+    const url=new URL(process.env.MACKNA_PREVIEW_READONLY_URL);
+    assert.equal(url.hostname,"postgres.imortais-homologacao.internal");
+    assert.equal(process.env.MACKNA_RESTORE_DATABASE,"app_restore_20261016044841");
+    url.pathname="/"+process.env.MACKNA_RESTORE_DATABASE;
+    const {Client}=require("pg");
+    const reader=new Client({connectionString:url.href,ssl:false,
+      options:"-c default_transaction_read_only=on",connectionTimeoutMillis:10000,query_timeout:10000});
+    await reader.connect();
+    try {
+      await reader.query("BEGIN READ ONLY");
+      const row=await reader.query("SELECT id,evidence,created_at FROM mackna_preview_qa_checkpoint WHERE id=$1",
+        ["pr89-persistence-20261016"]);
+      assert.equal(row.rowCount,1);
+      assert.equal(row.rows[0].evidence,"isolated synthetic persistence checkpoint");
+      const tables=await reader.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema='public'");
+      assert.equal(tables.rows[0].n,43);
+      report.restore={database:process.env.MACKNA_RESTORE_DATABASE,tables:43,checkpoint:true,readOnly:true};
+      await reader.query("ROLLBACK");
+    } finally { await reader.end(); }
+  });
+  // Existing destructive suites require loopback. Proxy ONLY to the exact disposable DB
+  // validated above; never relax their own safety guards.
+  const remote=new URL(process.env.DATABASE_URL),sockets=new Set();
+  const proxy=net.createServer(socket=>{
+    sockets.add(socket);socket.on("close",()=>sockets.delete(socket));
+    const upstream=net.connect({host:remote.hostname,port:Number(remote.port||5432)});
+    sockets.add(upstream);upstream.on("close",()=>sockets.delete(upstream));
+    socket.on("error",()=>upstream.destroy());
+    upstream.on("error",()=>socket.destroy());
+    socket.pipe(upstream);upstream.pipe(socket);
+  });
+  await new Promise((resolve,reject)=>{proxy.once("error",reject);proxy.listen(0,"127.0.0.1",resolve);});
+  const local=new URL(remote);local.hostname="127.0.0.1";local.port=String(proxy.address().port);
+  try { await suites({...process.env,DATABASE_URL:local.href}); }
+  finally { for(const socket of sockets)socket.destroy();await new Promise(resolve=>proxy.close(resolve)); }
+  report.state=report.checks.every(x=>x.ok)&&report.suites.every(x=>x.ok)?"passed":"failed";
+  report.finished=new Date().toISOString();
+  console.log("QA_SUMMARY "+JSON.stringify(report));
+}
+if(require.main===module) {
+  safety();
+  http.createServer((req,res)=>{
+    if(req.url==="/healthz"){res.writeHead(200);res.end("QA runner available");return;}
+    res.writeHead(report.state==="passed"?200:503,{"Content-Type":"application/json"});
+    res.end(JSON.stringify(report));
+  }).listen(3000,"0.0.0.0");
+  main().catch(e=>{
+    report.state="failed";report.error=e.message;
+    console.error("QA_FATAL "+e.stack);
+  });
+}
+module.exports={safety,report};

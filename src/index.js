@@ -9,6 +9,7 @@ const {
 } = require("discord.js");
 
 const db = require("./db");
+const {isPreview, validatePreview} = require("./mackna-preview");
 const { ROLES, WEAPONS, WEAPON_CATALOG, BOMB_COMPS, KITE_MIN, PARTIES } = require("./comps");
 const { findBestSlot, suggestUpgrade, renderRoster, reallocate, consolidate } = require("./roster");
 const cmds = require("./commands");
@@ -28,8 +29,9 @@ const locale = require("./locale");
 const { ctaPingTime, timeForCtaLabelUTC: timeToTodayUTC, sortCtaTimes } = require("./ctatime");
 const { parseConsolidationSteps, isCtaFrozen, consolidationStepsToRun } = require("./consolidation-state");
 const CALLER_TAG_ID = process.env.CALLER_TAG_ID || "1088448632023437362";
-const MASTER_OF_WAR_ROLE_ID = "1268568850971230331";
+const MASTER_OF_WAR_ROLE_ID = process.env.MASTER_OF_WAR_ROLE_ID || "1268568850971230331";
 const { CALLER_WEAPONS, CallerTransferError } = require("./caller-transfer");
+const { handleCallerRecovery } = require("./caller-recovery");
 const ROAMING_CATEGORY_ID = process.env.ROAMING_CATEGORY_ID || "1055337071067275284";
 
 const CFG = {
@@ -1943,6 +1945,13 @@ async function onSlash(interaction) {
 
   if (name.startsWith("castelo")) return onCasteloCommand(interaction);
 
+  if (name === "cta_substituir_caller") {
+    const timeLabel = interaction.options.getString("cta");
+    const ev = await db.getOpenEventByTime(interaction.guildId, timeLabel);
+    return handleCallerRecovery(interaction, ev, { db,
+      staffRoleIds:[process.env.STAFF_ROLE_ID,process.env.MASTER_OF_WAR_ROLE_ID],refreshRoster,logStaff });
+  }
+
   if (!cmds.isStaff(interaction))
     return interaction.reply({ content: "Só Mestre de Guerra usa esses comandos.", flags: MessageFlags.Ephemeral });
 
@@ -3120,7 +3129,7 @@ async function slashRemove(interaction, ev) {
 
   if (user) {
     if (String(user.id) === String(ev.caller_id))
-      return interaction.reply({ content: "Esse jogador é o caller principal. Use **Transferir Caller** no CTA antes de removê-lo.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Esse jogador é o caller principal. Use **Transferir Caller** ou, se ele estiver ausente, a staff pode usar **/cta_substituir_caller**. Depois remova o anterior.", flags: MessageFlags.Ephemeral });
     const removed = await db.deleteSignup(ev.id, user.id);
     if (!removed) return interaction.reply({ content: `${user} não estava no CTA.`, flags: MessageFlags.Ephemeral });
     await interaction.reply({ content: `🗑️ ${user} removido do CTA ${ev.time_label}.` });
@@ -3135,7 +3144,7 @@ async function slashRemove(interaction, ev) {
     const su = await db.getSignupAtSlot(ev.id, raw, vaga - 1);
     if (!su) return interaction.reply({ content: `Não há ninguém na PT${pt} vaga ${vaga}.`, flags: MessageFlags.Ephemeral });
     if (String(su.user_id) === String(ev.caller_id))
-      return interaction.reply({ content: "Essa vaga pertence ao caller principal. Use **Transferir Caller** primeiro.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Essa vaga pertence ao caller principal. Use **Transferir Caller** ou, se ele estiver ausente, **/cta_substituir_caller** (staff).", flags: MessageFlags.Ephemeral });
     await db.deleteSignup(ev.id, su.user_id);
     await interaction.reply({ content: `🗑️ **${su.username}** removido da PT${pt} vaga ${vaga} (CTA ${ev.time_label}).` });
     await applyReallocation(ev, interaction.guild, null);
@@ -3987,6 +3996,7 @@ const webActions = {
 
 (async () => {
   try {
+    validatePreview();
     await db.init();
     await perfil.initSchema(db.pool);
     await telemetry.initSchema(db.pool);
@@ -3994,15 +4004,19 @@ const webActions = {
     await contributorBilling.init(db.pool);
     await scout.initSchema(db.pool);
     web.startWebServer(client, webActions);
-    try{await client.login(CFG.token);}
-    catch(e){
-      if(/disallowed.?intents|4014/i.test(String(e?.message||e))||e?.code===4014)
-        console.error("[DISCORD BOOT] Login bloqueado por disallowed intents (4014): "+
-          "habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
-          "antes do deploy. O código solicita GatewayIntentBits.GuildMembers.");
-      throw e;
+    if (isPreview()) {
+      console.log("[MackNa Cloud] Preview isolado: banco de testes ativo, Discord desativado.");
+    } else {
+      try{await client.login(CFG.token);}
+      catch(e){
+        if(/disallowed.?intents|4014/i.test(String(e?.message||e))||e?.code===4014)
+          console.error("[DISCORD BOOT] Login bloqueado por disallowed intents (4014): "+
+            "habilite Server Members Intent no Discord Developer Portal → Bot → Privileged Gateway Intents "+
+            "antes do deploy. O código solicita GatewayIntentBits.GuildMembers.");
+        throw e;
+      }
+      runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
     }
-    runScoutConsolidation("boot").catch((e) => console.error("scout boot:", e?.message || e));
   } catch (e) {
     console.error("❌ Falha fatal no boot:", e);
     process.exit(1);

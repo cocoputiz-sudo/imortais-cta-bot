@@ -1,0 +1,74 @@
+name: MackNa Cloud AMD64 staging preview
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'scripts/mackna-discord-staging-preflight.cjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'docs/mackna-cloud-amd64-preview.md'
+      - '.github/workflows/mackna-amd64-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: imortais_preview
+          POSTGRES_USER: preview
+          POSTGRES_PASSWORD: preview_only_for_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U preview -d imortais_preview"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      NODE_ENV: test
+      MACKNA_PREVIEW: '1'
+      DATABASE_URL: postgresql://preview:preview_only_for_ci@localhost:5432/imortais_preview
+      PGSSL: disable
+      PORT: '3000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Preview safety and health unit tests
+        run: |
+          node test/mackna-preview.js
+          node test/mackna-discord-staging-preflight.cjs
+      - name: Build production-like isolated preview and verify health
+        run: |
+          set -euo pipefail
+          npm start > /tmp/imortais-preview.log 2>&1 &
+          app_pid=$!
+          trap 'kill $app_pid || true; cat /tmp/imortais-preview.log' EXIT
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/imortais-preview-health.json; then
+              node -e 'const r=require("/tmp/imortais-preview-health.json"); if(!r.ok || !r.database || r.discord || r.mode!=="preview") process.exit(1)'
+              exit 0
+            fi
+            if ! kill -0 "$app_pid" 2>/dev/null; then
+              echo 'Staging process exited before health check' >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          echo 'Staging preview health timed out' >&2
+          exit 1
+
+      - name: Existing IMORTAIS regression tests
+        run: npm test

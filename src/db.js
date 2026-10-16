@@ -1,6 +1,6 @@
 // Camada de banco (Postgres)
 const { Pool } = require("pg");
-const { transferPrimaryCaller, assignPrimaryCallerWeapon } = require("./caller-transfer");
+const { transferPrimaryCaller, assignPrimaryCallerWeapon, recoverPrimaryCaller } = require("./caller-transfer");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -31,6 +31,18 @@ async function init() {
       bomb_roster TEXT,
       bomb_ping_msg TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS cta_caller_recoveries (
+      id BIGSERIAL PRIMARY KEY,
+      event_id BIGINT NOT NULL REFERENCES cta_events(id) ON DELETE CASCADE,
+      guild_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      previous_caller_id TEXT NOT NULL,
+      new_caller_id TEXT NOT NULL,
+      weapon TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS seasons (
@@ -1265,6 +1277,7 @@ module.exports = {
   getOpenEvents, getOpenEventByTime, getRecentClosedEvents, getSignupAtSlot, clearParty, moveSignupToSlot,
   getSignups, getSignupsForEvents, getSignup, getSecondCaller, upsertSignup, deleteSignup, setStatus, setTimeLabel,
   transferCaller: (args) => transferPrimaryCaller(pool, args),
+  recoverCaller: (args) => recoverPrimaryCaller(pool, args),
   assignPrimaryCallerWeapon: (args) => assignPrimaryCallerWeapon(pool, args),
   getDueReminders, markReminderSent, markCtaFrozen, markConsolidationWarned,
   addNavigationObjective, setNavigationObjective, getNavigationObjective, getNavigationObjectives,

@@ -317,7 +317,9 @@ async function testRouteAccessAndResponses() {
     assert.equal((await confirm(cookieFor({canEdit:false,canViewContributors:true}))).status,403);
     assert.equal((await confirm(policeCookie)).status,200,"Police pode definir data do contribuinte");
     assert.equal((await confirm(cookieFor({canEdit:true,isSiteAdmin:true}))).status,200);
-    const bankAt=new Date().toISOString().slice(0,19).replace("T"," ");
+    // Esta integração valida quitação no prazo, independentemente do dia da execução.
+    // Quinta a domingo, um depósito com a data atual seria corretamente PAGO COM ATRASO.
+    const bankAt=contributorCycle.weekAt().start.slice(0,19).replace("T"," ");
     const bankTsv="Date\tPlayer\tReason\tAmount\n"+bankAt+"\tNovoQuatro\tDeposit\t10000000\n";
     const bankUrl=base+"/api/contributors/bank-import";
     const submitBank=(cookie)=>fetch(bankUrl,{method:"POST",headers:{
