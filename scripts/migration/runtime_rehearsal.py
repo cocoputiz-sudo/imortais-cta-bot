@@ -39,7 +39,9 @@ def image_build(repository, directory):
     paths = ["package.json", "package-lock.json", "src", "assets", "scripts/migration/runtime", "scripts/migration/railway-bridge"]
     # sudo reads the owner's checkout. Trust ONLY this exact directory for these
     # read calls; do not change global safe.directory or trust all repositories.
-    git = ["git", "-c", "safe.directory="+str(repository), "-C", str(repository)]
+    # status normally refreshes/replaces .git/index. Under sudo/umask077 this
+    # would leave the owner's next git pull unable to read the root-owned index.
+    git = ["git", "--no-optional-locks", "-c", "safe.directory="+str(repository), "-C", str(repository)]
     commit = target.run([*git, "rev-parse", "HEAD"])
     if not re.fullmatch(r"[0-9a-f]{40}", commit) or target.run(
             [*git, "status", "--porcelain", "--untracked-files=all", "--", *paths]):

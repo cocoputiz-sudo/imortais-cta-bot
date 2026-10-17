@@ -111,6 +111,24 @@ não comprova separação de clientes reais atrás dos proxies. O endereço Rail
 continua inalterado e não há autorização de troca implícita. `cutover_allowed=false`.
 Execução real desta nova etapa HTTP no Debian ainda pendente.
 
+### Recuperar índice Git criado por versão anterior do ensaio
+
+A versão inicial consultava git status com sudo e umask077; a atualização
+opcional do índice podia deixá-lo root0600 e impedir o git pull do proprietário.
+A rotina agora usa `git --no-optional-locks`, sem atualizar o índice. A CI confere
+conteúdo, dono, grupo e modo de .git/index antes/depois do build sob sudo/umask077.
+Se o proprietário receber `index file open failed: Permissão negada`, executar no
+seu terminal SSH normal, somente para o checkout desta preparação:
+
+```bash
+cd ~/imortais-migracao-20261017 &&
+sudo chown -R "$(id -u):$(id -g)" .git &&
+git pull --ff-only
+```
+
+Isso devolve os metadados Git ao proprietário conectado; não muda configurações
+ou credenciais protegidas fora do checkout, bancos, containers ou produção.
+
 ## Próxima ação no terminal Debian
 
 ```bash
