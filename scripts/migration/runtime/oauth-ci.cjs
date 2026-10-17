@@ -51,7 +51,8 @@ function request(path,{method='GET',cookie,headers={}}={}) {
   const cookie=await login();
   const me=JSON.parse((await request('/auth/me',{cookie})).raw);assert.equal(me.logged,true);assert.equal(me.member,true);
   assert.equal((await request('/api/events',{cookie})).status,200);
-  assert.equal((await request('/api/roster?event=1',{cookie})).status,200);
+  const event=(await db.pool.query('SELECT id FROM cta_events ORDER BY id LIMIT 1')).rows[0];
+  assert.ok(event);assert.equal((await request('/api/roster?event='+event.id,{cookie})).status,200);
   for (const path of ['/api/cta/open','/api/cta/finish','/api/move','/api/telemetry/ingest','/api/telemetry/pair','/api/telemetry/pairing/create'])
     assert.equal((await request(path,{method:'POST',cookie})).status,403);
   for (const path of ['/api/telemetry/context','/api/telemetry/agents','//evil.example/','/%61uth/login','/assets/../auth/login','http://evil.example/'])
