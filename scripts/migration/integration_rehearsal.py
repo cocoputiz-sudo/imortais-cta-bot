@@ -36,6 +36,8 @@ def exercise(cfg):
             script.chmod(0o755)
         identity = root / "key.age"
         subprocess.run(["age-keygen","-o",str(identity)],check=True,capture_output=True)
+        from integration_runtime import exercise as exercise_runtime
+        exercise_runtime(cfg,bins,root,identity)
         source = Postgres({"host":connection["IPAddress"],"port":5432,"database":"app","user":"postgres","password":"ci-disposable-password","sslmode":"disable"},bins)
         destination = Postgres({"host":"127.0.0.1","port":5432,"database":"app","user":"mackna_admin","password":cfg["admin_password"],"sslmode":"disable"},bins)
         def concurrent_write():

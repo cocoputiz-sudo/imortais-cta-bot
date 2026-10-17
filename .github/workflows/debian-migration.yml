@@ -10,7 +10,7 @@ permissions:
 jobs:
   guards-and-bridge:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:18-alpine

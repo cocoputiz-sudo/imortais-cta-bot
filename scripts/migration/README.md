@@ -27,6 +27,49 @@ bot real nem fazem a troca do Railway/Discord.
   O destino18 com volume persistente precisa ser provisionado e validado antes
   de qualquer cópia. O instalador de destino descrito abaixo cria um container18
   separado e o registra no PostgreSQL Manager, sem alterar os templates instalados.
+- Captura real das variáveis concluída no Debian em17/10/2026 às19:20BRT:
+  `VARIAVEIS_PRODUCAO_PREPARADAS`, sessão/telemetria preservadas, arquivos root0600,
+  `applied_to_mackna=false`, `bot_started=false`. Valores não foram publicados.
+
+## Ensaio da camada de banco com o usuário do bot e Node22
+
+Depois da captura das variáveis, executar no Debian:
+
+```bash
+cd ~/imortais-migracao-20261017
+git pull --ff-only
+sudo python3 scripts/migration/runtime_rehearsal.py --rehearsal imortais_rehearsal_20261017202749_a1f6e1
+```
+
+Usa somente o dump local cifrado do ensaio aprovado, com SHA-256/tamanho e age
+conferidos. Não acessa a origem Railway nem inicia o bot. Cria outro banco com
+nome aleatório `imortais_rehearsal_*`, propriedade de `imortais_app`, e restaura
+como esse usuário sem superpoderes, usando `--no-owner --no-acl` em transação.
+Compara fingerprints e sequências antes da inicialização. O `app` reservado
+continua intacto, conferido por fingerprints antes/depois.
+
+Constrói uma imagem separada `node:22-bookworm-slim`, registrando commit e image ID.
+O contexto contém somente package.json/lock, src e o probe; exige esses arquivos
+sem mudanças locais. Nenhuma variável real, arquivo .env, token ou chave OAuth
+entra no build/probe. O container não publica portas nem monta diretórios do host;
+roda como usuário node, filesystem somente leitura, sem capabilities, sem novos
+privilégios e limite512MiB. Somente a credencial do banco de ensaio entra pelo stdin.
+Não faz deploy/reconfigura serviço MackNa nem troca a imagem do serviço em espera.
+
+O probe importa somente `src/db.js`, bloqueia import de Discord/index/web e roda
+`db.init()` duas vezes no clone. Confere ownership/privilégios de tabelas e
+sequências, testa DDL e INSERT/UPDATE/DELETE na tabela CTA dentro de transação
+desfeita. A sequência do clone pode avançar, pois nextval não é transacional.
+Não agenda tarefas, autentica no Discord ou envia mensagens. A inicialização
+real pode normalizar dados apenas no clone; fingerprints são comparados antes
+dela. Isso valida a camada de banco, não login/OAuth/web/telemetria/SSE completos.
+
+Sucesso: `RUNTIME_BANCO_OK`. Evidências root0600 em
+`/var/lib/imortais-migration/runtime-rehearsals/<execução>/report.json`, build.log,
+restore.stderr e probe.stderr. O container temporário é removido; banco de ensaio
+e imagem permanecem para revisão. Em falha não apaga bancos ou arquivos aprovados.
+Uma repetição cria outro banco, sem reutilizar/apagar os anteriores. A execução
+real deste novo ensaio no Debian ainda está pendente.
 
 ## Próxima ação no terminal Debian
 
