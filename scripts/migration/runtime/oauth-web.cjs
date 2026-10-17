@@ -39,7 +39,7 @@ async function start(config) {
   const realFetch = global.fetch;
   const destinations = new Set(['https://discord.com/api/oauth2/token','https://discord.com/api/users/@me',
     `https://discord.com/api/users/@me/guilds/${GUILD}/member`]);
-  global.fetch = (raw, options = {}) => {
+  global.fetch = async (raw, options = {}) => {
     const url = String(raw);
     if (!destinations.has(url) || (options.method || 'GET') !== (url.endsWith('/token') ? 'POST' : 'GET')) throw new Error('oauth_destination_blocked');
     return realFetch(raw,{...options,redirect:'error',signal:AbortSignal.timeout(20000)});
