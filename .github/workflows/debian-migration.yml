@@ -1,0 +1,42 @@
+name: Debian migration preparation
+on:
+  pull_request:
+    paths: ['scripts/migration/**', '.github/workflows/debian-migration.yml']
+  push:
+    branches: ['prep/debian-production-migration-20261017']
+    paths: ['scripts/migration/**', '.github/workflows/debian-migration.yml']
+permissions:
+  contents: read
+jobs:
+  guards-and-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: app
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable-password
+        options: >-
+          --health-cmd "pg_isready -U postgres -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
+      - run: python3 -m compileall -q scripts/migration
+      - run: sudo apt-get update -qq && sudo apt-get install -y age rclone
+      - name: Real PostgreSQL18 multiline inventory output
+        env:
+          CTA_MIGRATION_DISPOSABLE_CI: 'yes'
+          CTA_MIGRATION_CI_CONTAINER: ${{ job.services.postgres.id }}
+        run: python3 scripts/migration/integration_inspect.py
+      - name: Private PostgreSQL18 target, roles and restart persistence
+        run: sudo env CTA_MIGRATION_DISPOSABLE_CI=yes GITHUB_ACTIONS=true CTA_MIGRATION_CI_CONTAINER=${{ job.services.postgres.id }} python3 scripts/migration/integration_target.py
+      - run: node --check scripts/migration/held.cjs && node scripts/migration/test_bridge.cjs && node scripts/migration/test_oauth_gateway.cjs
+      - run: docker build scripts/migration/railway-bridge -t imortais-bridge-test
