@@ -1,0 +1,46 @@
+name: CTA backup regression
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/cta-backup/**'
+      - '.github/workflows/cta-backup.yml'
+  push:
+    branches: ['feat/cta-drive-backups-debian-20261017']
+    paths:
+      - 'scripts/cta-backup/**'
+      - '.github/workflows/cta-backup.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  queue-and-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: app
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-disposable-password
+        ports:
+          - 55435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test tools
+        run: sudo apt-get update -qq && sudo apt-get install -y age rclone postgresql-client-16
+      - name: Durable queue regression
+        run: python3 -m unittest discover -s scripts/cta-backup -p 'test_*.py' -v
+      - name: Installer syntax
+        run: bash -n scripts/cta-backup/install.sh && python3 -m py_compile scripts/cta-backup/setup.py scripts/cta-backup/worker.py
+      - name: Encrypted backup and restore into a new disposable database
+        env:
+          CTA_BACKUP_DISPOSABLE_CI: 'yes'
+        run: python3 scripts/cta-backup/integration.py
