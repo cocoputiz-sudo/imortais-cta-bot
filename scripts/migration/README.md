@@ -1,7 +1,8 @@
 # Preparação da migração IMORTAIS para Debian
 
-Esta etapa prepara recursos e coleta diagnóstico. Não inicia o bot real,
-não altera o Railway/Discord e não copia dados automaticamente.
+Estas rotinas preparam recursos, copiam/restauram dados em bancos isolados e
+instalam backups host-side quando executadas pelo proprietário. Não iniciam o
+bot real nem fazem a troca do Railway/Discord.
 
 ## Estado conferido em 17/10/2026
 
@@ -11,8 +12,16 @@ não altera o Railway/Discord e não copia dados automaticamente.
 - URL atual `https://cta-imortais.up.railway.app`; callback `/auth/callback`.
 - Projeto Debian reservado `imortais-producao` (`p7a1de62d78`), separado das duas
   homologações. Serviço novo permanece sem token e com comando de espera.
-- Homologação validou backup Drive, restauração e reinicialização. Essa rotina
-  está limitada à instância/guilda PG16 de testes; **ainda não protege produção**.
+- Homologação validou backup Drive, restauração e reinicialização. Sua rotina
+  continua limitada à instância/guilda PG16 de testes. O backup de produção18
+  usa conta/configuração/fila próprias, já instaladas no Debian com envio inicial
+  conferido em17/10/2026. A recuperação manual de produção pelo Drive real foi
+  validada com54tabelas/187CTAs/32sequências. Primeiro disparo pós-CTA real ainda
+  precisa ser observado, sem forçar encerramentos na aplicação.
+- Serviço de espera publicado em `imortais.macknacloud.com.br`, sem credenciais.
+  DNS público confirmou179.174.166.157; TLS local com SNI/certificado validado
+  retornou HTTP/2 200 em17/10/2026 às18:54BRT. Isso não valida ainda login,
+  telemetria, SSE ou acesso pela entrada pública Railway.
 - MackNa instalado usa template PostgreSQL16. Não criar destino com esse template
   para receber a produção18 e não reaproveitar volume dos bancos de homologação.
   O destino18 com volume persistente precisa ser provisionado e validado antes
@@ -249,6 +258,57 @@ identidade. CI usa PG18/age/rclone reais com armazenamento local descartável;
 restaura uma cópia baixada novamente, verifica os dados anteriores a alterações
 na origem e large objects, preserva app e verifica as units com
 `systemd-analyze verify`. Não usa produção ou credenciais Google reais.
+
+## Capturar variáveis reais, sem aplicá-las ao serviço
+
+No terminal SSH, executar primeiro:
+
+```bash
+cd ~/imortais-migracao-20261017 &&
+git pull --ff-only &&
+sudo python3 scripts/migration/prepare_production_env.py
+```
+
+Quando o prompt oculto estiver esperando, abrir o serviço `imortais-cta-bot`
+do projeto Railway85680aee-6959-4cec-bf50-f7b9a33c359d, ambiente production
+c73b0773-673e-4566-8aaa-4af3c50ec013, aba Variables, RAW Editor. Copiar o bloco
+completo e colar diretamente no terminal. Aceita `.env` ou objeto JSON de
+strings. Pressionar Enter, digitar `FIM_IMORTAIS` e pressionar Enter novamente.
+O bloco e o marcador não aparecem durante a entrada. A importação não executa
+expressões de shell nem expande variáveis. Ctrl+C restaura o terminal.
+
+O inventário Railway OAuth confirmado nesta preparação fornece os nomes das
+variáveis, com valores ocultos e nenhuma variável sealed; por isso a leitura
+dos valores existentes depende do proprietário no painel. A captura valida
+as17variáveis de aplicação presentes, mais DATABASE_URL quando exportada.
+Recusa duplicatas, máscaras, referências não resolvidas fora de DATABASE_URL,
+metadados de outro serviço e identidade do bot de testes. Confere localmente
+o app ID codificado no primeiro segmento do token; **não autentica o token na
+API Discord e não abre conexão Gateway**.
+
+Preserva exatamente SESSION_SECRET e TELEMETRY_INGEST_KEY. O callback existente
+continua `https://cta-imortais.up.railway.app/auth/callback`. No candidato local,
+DATABASE_URL é substituída pelo endereço privado do destino18 reservado e
+`PGSSL=disable`, conforme a configuração esperada por src/db.js. Esse banco
+`app` ainda está vazio; o arquivo não pode ser ativado antes da cópia final,
+teste de permissões/runtime e autorização da janela.
+
+Arquivos root0600, fora do checkout:
+
+- `/etc/imortais-migration/production-source-env.json`: exportação original e
+  IDs do projeto/ambiente/serviço para preservar a origem.
+- `/etc/imortais-migration/production-prepared-env.json`: envelope
+  `prepared-only`, `activation_allowed=false` e `runtime_variables` candidatas.
+- `/var/lib/imortais-migration/production-env-preparation.json`: relatório sem
+  valores de segredos, com nomes e condições ainda pendentes.
+
+Sucesso: `VARIAVEIS_PRODUCAO_PREPARADAS`. Reexecução reutiliza a origem salva;
+não solicita outra cópia nem substitui silenciosamente chaves diferentes.
+`--status` imprime apenas o relatório. A rotina não usa subprocessos, rede,
+MCP, API Railway/Discord ou Docker; não aplica variáveis, faz deploy ou inicia
+o bot. Testes PTY reais verificam ausência de eco, entrada maior que4096bytes
+e restauração do terminal após sucesso/Ctrl+C; testes de arquivos conferem
+permissões, preservação literal de chaves e recusa de troca da exportação.
 
 ## Ordem antes da troca
 
