@@ -133,8 +133,8 @@ def read_hidden():
     changed = termios.tcgetattr(fd)
     changed[3] &= ~(termios.ECHO | termios.ICANON)
     changed[6][termios.VMIN], changed[6][termios.VTIME] = 1, 0
-    termios.tcsetattr(fd, termios.TCSANOW, changed)
     try:
+        termios.tcsetattr(fd, termios.TCSANOW, changed)
         print("Cole o bloco do Railway aqui (entrada oculta). Depois Enter, FIM_IMORTAIS e Enter:", flush=True)
         while True:
             chunk = os.read(fd, 8192)

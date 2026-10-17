@@ -11,6 +11,7 @@ import tempfile
 import termios
 import time
 import unittest
+from unittest.mock import patch
 
 import prepare_production_env as env
 import prepare_pg18 as target
@@ -103,6 +104,25 @@ class ProductionEnvironment(unittest.TestCase):
 
 
 class HiddenTerminal(unittest.TestCase):
+    def test_interruption_while_disabling_echo_still_restores_terminal(self):
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        real_set = termios.tcsetattr
+        calls = []
+        def interrupted_setup(*args):
+            real_set(*args)
+            calls.append(args)
+            if len(calls) == 1:
+                raise KeyboardInterrupt()
+        try:
+            with patch.object(env.sys.stdin, "isatty", return_value=True), patch.object(env.sys.stdin, "fileno", return_value=slave), patch.object(env.termios, "tcsetattr", side_effect=interrupted_setup):
+                with self.assertRaises(KeyboardInterrupt):
+                    env.read_hidden()
+            self.assertEqual(termios.tcgetattr(slave), original)
+        finally:
+            os.close(master)
+            os.close(slave)
+
     def capture(self, *, cancel=False):
         master, slave = pty.openpty()
         before = termios.tcgetattr(slave)
