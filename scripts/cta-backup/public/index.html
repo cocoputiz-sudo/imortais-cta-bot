@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IMORTAIS Backups</title>
+<meta name="description" content="Informações sobre o aplicativo pessoal IMORTAIS Backups e sua integração com o Google Drive.">
+<style>body{margin:0;background:#101519;color:#e9edf0;font:18px/1.65 system-ui,sans-serif}main{max-width:760px;margin:70px auto;padding:0 26px}small{color:#d9b56b;letter-spacing:.12em}h1{font-size:clamp(38px,8vw,64px);line-height:1.05;margin:20px 0 30px}h2{font-size:24px;margin-top:36px}p{color:#c5cdd3}a{color:#edd09a}nav{display:flex;gap:24px;flex-wrap:wrap;padding:26px 0;border-top:1px solid #374048;margin-top:40px}footer{font-size:14px;color:#a5b0b9;margin-bottom:50px}</style>
+<main>
+<small>IMORTAIS · CONTINUIDADE DOS DADOS</small>
+<h1>IMORTAIS Backups</h1>
+<p>Aplicativo pessoal de Igor Perini para guardar cópias do banco de dados do bot de CTAs da guilda IMORTAIS em sua própria conta do Google Drive.</p>
+<h2>Como funciona</h2>
+<p>Uma rotina no servidor Debian identifica o encerramento de CTAs, gera uma cópia consistente do PostgreSQL, criptografa o arquivo e o envia à pasta privada <strong>IMORTAIS-CTA-BOT-BACKUPS</strong>. Cada cópia acompanha um manifesto para conferir sua integridade.</p>
+<p>A integração usa rclone e um cliente OAuth próprio. O titular da conta autoriza o Google Drive no navegador. Estas páginas são informativas e não solicitam login, senhas ou arquivos.</p>
+<h2>Uso atual</h2>
+<p>A rotina está configurada para o ambiente de homologação do Debian. A proteção do banco de produção exige uma configuração específica. O aplicativo não é disponibilizado como serviço de backup para terceiros.</p>
+<nav aria-label="Informações do aplicativo"><a href="/privacidade">Política de privacidade</a><a href="/termos">Condições de uso</a><a href="mailto:iamperiniadv@gmail.com">Contato</a></nav>
+<footer>Responsável: Igor Perini · Atualizado em 17 de outubro de 2026</footer>
+</main></html>
