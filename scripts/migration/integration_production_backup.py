@@ -42,7 +42,9 @@ def exercise(destination, identity, bins, connection, root, source_sql):
         pass
     else:
         raise AssertionError("Source session unexpectedly accepted a write")
-    baseline = time.time()
+    # PostgreSQL timestamps round to microseconds; use whole seconds for an
+    # exact 120-second boundary assertion shared with SQLite/Python floats.
+    baseline = float(int(time.time()))
     now = [baseline]
     worker = Worker(cfg["state_dir"], backend, lambda:now[0])
     try:
