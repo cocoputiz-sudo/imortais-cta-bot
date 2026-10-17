@@ -1,0 +1,104 @@
+# Preparação da migração IMORTAIS para Debian
+
+Esta etapa prepara recursos e coleta diagnóstico. Não inicia o bot real,
+não altera o Railway/Discord e não copia dados automaticamente.
+
+## Estado conferido em 17/10/2026
+
+- Produção: commit `42877561d6b655f2bd0c35f3ee5b6e65458bc283`, deployment
+  `00c04fee-75be-4d29-a59e-e8bd451a7c87`, PostgreSQL **18**.
+- Guilda real `683411304408416285`; app Discord `1541617852056862801`.
+- URL atual `https://cta-imortais.up.railway.app`; callback `/auth/callback`.
+- Projeto Debian reservado `imortais-producao` (`p7a1de62d78`), separado das duas
+  homologações. Serviço novo permanece sem token e com comando de espera.
+- Homologação validou backup Drive, restauração e reinicialização. Essa rotina
+  está limitada à instância/guilda PG16 de testes; **ainda não protege produção**.
+- MackNa instalado usa template PostgreSQL16. Não criar destino com esse template
+  para receber a produção18 e não reaproveitar volume dos bancos de homologação.
+  O destino18 com volume persistente precisa ser provisionado e validado antes
+  de qualquer cópia. Este PR não altera templates do MackNa nem cria esse banco.
+
+## Próxima ação no terminal Debian
+
+```bash
+git clone --depth 1 --branch prep/debian-production-migration-20261017 https://github.com/cocoputiz-sudo/imortais-cta-bot.git ~/imortais-migracao-20261017
+sudo apt-get update
+sudo apt-get install -y postgresql-client-18
+sudo python3 ~/imortais-migracao-20261017/scripts/migration/inspect_railway.py
+```
+
+No Railway, serviço Postgres da produção, Variables, copiar `DATABASE_PUBLIC_URL`.
+Colar apenas no prompt oculto do script, no terminal SSH interativo. Não passar
+URL por argumento, histórico do shell, chat ou arquivo do repositório. A conexão
+OAuth do plugin Railway não retorna os valores das variáveis.
+
+O diagnóstico faz uma transação REPEATABLE READ READ ONLY, exige TLS e confere
+PostgreSQL18 e guilda real. Não executa DDL/DML, pg_dump, restauração, alterações
+de usuários, deploy ou Discord. Grava credencial root0600 em
+`/etc/imortais-migration/railway-source.json`; relatório sem senha em
+`/var/lib/imortais-migration/source-inventory.json`. Em repetição usa a configuração
+local; `--refresh-source` solicita outra URL. Tabelas de telemetria usam estimativas,
+não contagens completas. A contagem de CTAs é exata. TLS `require` cifra a conexão;
+validação do certificado/hostname exige `verify-full` e CA correspondente.
+
+## Ordem antes da troca
+
+1. Conferir relatório, tamanho, extensões e CTAs não encerradas; escolher uma janela
+   sem CTA em andamento. Reconfirmar commit/deployment imediatamente antes da troca.
+2. Provisionar PostgreSQL18 dedicado no projeto reservado, com volume próprio,
+   acesso privado, limite de memória e clientes18. Não atualizar PG16 em seu volume.
+3. Transferir as variáveis reais diretamente ao Debian/MackNa. Preservar
+   `SESSION_SECRET`, `TELEMETRY_INGEST_KEY`, token Discord e configurações de canais,
+   cargos e temporada. Ajustar DATABASE_URL apenas para o destino18. Não substituir
+   valores ocultos/sealed por novos. A identidade de teste nunca entra em produção.
+4. Fazer cópia de ensaio somente após autorização para copiar o banco real;
+   restaurar em banco novo18 e validar tabelas, dados, sequências, extensões,
+   dispositivos, períodos e encerramentos. Não iniciar o bot usando esse ensaio.
+5. Adaptar backup pós-CTA para configuração/fila/prefixo de **produção** separados
+   e cliente18. Validar upload e restauração do banco18 antes da troca. O instalador
+   de homologação do PR91 não deve ser apontado ao banco real.
+6. Preparar HTTPS do destino `imortais.macknacloud.com.br`. Validar bridge com esse
+   destino, callback/login Discord, cookies, POST de telemetria autenticado, SSE,
+   limites por IP e desconexão. Testes locais do bridge não comprovam esse trajeto.
+7. Registrar autorização da troca. Interromper o bot Railway e bloquear entradas
+   com 503/Retry-After, aguardar conexões em andamento e congelar todos os escritores.
+   Confirmar ausência de escrita antes do dump final consistente. Nunca executar
+   duas instâncias ativas com o token real.
+8. Copiar dump final para banco NOVO18 e conferir dados da cópia final. Guardar o
+   dump cifrado fora do servidor. Só então configurar e iniciar um único bot Debian.
+9. Trocar o serviço Railway para o bridge e só habilitar `IMORTAIS_BRIDGE_MODE=forward`
+   após health do destino confirmar DB e Discord; verificar callbacks e Combat Client.
+   Monitorar, guardar origem e artefatos; não apagar Railway na mesma janela.
+
+## Continuidade do endereço e retorno
+
+O hostname `*.up.railway.app` pertence ao Railway e não pode ser movido por DNS
+próprio. O candidato a bridge em `railway-bridge/` permite preservar esse endereço
+como entrada HTTP enquanto bot e banco rodam no Debian. O Railway continuará
+necessário para essa entrada enquanto clientes usarem a URL antiga.
+
+O bridge não importa código do bot e não acessa banco/Discord. Por padrão retorna
+503 e só encaminha quando configurado explicitamente. Destino é fixo e validado;
+TLS verifica certificado, corpo/SSE usam streams, credenciais/cookies e query são
+encaminhados sem log. Falha do destino resulta em 502/Retry-After, nunca em sucesso
+fictício para ingestão. WebSocket upgrade não é suportado; a War Room usa SSE.
+`/health` do serviço em espera só informa `migration-hold`, não prontidão do bot.
+
+Antes de qualquer nova escrita no Debian, o retorno pode reativar o deployment
+original com o banco original. **Depois de novas escritas no Debian, não basta
+religar o banco antigo:** parar os escritores do Debian, copiar o estado atual
+para banco18 separado no Railway, conferir e apontar o único bot ativo a esse
+banco. Reativar o banco antigo perderia os dados gravados após a troca. O retorno
+com cópia inversa precisa ser ensaiado antes de chamar a migração de pronta.
+
+## Validação desta preparação
+
+```bash
+python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
+node scripts/migration/test_bridge.cjs
+```
+
+Testes cobrem recusa de destino/TLS/versão/guilda incorretos e proxy HTTP real local
+com POST, autenticação, cookies, query e SSE; modo de espera, erro do destino e
+caminhos que tentem trocar o host. CI também constrói a imagem do bridge.
+Não há teste com credenciais reais ou conexão ao banco de produção nesta CI.

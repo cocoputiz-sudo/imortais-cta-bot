@@ -1,0 +1,22 @@
+name: Debian migration preparation
+on:
+  pull_request:
+    paths: ['scripts/migration/**', '.github/workflows/debian-migration.yml']
+  push:
+    branches: ['prep/debian-production-migration-20261017']
+    paths: ['scripts/migration/**', '.github/workflows/debian-migration.yml']
+permissions:
+  contents: read
+jobs:
+  guards-and-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
+      - run: python3 -m py_compile scripts/migration/inspect_railway.py
+      - run: node --check scripts/migration/held.cjs && node scripts/migration/test_bridge.cjs
+      - run: docker build scripts/migration/railway-bridge -t imortais-bridge-test
