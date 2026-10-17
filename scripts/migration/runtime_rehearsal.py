@@ -37,9 +37,12 @@ def app_connection(cfg, database, *, internal=False):
 def image_build(repository, directory):
     repository = Path(repository).resolve()
     paths = ["package.json", "package-lock.json", "src", "scripts/migration/runtime"]
-    commit = target.run(["git", "-C", str(repository), "rev-parse", "HEAD"])
+    # sudo reads the owner's checkout. Trust ONLY this exact directory for these
+    # read calls; do not change global safe.directory or trust all repositories.
+    git = ["git", "-c", "safe.directory="+str(repository), "-C", str(repository)]
+    commit = target.run([*git, "rev-parse", "HEAD"])
     if not re.fullmatch(r"[0-9a-f]{40}", commit) or target.run(
-            ["git", "-C", str(repository), "status", "--porcelain", "--untracked-files=all", "--", *paths]):
+            [*git, "status", "--porcelain", "--untracked-files=all", "--", *paths]):
         raise ValueError("Arquivos do runtime precisam corresponder ao commit, sem mudanças locais.")
     # A minimal context prevents unrelated local files/credentials entering Docker.
     with tempfile.TemporaryDirectory(prefix=".build-", dir=directory) as tmp:
@@ -177,6 +180,7 @@ def main():
             raise ValueError("Sem margem de disco para outra restauração isolada e imagem Node22.")
         directory = ROOT/(dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ_")+secrets.token_hex(3))
         directory.mkdir(mode=0o700)
+        print("EVIDENCIAS_RUNTIME: "+str(directory),flush=True)
         print("Construindo imagem Node22 sem credenciais; esta etapa pode levar alguns minutos...",flush=True)
         image,commit = image_build(Path(__file__).resolve().parents[2],directory)
         admin = rehearsal.Postgres({"host":"127.0.0.1","port":target.PORT,"database":"app",
