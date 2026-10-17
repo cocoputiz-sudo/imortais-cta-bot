@@ -44,8 +44,8 @@ def environment(db):
             "PGOPTIONS": "-c default_transaction_read_only=on -c statement_timeout=60000 -c lock_timeout=3000"}
 
 
-def inventory(db):
-    sql = """BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+def inventory_sql():
+    return """BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
     SELECT json_build_object(
       'database', current_database(), 'server_version', current_setting('server_version'),
       'major', current_setting('server_version_num')::int/10000,
@@ -60,15 +60,26 @@ def inventory(db):
       'relation_estimates', (SELECT coalesce(json_agg(t ORDER BY t.relname),'[]'::json)
         FROM (SELECT relname, n_live_tup AS estimated_rows FROM pg_stat_user_tables WHERE schemaname='public') t));
     COMMIT;"""
-    result = subprocess.run([str(PG), "-XAtw", "-v", "ON_ERROR_STOP=1", "-c", sql],
+
+
+def read_inventory_output(output):
+    # json_agg(row) can contain literal newlines between array entries.
+    # Quiet psql suppresses BEGIN/COMMIT tags; parse its complete JSON value.
+    try:
+        report = json.loads(output)
+    except (ValueError, UnicodeError):
+        raise RuntimeError("Resposta JSON de diagnóstico inválida; nenhum conteúdo da consulta foi registrado.") from None
+    if not isinstance(report, dict):
+        raise RuntimeError("Resposta de diagnóstico inesperada.")
+    return report
+
+
+def inventory(db):
+    result = subprocess.run([str(PG), "-XAtqw", "-v", "ON_ERROR_STOP=1", "-c", inventory_sql()],
                             env=environment(db), capture_output=True, timeout=75)
     if result.returncode:
         raise RuntimeError("Consulta de leitura falhou; código " + str(result.returncode) + ". Verifique conexão, TLS e URL no Railway.")
-    # psql transaction command tags may share stdout with the single JSON result.
-    records = [json.loads(line) for line in result.stdout.decode().splitlines() if line.startswith("{")]
-    if len(records) != 1:
-        raise RuntimeError("Resposta de diagnóstico inesperada.")
-    report = records[0]
+    report = read_inventory_output(result.stdout)
     if report["major"] != 18 or report["other_guilds"] != 0 or report["transaction_read_only"] != "on" or report["tls"] is not True:
         raise RuntimeError("Versão/guilda/TLS/leitura fora da produção esperada; preparação interrompida.")
     return report
@@ -123,6 +134,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        print("Diagnóstico cancelado no terminal.", file=sys.stderr)
+        sys.exit(130)
     except Exception as exc:
         print("PREPARACAO_ERRO: " + (str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__), file=sys.stderr)
         sys.exit(1)
