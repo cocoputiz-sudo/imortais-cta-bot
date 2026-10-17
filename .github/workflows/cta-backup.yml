@@ -39,7 +39,7 @@ jobs:
       - name: Durable queue regression
         run: python3 -m unittest discover -s scripts/cta-backup -p 'test_*.py' -v
       - name: Installer syntax
-        run: bash -n scripts/cta-backup/install.sh && python3 -m py_compile scripts/cta-backup/setup.py scripts/cta-backup/worker.py
+        run: bash -n scripts/cta-backup/install.sh && python3 -m py_compile scripts/cta-backup/setup.py scripts/cta-backup/worker.py scripts/cta-backup/restore_test.py
       - name: Encrypted backup and restore into a new disposable database
         env:
           CTA_BACKUP_DISPOSABLE_CI: 'yes'

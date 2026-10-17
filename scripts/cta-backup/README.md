@@ -131,6 +131,29 @@ sudo systemctl stop imortais-cta-backup.service
 
 ## Restaurar em um banco NOVO
 
+Para validar uma CTA já enviada usando a instalação existente no Debian:
+
+```bash
+cd ~/imortais-backups-20261017
+git pull --ff-only
+sudo python3 scripts/cta-backup/restore_test.py --cta 6
+```
+
+O teste baixa o manifesto e o arquivo criptografado **do Drive**, compara com
+o manifesto local registrado no envio, verifica SHA-256 e descriptografa com
+a chave local, sem exibi-la. Usa o admin_dsn da mesma instância de homologação
+para criar um banco `app_drive_test_<data>_<aleatorio>`, sem aceitar um nome
+informado pelo operador. Restaura em uma única transação e confere a quantidade
+de tabelas, guilda, status e data de encerramento da CTA escolhida. Nenhum comando
+de restauração seleciona `app`. Não muda o timer nem as configurações do bot.
+
+Sucesso imprime `RESTAURACAO_OK` e grava um relatório JSON no diretório de estado.
+Os arquivos temporários, incluindo o dump descriptografado, são removidos ao sair;
+o banco novo é preservado para inspeção, inclusive em caso de falha depois da criação.
+Se o worker estiver ativo, aguarde um minuto e repita. A rotina exige manifesto
+local e fila existentes; para recuperação após perda total do servidor, use a
+chave guardada fora dele e o procedimento manual abaixo.
+
 Baixar um par `.dump.age` / `.json` pelo Drive. Conferir SHA-256 do criptografado
 com o manifesto. Descriptografar com age (disponível em Linux e Windows):
 

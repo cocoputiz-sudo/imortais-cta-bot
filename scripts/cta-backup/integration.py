@@ -11,6 +11,7 @@ import tempfile
 import time
 
 from worker import Backend, Worker, FOLDER, GUILD, INSTANCE, digest
+from restore_test import restore_archive, select_uploaded
 
 
 def main():
@@ -67,6 +68,9 @@ def main():
             manifests = list(drive.rglob("cta-1-*.json"))
             assert len(manifests) == 1
             manifest = json.loads(manifests[0].read_text())
+            selected, prefix, name = select_uploaded(cfg, "1")
+            assert selected == manifest
+            assert (drive / prefix / (name + ".json")).exists()
             artifact = manifests[0].with_name(manifest["file"])
             assert digest(artifact) == manifest["sha256"]
             assert "ci-reader-password" not in manifests[0].read_text()
@@ -79,13 +83,14 @@ def main():
             listing = subprocess.run([str(pg / "pg_restore"), "--list", str(dump)],
                                      check=True, capture_output=True, text=True).stdout
             assert "backup_sentinel" in listing and "cta_events" in listing
-            query("CREATE DATABASE backup_restore_ci")
-            subprocess.run([str(pg / "pg_restore"), "--dbname", "backup_restore_ci", "--no-owner",
-                            "--no-acl", "--exit-on-error", str(dump)], env=admin, check=True,
-                           capture_output=True)
-            assert query("SELECT count(*) FROM backup_sentinel", "backup_restore_ci") == "2"
-            assert query("SELECT note FROM backup_sentinel WHERE id=1", "backup_restore_ci") == "IMORTAIS çã"
-            assert query("SELECT status FROM cta_events WHERE id=1", "backup_restore_ci") == "closed"
+            report = restore_archive(cfg, admin, dump, manifest)
+            restored = report["database"]
+            assert restored.startswith("app_drive_test_") and report["status"] == "ok"
+            assert query("SELECT count(*) FROM backup_sentinel", restored) == "2"
+            assert query("SELECT note FROM backup_sentinel WHERE id=1", restored) == "IMORTAIS çã"
+            assert query("SELECT status FROM cta_events WHERE id=1", restored) == "closed"
+            assert query("SELECT count(*) FROM backup_sentinel", "app") == "2"
+            assert report["tables"] == 2 and report["ctas"] == 1
             damaged = bytearray(artifact.read_bytes())
             damaged[-10] ^= 1
             bad = root / "damaged.age"
