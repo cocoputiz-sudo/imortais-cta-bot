@@ -52,6 +52,8 @@ def exercise(cfg, bins, root, identity):
     assert web["telemetry_ingest_persisted"] and web["sse_heartbeat"]
     assert admin.query("SELECT to_jsonb(note) FROM sentinel WHERE id=1;","app")=="IMORTAIS çã"
     print("NODE22_WEB_REHEARSAL_OK: real HTTP bridge/War Room/logo, OAuth provider mock, cookies and denied auth, paired ingest persisted/deduplicated, roster+telemetry SSE with25s heartbeat; app unchanged; live provider/public path NOT tested.")
+    from integration_oauth_validation import exercise as exercise_oauth
+    exercise_oauth(cfg,admin,directory,image,restored['database'])
     # A restored relation with the wrong owner must fail the real init/owner probe.
     admin.execute("ALTER TABLE cta_events OWNER TO postgres;",restored["database"],read_only=False)
     try:

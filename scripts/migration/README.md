@@ -109,7 +109,8 @@ HTTPS pública Railway/Caddy e IP real por cliente ainda NÃO são validados. O 
 local usa socket127.0.0.1 e substitui X-Forwarded-For, então o teste de limite local
 não comprova separação de clientes reais atrás dos proxies. O endereço Railway
 continua inalterado e não há autorização de troca implícita. `cutover_allowed=false`.
-Execução real desta nova etapa HTTP no Debian ainda pendente.
+Execução real HTTP concluída no Debian em17/10/2026 às19:58BRT, com WEB_ENSAIO_OK
+no clone imortais_rehearsal_20261017225655_178d51; provedor OAuth simulado.
 
 ### Recuperar índice Git criado por versão anterior do ensaio
 
@@ -128,6 +129,71 @@ git pull --ff-only
 
 Isso devolve os metadados Git ao proprietário conectado; não muda configurações
 ou credenciais protegidas fora do checkout, bancos, containers ou produção.
+
+## Validar o login de navegador com o provedor real
+
+O proprietário autorizou em17/10/2026 o acréscimo exclusivo de
+`https://imortais.macknacloud.com.br/auth/callback` ao app real CTA IMORTAIS,
+preservando os callbacks existentes. Informou que salvou o cadastro. Isso não
+autoriza a troca da produção ou a conexão de um segundo bot ao Gateway.
+
+Após CI aprovada, executar no SSH Debian:
+
+```bash
+cd ~/imortais-migracao-20261017 && git pull --ff-only && sudo python3 scripts/migration/install_oauth_validation.py --rehearsal imortais_rehearsal_20261017202749_a1f6e1 --apply
+```
+
+O instalador confirma o callback novo e o antigo por GET autenticado na API.
+Reutiliza a exportação privada já capturada; não pede tokens ou outro JSON.
+Constrói a imagem Node22 sem segredos e restaura OUTRO clone do arquivo cifrado
+local aprovado. Nunca lê o banco Railway nessa etapa nem altera o app reservado.
+O ensaio de restauração/inicialização acontece como imortais_app; depois cria
+uma conta `imortais_oauth_*` com somente CONNECT, USAGE e SELECT nesse clone,
+sem privilégios globais, de sequência ou de escrita. Revoga CREATE/TEMP e a
+execução pública de rotinas do clone. Não concede acesso aos dados do app real.
+
+Container fixo `imortais-oauth-validation`, privado na rede do projeto, usuário
+1000:1000, filesystem read-only, cap-drop ALL, no-new-privileges,768MiB e128pids,
+restart unless-stopped, sem portas do host. Único bind: arquivo JSON read-only,
+UID1000/mode0400 sob diretório root0700. Nenhum segredo em imagem, argumento,
+variável Docker, Git ou MCP. Usa o client secret real SOMENTE em tempo de
+execução e uma chave de sessão nova exclusiva; não recebe token do bot, chave
+de ingestão ou sessão da produção. Recusa container/configuração divergentes.
+
+Executa os handlers OAuth originais de src/web.js, ligados apenas em loopback,
+e libera na porta3000 somente GET da página/assets, login/callback/me/logout,
+eventos/roster e health. Todos os POSTs, pareamento, contexto e ingestão são403.
+Mantém cookies assinados Secure/HttpOnly/SameSite=Lax, valida state/membro e
+limita inícios de login. O único fetch externo permitido é o OAuth Discord
+(token, usuário, membro), sem redirects e com timeout. Bloqueia import de
+discord.js/entrypoint. Não inicializa telemetria ou seus workers; sua instalação
+de rotas é omitida explicitamente neste bootstrap de validação. A UI exibe
+"VALIDAÇÃO DO LOGIN · Cópia do banco · Ações de CTA desativadas".
+
+Sucesso do comando: `OAUTH_WEB_LOCAL_OK`. Isso confirma prontidão LOCAL, não
+login real no navegador. Evidências e config em
+`/var/lib/imortais-migration/oauth-validation/`, separadas dos ensaios anteriores.
+O instalador não publica o domínio nem modifica Caddy, MackNa, Railway ou Discord.
+Após o sucesso, o serviço MackNa sca714da427 pode receber apenas o comando
+`node scripts/migration/runtime/oauth-gateway.cjs`, health /health, vars=[] e
+deploy do commit validado. Esse gateway só encaminha ao nome privado fixo do
+container, usa a mesma lista de caminhos e não recebe segredos. Se o candidato
+estiver ausente, retorna503. Manter auto_deploy=false e guardar deployment held.
+
+Então testar pelo navegador o domínio novo: login, /auth/me logged/member=true,
+cookie e acesso ao roster. O /health deve identificar oauth-validation,
+readOnly=true, Node22, botStarted=false e discord=false. Os campos
+oauthCallbackAt/oauthMember registram somente a hora e a condição de membro do
+último callback, sem identidade ou tokens; ainda é preciso verificar o navegador.
+/api/health continua503 porque Discord está desligado. Não confundir a prontidão
+web com o health do bot. Cadeia de IP real, telemetria/SSE públicos e retorno com
+novas escritas seguem pendentes. Não há autorização de cutover implícita.
+
+A CI executa o MESMO bootstrap em PostgreSQL18/Node22, com credenciais e provedor
+sintéticos; testa cookie/state/membro, rota exata, escrita/DDL/nextval e leitura
+de outro banco negadas mesmo ao desligar o default read-only, fingerprints do
+clone intactos, bind privado, readiness, limites e reinício com a mesma sessão.
+Ela não usa o provedor real ou segredos de produção.
 
 ## Inspecionar OAuth real e HTTPS sem alterar o app
 

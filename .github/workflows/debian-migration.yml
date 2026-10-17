@@ -38,5 +38,5 @@ jobs:
         run: python3 scripts/migration/integration_inspect.py
       - name: Private PostgreSQL18 target, roles and restart persistence
         run: sudo env CTA_MIGRATION_DISPOSABLE_CI=yes GITHUB_ACTIONS=true CTA_MIGRATION_CI_CONTAINER=${{ job.services.postgres.id }} python3 scripts/migration/integration_target.py
-      - run: node --check scripts/migration/held.cjs && node scripts/migration/test_bridge.cjs
+      - run: node --check scripts/migration/held.cjs && node scripts/migration/test_bridge.cjs && node scripts/migration/test_oauth_gateway.cjs
       - run: docker build scripts/migration/railway-bridge -t imortais-bridge-test
