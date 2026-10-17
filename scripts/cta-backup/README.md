@@ -154,3 +154,14 @@ produção. O workflow `.github/workflows/cta-backup.yml` acrescenta PostgreSQL1
 descartável, `pg_dump` real com reader, age, rclone para pasta temporária,
 restauração em um banco novo e rejeição de arquivo criptografado adulterado.
 Essa CI não usa acesso ao Google Drive real nem credenciais do Debian.
+
+## Páginas informativas do aplicativo
+
+O diretório `public/` contém página inicial, política de privacidade e condições de uso, servidas por Node sem dependências, formulários ou acesso a credenciais/banco. Seu Dockerfile permite implantação num serviço independente do bot. Host preparado: `backups.macknacloud.com.br`. O proprietário deve apontar o registro DNS A para o IP público do Debian e confirmar HTTPS antes de cadastrar as URLs no Google.
+
+- Página inicial: `https://backups.macknacloud.com.br/`
+- Privacidade: `https://backups.macknacloud.com.br/privacidade`
+- Condições: `https://backups.macknacloud.com.br/termos`
+- Domínio autorizado Google: `macknacloud.com.br`
+
+A política descreve o escopo Drive amplo, uso operacional da pasta de backups, criptografia do dump, manifestos em claro, retenção manual, revogação e contato. Publicação do app e verificação de marca/escopos são processos distintos; uso pessoal pode ser dispensado de verificação conforme critérios Google. Se houver solicitação de verificação do domínio, usar o Search Console com o domínio próprio.

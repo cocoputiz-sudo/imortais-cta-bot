@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Política de privacidade | IMORTAIS Backups</title>
+<style>body{margin:0;background:#101519;color:#e9edf0;font:18px/1.65 system-ui,sans-serif}main{max-width:760px;margin:55px auto;padding:0 26px}h1{font-size:38px;line-height:1.15}h2{font-size:23px;margin-top:32px}p,li{color:#c5cdd3}a{color:#edd09a}footer{border-top:1px solid #374048;padding:24px 0;font-size:14px;margin-top:36px}</style>
+<main><a href="/">IMORTAIS Backups</a><h1>Política de privacidade</h1>
+<p>Esta política descreve o uso de dados pelo aplicativo pessoal IMORTAIS Backups, administrado por Igor Perini. Atualização: 17 de outubro de 2026.</p>
+<h2>Finalidade e dados tratados</h2>
+<p>O aplicativo envia cópias criptografadas do banco PostgreSQL do bot de CTAs para a conta Google Drive autorizada pelo próprio responsável. O banco pode conter identificadores e registros da guilda, de seus membros, CTAs e demais funcionalidades do bot. O manifesto de cada cópia contém metadados de controle, como identificadores da CTA e da guilda, data, tamanho, número de tabelas e checksums.</p>
+<h2>Acesso ao Google Drive</h2>
+<p>A autorização OAuth utilizada pelo rclone concede acesso de leitura e escrita ao Google Drive. Essa permissão é ampla e não é limitada pelo Google a uma única pasta. A configuração operacional do aplicativo direciona as operações à pasta privada IMORTAIS-CTA-BOT-BACKUPS, onde cria arquivos e pastas e consulta metadados e hashes para confirmar os envios. O aplicativo não tem como finalidade ler documentos pessoais de outras pastas.</p>
+<h2>Armazenamento e proteção</h2>
+<p>O conteúdo do banco é criptografado com age no Debian antes do envio. Uma cópia criptografada permanece no servidor para permitir novas tentativas de upload. Os manifestos de controle não são criptografados. A chave privada de recuperação fica separada dos arquivos enviados e deve ser guardada pelo responsável fora do servidor.</p>
+<p>As credenciais OAuth e do banco são armazenadas em arquivos locais com acesso restrito. Não são incluídas nos manifestos nem publicadas neste site. Logs e a fila local registram o controle dos envios e eventuais falhas.</p>
+<h2>Compartilhamento e uso limitado</h2>
+<p>Os arquivos são transmitidos ao Google Drive da conta autorizada, utilizando os serviços Google para armazenamento. O aplicativo não vende os dados nem os utiliza para publicidade. A rotina não compartilha os backups com outros usuários ou serviços e não usa dados obtidos das APIs Google para treinamento de modelos de inteligência artificial.</p>
+<p>O uso e a transferência de informações recebidas das APIs Google seguem a <a href="https://developers.google.com/terms/api-services-user-data-policy">Política de Dados do Usuário dos Serviços de API do Google</a>, incluindo os requisitos de Uso Limitado.</p>
+<h2>Retenção, exclusão e revogação</h2>
+<p>Nesta versão, não há exclusão automática das cópias. O titular pode removê-las no Drive e no servidor. Excluir arquivos de um desses locais não elimina automaticamente a outra cópia. O titular pode revogar a autorização na <a href="https://myaccount.google.com/connections">página de conexões da Conta Google</a>; a revogação impede novos acessos autorizados, mas não apaga os arquivos já existentes.</p>
+<h2>Este site e contato</h2>
+<p>Estas páginas não possuem formulário, cookies de análise ou rastreadores de terceiros. O navegador e a infraestrutura de hospedagem podem tratar dados técnicos necessários à entrega das páginas, como endereço IP e horário da requisição. Para dúvidas ou solicitações sobre dados da aplicação, contate Igor Perini em <a href="mailto:iamperiniadv@gmail.com">iamperiniadv@gmail.com</a>.</p>
+<footer><a href="/">Página inicial</a> · <a href="/termos">Condições de uso</a></footer></main></html>
