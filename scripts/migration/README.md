@@ -79,6 +79,60 @@ apaga recursos. Em falha parcial, preserva os recursos para diagnóstico.
 Sucesso imprime `DESTINO_PG18_OK`. Após a primeira execução espera-se0 tabelas.
 Essa etapa não copia o banco, não habilita backups de produção e não inicia bot.
 
+## Cópia de ensaio e restauração separada
+
+Após autorização para o ensaio com o banco real, no terminal Debian:
+
+```bash
+cd ~/imortais-migracao-20261017
+git pull --ff-only
+sudo python3 scripts/migration/rehearse.py
+```
+
+Usa as configurações root0600 já gravadas, não pede novamente as credenciais.
+Na origem abre uma transação REPEATABLE READ READ ONLY, exporta o snapshot e
+mantém essa sessão até o pg_dump18 com `--snapshot` terminar. A lista de tabelas,
+contagens e conferência de conteúdo usam o **mesmo snapshot** da cópia: novas
+escritas do bot no Railway continuam normalmente e ficam fora desse ensaio.
+As consultas de conferência leem todas as linhas e consomem CPU/I/O na origem;
+há limites de tempo e de espera por locks. Não há DDL/DML de origem nem segunda
+instância do bot/Discord. Este snapshot é para ensaio, não para trocar produção
+depois que novas escritas ocorrerem no Railway.
+
+pg_dump em formato custom é encaminhado diretamente ao age. A cópia cifrada e
+manifesto ficam root-only em `/var/lib/imortais-migration/rehearsals/<nome>/`.
+A chave é a mesma já guardada fora do servidor para os backups; o script confere
+que ela corresponde ao recipient instalado. SHA-256 e autenticação age são
+verificados antes de restaurar. O dump descriptografado existe só no diretório
+temporário root-only e é removido ao sair; a cópia cifrada é preservada.
+
+Cria somente um banco novo `imortais_rehearsal_<data>_<aleatorio>` no PG18 local,
+com locale/encoding da origem e CONNECT público revogado. Não recebe nome de banco
+por argumento, não usa --clean/--create e nunca restaura em `app`. A restauração
+usa mackna_admin, sem owner/ACL da origem; é ensaio de dados e não uma validação
+final do runtime, permissões funcionais ou aplicação. Não inicia o bot.
+
+Confere lista de tabelas, contagens e duas somas dos hashes MD5 das linhas,
+independentes da ordem, contra o snapshot; detecta diferenças acidentais sem
+materializar todas as linhas em memória. Essa conferência de conteúdo não é
+uma assinatura criptográfica. O arquivo tem SHA-256 e autenticação age.
+Também confere guilda, CTAs, extensões, large objects (inclusive páginas) e
+metadados das sequências. Para sequências ligadas a colunas, confere que não
+ficaram atrás dos IDs restaurados; o valor da sequência pode avançar na origem
+durante o pg_dump, pois sequências não seguem o snapshot MVCC das linhas.
+
+Sucesso imprime `ENSAIO_RESTAURACAO_OK` e grava `report.json`. Falhas preservam
+o banco de ensaio já criado e artefatos concluídos, sem excluir dados. Logs do
+pg_restore são locais root-only. Esta etapa mantém o banco real/bot no Railway,
+o banco `app` do destino e a homologação. **Não envia ao Drive e não habilita
+o backup automático de produção.** O envio externo e a restauração dessa cópia
+externa continuam sendo requisitos antes da troca definitiva.
+
+CI usa dois PostgreSQL18 descartáveis e clientes18 reais: escreve na origem após
+fixar o snapshot para demonstrar consistência, testa dados UTF8/NULL/numéricos,
+sequências vazias/avançadas, large objects, criptografia, recusa de corrupção e
+diferença de conteúdo com a mesma contagem de linhas. Não usa credenciais reais.
+
 ## Ordem antes da troca
 
 1. Conferir relatório, tamanho, extensões e CTAs não encerradas; escolher uma janela

@@ -67,6 +67,9 @@ def main():
         execute(command)
         assert role_sql("imortais_app", cfg["app_password"], "SELECT note FROM sentinel;") == "IMORTAIS çã"
         print("PG18_TARGET_OK: isolated volume/port, least-privilege roles, unchanged credentials/config, restart persistence; no Railway connection.")
+        if os.environ.get("CTA_MIGRATION_CI_CONTAINER"):
+            from integration_rehearsal import exercise
+            exercise(cfg)
     finally:
         for args in (["docker", "rm", "-f", target.CONTAINER], ["docker", "volume", "rm", target.VOLUME], ["docker", "network", "rm", target.NETWORK]):
             subprocess.run(args, capture_output=True, timeout=60)
