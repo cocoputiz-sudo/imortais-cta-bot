@@ -30,7 +30,7 @@ jobs:
           node-version: 22
       - run: python3 -m unittest discover -s scripts/migration -p 'test_*.py' -v
       - run: python3 -m py_compile scripts/migration/inspect_railway.py
-      - run: sudo apt-get update -qq && sudo apt-get install -y age
+      - run: sudo apt-get update -qq && sudo apt-get install -y age rclone
       - name: Real PostgreSQL18 multiline inventory output
         env:
           CTA_MIGRATION_DISPOSABLE_CI: 'yes'

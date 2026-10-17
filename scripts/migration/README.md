@@ -133,6 +133,53 @@ fixar o snapshot para demonstrar consistência, testa dados UTF8/NULL/numéricos
 sequências vazias/avançadas, large objects, criptografia, recusa de corrupção e
 diferença de conteúdo com a mesma contagem de linhas. Não usa credenciais reais.
 
+## Cópia externa e recuperação a partir do Drive
+
+Depois de `ENSAIO_RESTAURACAO_OK`, executar no Debian, informando o nome exato
+do banco de ensaio que consta no relatório:
+
+```bash
+cd ~/imortais-migracao-20261017 &&
+git pull --ff-only &&
+sudo python3 scripts/migration/drive_recovery.py --rehearsal imortais_rehearsal_20261017202749_a1f6e1
+```
+
+`drive_recovery.py` não acessa a origem Railway nem faz um dump novo. Exige
+manifesto/relatório aprovados do ensaio, checksum local intacto e o mesmo
+destino18 reservado e chave de recuperação. Reutiliza a autorização existente
+do Drive através de cópia temporária root0600 do rclone.conf, sem disputar a
+atualização de tokens no arquivo do worker de homologação.
+
+Envia somente o dump cifrado e manifesto para a pasta privada
+`IMORTAIS-CTA-BOT-BACKUPS`, prefixo
+`producao/ensaios/<nome-do-ensaio>/`. Usa `copyto --immutable --checksum` e
+confere MD5 informado pelo Drive. Não apaga nem sincroniza diretórios.
+
+Baixa manifesto e dump em arquivos novos, confere o SHA-256 do manifesto
+contra o manifesto local aprovado, e tamanho/SHA-256 do dump baixado. Autentica
+age antes de criar banco. Restaura somente essa cópia baixada em outro banco
+novo `imortais_rehearsal_<data>_<aleatorio>`; nunca usa o dump original como
+fallback. Confere todos os fingerprints, locale/encoding, CTAs, guilda,
+extensões, sequências e large objects. O dump em claro é temporário e removido
+mesmo em falha; cópias cifradas e bancos concluídos são preservados.
+
+Sucesso imprime `DRIVE_PRODUCAO_RESTAURACAO_OK` após enviar/conferir também um
+relatório JSON com nome único no Drive. Evidências locais ficam em
+`/var/lib/imortais-migration/drive-recovery/<data>_<aleatorio>/` e uma cópia do
+relatório no diretório do ensaio original. Nova execução reutiliza os mesmos
+arquivos remotos imutáveis e cria outro banco/relatório; não repetir sem motivo.
+
+Esta é uma cópia manual do snapshot do ensaio, não o backup automático após
+cada CTA de produção, nem o snapshot final da migração. O bot novo continua
+parado e o banco `app` não é alterado. O worker pós-CTA de produção continua
+pendente e precisa usar configuração/fila próprias com cliente18.
+
+CI testa rclone real com um alias de armazenamento local descartável, age e
+PostgreSQL18 reais. Valida upload/checksum/download independente/restauração,
+inclusive large objects, e recusa download corrompido antes de criar banco.
+Não usa Google Drive real ou credenciais do usuário; a confirmação de acesso
+Google e recuperação externa depende desta execução no Debian.
+
 ## Ordem antes da troca
 
 1. Conferir relatório, tamanho, extensões e CTAs não encerradas; escolher uma janela

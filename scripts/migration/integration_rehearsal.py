@@ -53,6 +53,8 @@ def exercise(cfg):
         encrypted = directory / "source.dump.age"
         assert digest(encrypted) == report["encrypted_sha256"]
         assert encrypted.read_bytes().startswith(b"age-encryption.org/v1")
+        from integration_drive_recovery import exercise as exercise_drive
+        exercise_drive(destination, identity, directory, root)
         damaged = directory / "damaged.age"
         content = bytearray(encrypted.read_bytes())
         content[-10] ^= 1
