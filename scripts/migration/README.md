@@ -16,7 +16,8 @@ não altera o Railway/Discord e não copia dados automaticamente.
 - MackNa instalado usa template PostgreSQL16. Não criar destino com esse template
   para receber a produção18 e não reaproveitar volume dos bancos de homologação.
   O destino18 com volume persistente precisa ser provisionado e validado antes
-  de qualquer cópia. Este PR não altera templates do MackNa nem cria esse banco.
+  de qualquer cópia. O instalador de destino descrito abaixo cria um container18
+  separado e o registra no PostgreSQL Manager, sem alterar os templates instalados.
 
 ## Próxima ação no terminal Debian
 
@@ -40,6 +41,43 @@ de usuários, deploy ou Discord. Grava credencial root0600 em
 local; `--refresh-source` solicita outra URL. Tabelas de telemetria usam estimativas,
 não contagens completas. A contagem de CTAs é exata. TLS `require` cifra a conexão;
 validação do certificado/hostname exige `verify-full` e CA correspondente.
+
+## Preparar o destino PostgreSQL18 vazio
+
+Após o diagnóstico da origem ter concluído com sucesso, no Debian:
+
+```bash
+cd ~/imortais-migracao-20261017
+git pull --ff-only
+sudo python3 scripts/migration/prepare_pg18.py --apply
+```
+
+Sem `--apply`, apenas confere capacidade. Exige disco livre de pelo menos quatro
+vezes o tamanho da origem mais5GiB, com piso15% do filesystem Docker, e2GiB de
+memória disponível. Essa margem é uma condição inicial, não uma garantia sobre
+o crescimento futuro. O comando imprime os valores antes de criar recursos.
+
+Cria somente `imortais-prod-pg18`, imagem oficial `postgres:18.6-bookworm` resolvida
+para um ID local e preservada, limite1GiB, volume próprio
+`imortais-prod-pg18-data` montado em `/var/lib/postgresql`, PGDATA18/docker,
+restart `unless-stopped`. Publica apenas `127.0.0.1:55436`, sem domínio ou porta
+do modem. O alias privado é `postgres18.imortais-producao.internal`, na rede do
+projeto reservado. Nunca monta um volume de homologação.
+
+As novas credenciais aleatórias ficam root0600 em
+`/etc/imortais-migration/target18.json`; a aplicação usa `imortais_app` sem
+superusuário. `mackna_reader` só recebe leitura e `mackna_admin` administra o
+destino. A instância `postgres-imortais-producao` aparece na **aba PostgreSQL**
+do MackNa. Este container é administrado pelo terminal Docker, não pelo ciclo
+de deploy dos serviços Cloud: não aparece como serviço Postgres no cartão do
+projeto. O serviço `bot-imortais` continua parado e sem credenciais.
+
+O instalador não lê a credencial da origem nem acessa o Railway. Pode repetir:
+preserva container, volume, senhas e dados existentes que pertençam à preparação;
+recusa recursos com identidade, imagem, porta ou montagem divergentes. Nunca
+apaga recursos. Em falha parcial, preserva os recursos para diagnóstico.
+Sucesso imprime `DESTINO_PG18_OK`. Após a primeira execução espera-se0 tabelas.
+Essa etapa não copia o banco, não habilita backups de produção e não inicia bot.
 
 ## Ordem antes da troca
 
