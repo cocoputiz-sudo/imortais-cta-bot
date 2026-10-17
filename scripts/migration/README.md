@@ -129,6 +129,36 @@ git pull --ff-only
 Isso devolve os metadados Git ao proprietário conectado; não muda configurações
 ou credenciais protegidas fora do checkout, bancos, containers ou produção.
 
+## Inspecionar OAuth real e HTTPS sem alterar o app
+
+```bash
+cd ~/imortais-migracao-20261017
+git pull --ff-only
+sudo python3 scripts/migration/inspect_oauth.py
+```
+
+O ensaio HTTP real já foi concluído no Debian em17/10/2026 às19:58BRT no clone
+imortais_rehearsal_20261017225655_178d51, com WEB_ENSAIO_OK. Essa evidência ainda
+não comprova login de navegador no provedor real ou caminho público externo.
+
+A inspeção usa a exportação original privada e apenas GET autenticado para
+`https://discord.com/api/v10/applications/@me`, validando app1541617852056862801.
+É autenticação REST para leitura, sem conexão Gateway, registro de comandos ou
+mensagens. API oficial: https://docs.discord.com/developers/resources/application
+Verifica a lista opcional redirect_uris; ausência do campo significa desconhecido,
+nunca lista vazia presumida. Lista exibida sem usuário/senha/query/fragmento.
+Não retorna owner, email, client secret ou token. O callback atual continua
+`https://cta-imortais.up.railway.app/auth/callback`; o candidato é
+`https://imortais.macknacloud.com.br/auth/callback`.
+
+Também faz GET HTTPS sem Authorization para /health do domínio novo, com validação
+normal do certificado. Essa requisição parte do Debian: não comprova acesso de
+fora da rede ou IP por cliente. Falha local não diagnostica indisponibilidade
+externa. Destinos fixos, sem proxies herdados ou redirects, timeout20s e corpo
+limitado128KiB. Não testa login de navegador nem altera callback, configuração
+Discord, Railway, DB ou serviço. Sucesso imprime OAUTH_DIAGNOSTICO_OK e guarda
+relatório root0600 em /var/lib/imortais-migration/oauth-inspection.json.
+
 ## Próxima ação no terminal Debian
 
 ```bash
