@@ -70,4 +70,6 @@ def exercise(cfg):
             pass
         else:
             raise AssertionError("Changed content with same counts was accepted")
+        from integration_production_backup import exercise as exercise_production
+        exercise_production(destination, identity, bins, connection, root, source_sql)
     print("PG18_REHEARSAL_OK: consistent snapshot during concurrent writes; age; new DB; full row fingerprints, owned sequences, LOs and tamper detection; app unchanged.")

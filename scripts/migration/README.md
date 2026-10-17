@@ -180,6 +180,76 @@ inclusive large objects, e recusa download corrompido antes de criar banco.
 Não usa Google Drive real ou credenciais do usuário; a confirmação de acesso
 Google e recuperação externa depende desta execução no Debian.
 
+## Backup automático de produção, ainda com a origem Railway
+
+Depois da recuperação real pelo Drive aprovada, instalar no Debian:
+
+```bash
+cd ~/imortais-migracao-20261017 &&
+git pull --ff-only &&
+sudo python3 scripts/migration/install_production_backup.py
+```
+
+O instalador reutiliza a conexão salva em
+`/etc/imortais-migration/railway-source.json`, a autorização Google já validada
+e a chave de recuperação existente. Não pede novo token nem gera outra chave.
+Exige relatório de recuperação aprovada pelo Drive, verifica dependências18,
+conexão de leitura/TLS e autorização antes de instalar. Não cria roles nem faz
+escritas no PostgreSQL Railway; usa a credencial já fornecida com a sessão
+configurada como somente leitura. Não configura ou inicia o bot.
+
+Instala somente estes recursos de produção:
+
+- Conta `imortais-prod-backup`, sem login, worker em
+  `/opt/imortais-cta-backup-producao/production_backup.py`.
+- Configuração root:grupo0640 em `/etc/imortais-cta-backup-producao/config.json`.
+- Estado/fila SQLite e cópia própria da autorização OAuth, protegidos em
+  `/var/lib/imortais-cta-backup-producao/`.
+- Serviço/timer `imortais-cta-backup-producao`, execução a cada minuto,
+  persistente após reboot. O timer só é habilitado depois da cópia inicial
+  enviada e conferida. Sucesso: `BACKUP_PRODUCAO_INSTALADO`.
+- Drive: `IMORTAIS-CTA-BOT-BACKUPS/producao/automatico/AAAA/MM/DD/`.
+
+A cópia inicial inclui o banco completo. A fila passa a observar as CTAs
+encerradas/canceladas depois de sua ativação; o histórico anterior não gera
+centenas de cópias repetidas. Cada CTA detectada gera um dump completo18
+criptografado diretamente pelo age, com espera mínima de120s após `closed_at`
+e verificação por minuto, normalmente dois a três minutos mais o tempo de
+transferência. Não usa evento Discord, webhook ou escrita na aplicação.
+
+Fila SQLite durável, chave única por CTA e lock de execução evitam duplicação.
+Falhas de upload preservam o mesmo dump/manifesto para nova tentativa com
+backoff de60s a1h. Um arquivo é marcado enviado somente após dump e manifesto
+conferidos no Drive por checksum. Reinstalação preserva fila, baseline, chave
+e autorização; aceita rotação de senha, mas recusa troca silenciosa de origem,
+guilda, pasta ou destinatário. `--refresh-oauth` atualiza somente a cópia da
+autorização de produção quando isso for necessário.
+
+Se o Debian ficar desligado, ao voltar a fila procura também as CTAs encerradas
+durante a parada. As cópias representam o estado disponível quando o dump é
+feito; não recriam um snapshot histórico do instante em que o servidor estava
+desligado. Cópias concluídas não são apagadas automaticamente. Falta de espaço
+adia a criação de novos dumps preservando os já existentes.
+
+```bash
+sudo -u imortais-prod-backup python3 /opt/imortais-cta-backup-producao/production_backup.py --status
+sudo systemctl status imortais-cta-backup-producao.timer --no-pager
+sudo journalctl -u imortais-cta-backup-producao.service -n20 --no-pager
+```
+
+Esta versão segue a origem Railway allowlisted com TLS e cliente18. A mudança
+da origem do backup para o Debian deve ser feita junto ao plano de migração;
+não apontar a configuração ao banco vazio `app` ou a um ensaio. Antes da janela,
+parar somente este timer/serviço, preservar fila e configurar a continuidade
+para o destino real validado. O backup da homologação permanece independente.
+
+Testes cobrem espera, closed/cancelled, retorno após reinício, indisponibilidade
+e upload parcial, reuso exato do snapshot, corrupção e recusa de mudança de
+identidade. CI usa PG18/age/rclone reais com armazenamento local descartável;
+restaura uma cópia baixada novamente, verifica os dados anteriores a alterações
+na origem e large objects, preserva app e verifica as units com
+`systemd-analyze verify`. Não usa produção ou credenciais Google reais.
+
 ## Ordem antes da troca
 
 1. Conferir relatório, tamanho, extensões e CTAs não encerradas; escolher uma janela
