@@ -68,8 +68,48 @@ Sucesso: `RUNTIME_BANCO_OK`. Evidências root0600 em
 `/var/lib/imortais-migration/runtime-rehearsals/<execução>/report.json`, build.log,
 restore.stderr e probe.stderr. O container temporário é removido; banco de ensaio
 e imagem permanecem para revisão. Em falha não apaga bancos ou arquivos aprovados.
-Uma repetição cria outro banco, sem reutilizar/apagar os anteriores. A execução
-real deste novo ensaio no Debian ainda está pendente.
+Uma repetição cria outro banco, sem reutilizar/apagar os anteriores. Execução
+real concluída no Debian em17/10/2026 às19:34BRT: RUNTIME_BANCO_OK, Node22.23.3,
+54tabelas/32sequências/187CTAs, nenhuma permissão negada ou owner externo.
+Banco imortais_rehearsal_20261017223329_17b76c, owner imortais_app confirmado
+também por MCP. App permaneceu com0tabelas, serviço ainda held.cjs/vars=[].
+
+## Ensaio HTTP, telemetria e SSE com login simulado
+
+```bash
+cd ~/imortais-migracao-20261017
+git pull --ff-only
+sudo python3 scripts/migration/runtime_rehearsal.py --rehearsal imortais_rehearsal_20261017202749_a1f6e1 --web
+```
+
+Repete a restauração como app em OUTRO banco de ensaio e o teste de inicialização;
+depois executa os handlers HTTP reais do War Room/telemetria, por um bridge HTTP
+local descartável dentro do container. O contexto da imagem agora inclui também
+assets e o código do bridge, sem nenhuma credencial real. Não publica porta,
+domínio, callback ou rota, e não altera os serviços MackNa/Railway/Discord.
+
+Confere página/logo, health honesto503 com database=true e discord=false,
+autorização401/403, fluxo OAuth com provedor SIMULADO, state de uso único, HMAC e
+atributos do cookie, pareamento de uso único e limitação de tentativas. Uma
+credencial de agente criada apenas no clone envia heartbeat; verifica persistência
+e deduplicação. Roster e telemetria percorrem SSE pelo bridge real, incluindo o
+heartbeat de25s. Os testes usam identidade, session secret e chave de ingestão
+sintéticos. Não enviam código/token para Discord ou qualquer API externa.
+O módulo discord.js e o entrypoint do bot são bloqueados. O worker de materialização
+do Guild Might pode trabalhar apenas no clone após telemetry.initSchema.
+
+Dados sintéticos ficam exclusivamente nesse clone para revisão, junto às cópias
+dos dados restaurados; não apaga/reinicializa tabelas copiadas. Sucesso final:
+`WEB_ENSAIO_OK`. Relatório root0600 `web-report.json` e log `web-probe.stderr` no
+mesmo diretório de evidências impresso pelo comando. O `RUNTIME_BANCO_OK` anterior
+confirma só a parte DB; aguarde também `WEB_ENSAIO_OK` nesta execução.
+
+**Limites:** provedor OAuth live, comportamento do cookie no navegador, cadeia
+HTTPS pública Railway/Caddy e IP real por cliente ainda NÃO são validados. O bridge
+local usa socket127.0.0.1 e substitui X-Forwarded-For, então o teste de limite local
+não comprova separação de clientes reais atrás dos proxies. O endereço Railway
+continua inalterado e não há autorização de troca implícita. `cutover_allowed=false`.
+Execução real desta nova etapa HTTP no Debian ainda pendente.
 
 ## Próxima ação no terminal Debian
 

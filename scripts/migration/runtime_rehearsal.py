@@ -36,7 +36,7 @@ def app_connection(cfg, database, *, internal=False):
 
 def image_build(repository, directory):
     repository = Path(repository).resolve()
-    paths = ["package.json", "package-lock.json", "src", "scripts/migration/runtime"]
+    paths = ["package.json", "package-lock.json", "src", "assets", "scripts/migration/runtime", "scripts/migration/railway-bridge"]
     # sudo reads the owner's checkout. Trust ONLY this exact directory for these
     # read calls; do not change global safe.directory or trust all repositories.
     git = ["git", "-c", "safe.directory="+str(repository), "-C", str(repository)]
@@ -72,27 +72,41 @@ def image_build(repository, directory):
     return image, commit
 
 
-def node_probe(image, cfg, database, directory):
+def validate_probe_report(report, database, web=False):
+    if (report.get("status") != "ok" or report.get("database") != database or
+        report.get("role") != "imortais_app" or report.get("db_init_runs") != 2 or
+        report.get("bot_started") is not False or report.get("discord_module_loaded") is not False or
+        report.get("production_secrets_received") is not False):
+        raise RuntimeError("Relatório Node22 incompleto.")
+    if not web and report.get("crud_rollback") is not True:
+        raise RuntimeError("Teste CRUD do banco incompleto.")
+    if web and (any(report.get(k) is not True for k in
+        ("war_room_html","static_logo","http_bridge_local","oauth_mock_flow","cookie_flags",
+         "invalid_state_rejected","nonmember_rejected","forged_cookie_rejected","roster_sse",
+         "telemetry_ingest_persisted","telemetry_deduplicated","telemetry_sse","sse_heartbeat",
+         "pairing_single_use","pairing_rate_limited","health_no_discord_503")) or
+        report.get("oauth_provider_live") is not False or report.get("public_https_path_tested") is not False):
+        raise RuntimeError("Relatório HTTP incompleto ou confundido com login público real.")
+    return report
+
+
+def node_probe(image, cfg, database, directory, *, web=False):
     app_connection(cfg, database, internal=True)
     url = target.dsn(cfg,"imortais_app",internal=True).replace("/app?", "/"+database+"?")
     name = "imortais-runtime-probe-" + secrets.token_hex(6)
     command = ["docker","run","--rm","-i","--name",name,"--network",target.NETWORK,
                "--read-only","--cap-drop=ALL","--security-opt=no-new-privileges",
                "--memory=512m","--pids-limit=128","--tmpfs","/tmp:rw,noexec,nosuid,size=32m",
-               "--log-driver=none",image]
+               "--log-driver=none",image,"node","web-probe.cjs" if web else "probe.cjs"]
     try:
         result = subprocess.run(command, input=json.dumps({"database":database,"database_url":url}).encode(),
                                 capture_output=True, timeout=300)
-        (directory/"probe.stderr").write_bytes(result.stderr)
+        error_file = "web-probe.stderr" if web else "probe.stderr"
+        (directory/error_file).write_bytes(result.stderr)
         if result.returncode:
-            raise RuntimeError("Inicialização/CRUD como usuário do bot falhou; veja probe.stderr privado.")
+            raise RuntimeError("Ensaio Node22 falhou; veja "+error_file+" privado.")
         report = json.loads(result.stdout)
-        if (report.get("status") != "ok" or report.get("database") != database or
-            report.get("role") != "imortais_app" or report.get("db_init_runs") != 2 or
-            report.get("crud_rollback") is not True or report.get("bot_started") is not False or
-            report.get("discord_module_loaded") is not False or report.get("production_secrets_received") is not False):
-            raise RuntimeError("Relatório Node22 incompleto.")
-        return report
+        return validate_probe_report(report,database,web)
     finally:
         # Only the uniquely named, nonpersistent rehearsal container is removed.
         subprocess.run(["docker","rm","-f",name],capture_output=True,timeout=30)
@@ -153,6 +167,7 @@ def restore_and_probe(cfg, admin, archive_dir, identity, directory, image, commi
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rehearsal",required=True,help="Nome exato do ensaio local aprovado")
+    parser.add_argument("--web",action="store_true",help="Também testar HTTP/OAuth simulado/telemetria/SSE no clone")
     args = parser.parse_args()
     os.umask(0o077)
     if os.geteuid()!=0 or not re.fullmatch(NAME,args.rehearsal):
@@ -185,7 +200,17 @@ def main():
         image,commit = image_build(Path(__file__).resolve().parents[2],directory)
         admin = rehearsal.Postgres({"host":"127.0.0.1","port":target.PORT,"database":"app",
             "user":"postgres","password":cfg["postgres_password"],"sslmode":"disable"})
-        restore_and_probe(cfg,admin,archive,rehearsal.IDENTITY,directory,image,commit)
+        report = restore_and_probe(cfg,admin,archive,rehearsal.IDENTITY,directory,image,commit)
+        if args.web:
+            print("Validando HTTP, login simulado e SSE no clone; aguarde o heartbeat de25s...",flush=True)
+            web_before = rehearsal.fingerprints(lambda sql:admin.query(sql,"app"),admin.query(rehearsal.TABLES_SQL,"app"),"App reservado")
+            web = node_probe(image,cfg,report["database"],directory,web=True)
+            rehearsal.compare_fingerprints(web_before,rehearsal.fingerprints(lambda sql:admin.query(sql,"app"),admin.query(rehearsal.TABLES_SQL,"app"),"App reservado"))
+            result = {"status":"ok","database":report["database"],"image":image,"commit":commit,
+                      "app_database_unchanged":True,"bot_started":False,"source_contacted":False,
+                      "web":web,"cutover_allowed":False,"checked_at":dt.datetime.now(dt.timezone.utc).isoformat()}
+            private_json(directory/"web-report.json",result)
+            print("WEB_ENSAIO_OK: "+json.dumps(result,ensure_ascii=False),flush=True)
 
 
 if __name__=="__main__":

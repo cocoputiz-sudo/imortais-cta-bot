@@ -38,6 +38,16 @@ def exercise(cfg, bins, root, identity):
     assert not list(directory.glob(".build-*"))
     report = json.loads((directory/"report.json").read_text())
     assert report["source_contacted"] is False and report["bot_started"] is False
+    try:
+        web = runtime.node_probe(image,cfg,restored["database"],directory,web=True)
+    except Exception:
+        # Synthetic CI fixtures only, never real credentials or real source data.
+        print((directory/"web-probe.stderr").read_text(),flush=True)
+        raise
+    assert web["oauth_provider_live"] is False and web["public_https_path_tested"] is False
+    assert web["telemetry_ingest_persisted"] and web["sse_heartbeat"]
+    assert admin.query("SELECT to_jsonb(note) FROM sentinel WHERE id=1;","app")=="IMORTAIS çã"
+    print("NODE22_WEB_REHEARSAL_OK: real HTTP bridge/War Room/logo, OAuth provider mock, cookies and denied auth, paired ingest persisted/deduplicated, roster+telemetry SSE with25s heartbeat; app unchanged; live provider/public path NOT tested.")
     # A restored relation with the wrong owner must fail the real init/owner probe.
     admin.execute("ALTER TABLE cta_events OWNER TO postgres;",restored["database"],read_only=False)
     try:
