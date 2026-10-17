@@ -53,6 +53,10 @@ def image_build(repository, directory):
                 shutil.copytree(source, dest)
             else:
                 shutil.copyfile(source, dest)
+        # Host umask is077; image code must remain readable by USER node.
+        # Only these allowlisted, nonsecret context files receive public read.
+        for path in context.rglob("*"):
+            path.chmod(0o755 if path.is_dir() else 0o644)
         tag = "imortais-migration-runtime:" + commit[:12]
         with (directory/"build.log").open("wb") as log:
             result = subprocess.run(["docker","build","-f","scripts/migration/runtime/Dockerfile","-t",tag,str(context)],

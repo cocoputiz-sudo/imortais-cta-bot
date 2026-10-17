@@ -14,7 +14,11 @@ def exercise(cfg, bins, root, identity):
         raise RuntimeError("Disposable CI required.")
     directory = root/"runtime"
     directory.mkdir()
-    image,commit = runtime.image_build(Path(__file__).resolve().parents[2],directory)
+    original_umask = os.umask(0o077)
+    try:
+        image,commit = runtime.image_build(Path(__file__).resolve().parents[2],directory)
+    finally:
+        os.umask(original_umask)
     admin = rehearsal.Postgres({"host":"127.0.0.1","port":5432,"database":"app","user":"postgres",
                                 "password":cfg["postgres_password"],"sslmode":"disable"},bins)
     fixture = runtime.fresh_name()
